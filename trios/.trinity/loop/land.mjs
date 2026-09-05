@@ -31,6 +31,7 @@
 //   node land.mjs            # report the gap
 //   node land.mjs --land     # squash-merge the next batch that applies cleanly
 
+import fs from 'node:fs'
 import path from 'node:path'
 import { execSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -91,6 +92,36 @@ const sh = (c, opts = {}) => {
  * somewhere it is known. git is asked the loose question and the boundary is
  * checked here.
  */
+
+// ------------------------------------------------------------ replacements
+
+// A BRANCH WHOSE INTENT HAS BEEN RE-FILED IS NOT DEBT, IT IS HISTORY.
+//
+// Five branches conflicted for four rounds and `why` warned every round that the
+// pipeline would starve behind them. The warning was mechanically true and
+// useless: they will never land. Their base has moved past them, rebasing one
+// would delete work that landed since, and `salvage` has now measured what each
+// still owes and filed it as a fresh brief against today's base.
+//
+// So they are recorded as REPLACED, with the issue that replaces them. This is
+// deliberately a written act rather than an inference: nothing here guesses that
+// a branch has been superseded, someone says so and says by what. The branches
+// are left alone - no deletion, no force, nothing irreversible - and the
+// pipeline stops counting them as work it is stuck behind.
+const REPLACED = path.join(DIR, 'state', 'replaced-branches.json')
+
+export function replacements() {
+  try { return JSON.parse(fs.readFileSync(REPLACED, 'utf8')) } catch { return {} }
+}
+
+export function recordReplacement(branch, issue, note = '') {
+  const all = replacements()
+  all[branch] = { issue, note, at: new Date().toISOString() }
+  fs.mkdirSync(path.dirname(REPLACED), { recursive: true })
+  fs.writeFileSync(REPLACED, JSON.stringify(all, null, 2))
+  return all[branch]
+}
+
 export function closedInBase(branch, run = sh) {
   const m = String(branch).match(/queen-(\d+)$/)
   if (!m) return false
@@ -287,6 +318,10 @@ export async function survey() {
     // The right question is whether the WORK is in the base, and the diff
     // answers it whatever route the work took: empty diff, work landed.
     if (isLanded(b)) continue
+    // Recorded as replaced: its intent was measured and re-filed against today's
+    // base. Not debt, and not something the pipeline is stuck behind.
+    const repl = replacements()[b]
+    if (repl) continue
     const issue = (b.match(/queen-(\d+)/) || [])[1]
     const stat = sh(`git diff --shortstat origin/${BASE}...origin/${b}`) || ''
     const files = Number((stat.match(/(\d+) files? changed/) || [])[1] || 0)
@@ -346,6 +381,12 @@ if (isMain) {
     const m = mergesCleanly(r.branch)
     if (m.clean) { r.clean = true; batch.push(r) } else { r.clean = false; r.why = m.why; skipped.push(r) }
   }
+  const replaced = Object.entries(replacements())
+  if (replaced.length) {
+    console.log(`\n${replaced.length} branch(es) recorded as REPLACED - their intent was measured and re-filed, so they are history rather than debt:`)
+    for (const [b, r] of replaced) console.log(`  ${b.padEnd(16)} -> #${r.issue}${r.note ? `  ${r.note}` : ''}`)
+    console.log('  The branches are untouched. Nothing was deleted and nothing was forced.')
+  }
   for (const r of skipped) {
     // The whole reason, not the first 96 characters of it. The truncation hid
     // exactly the half that says what to DO about the conflict.
@@ -357,9 +398,14 @@ if (isMain) {
   if (!batch.length && landable.length) {
     console.log('')
     console.log(`ALL ${landable.length} remaining branch(es) conflict. Nothing here can be landed by merging.`)
-    console.log('A conflict is reported for a person, never resolved by guessing - these need a')
-    console.log('rebase, or an honest closure as superseded. Meanwhile close-done refuses to')
-    console.log('close anything that has not landed, so this is where the pipeline stops.')
+    console.log('A conflict is reported for a person, never resolved by guessing. And a rebase')
+    console.log('is usually the WRONG remedy once the base has moved: replaying an old branch')
+    console.log('can delete work that landed since, and applying cleanly proves nothing, because')
+    console.log('a semantic conflict carries no markers.')
+    console.log('  tri salvage <N>   measures what the branch would still add, asks the issue its')
+    console.log('                    own criterion against the base, and writes the remainder as a brief')
+    console.log('Meanwhile close-done refuses to close anything that has not landed, so this is')
+    console.log('where the pipeline stops.')
   }
   console.log(`\n${landable.length} landable, showing the next ${batch.length} (batch ${BATCH}).`)
   console.log('A closed issue whose code is not in the branch is a false statement about the repository.')

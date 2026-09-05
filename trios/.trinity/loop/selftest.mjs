@@ -2020,6 +2020,26 @@ check('an unmeasurable branch says so instead of saying superseded', () => {
   if (!/a reader still decides/.test(code)) throw new Error('the tool measures; the person concludes')
 })
 
+check('a replacement is written down, never inferred', async () => {
+  const LAND = await import('./land.mjs')
+  const code = codeOf('land.mjs')
+  // Five branches conflicted for four rounds and the warning was mechanically
+  // true and useless: they will never land. Recording the issue that replaces
+  // one is a deliberate act - nothing here GUESSES that a branch is superseded.
+  if (!/recordReplacement/.test(code)) throw new Error('a replacement must be recorded by someone')
+  if (typeof LAND.replacements() !== 'object') throw new Error('and readable back')
+  if (/git push --delete|branch -D|--force/.test(code)) throw new Error('nothing about this is destructive; the branches stay')
+})
+
+check('land no longer advises a rebase it knows is usually wrong', () => {
+  const code = codeOf('land.mjs')
+  // Rebasing #1302 would have deleted #1308's landed work and reintroduced an
+  // L3 violation, and the tool recommended it in one line for four rounds.
+  if (/these need a\s+rebase/.test(code)) throw new Error('that advice was toward destroying finished code')
+  if (!/tri salvage/.test(code)) throw new Error('point at the tool that measures instead of guessing')
+  if (!/semantic conflict/.test(code)) throw new Error('and say why "it applied cleanly" is not evidence')
+})
+
 check('the harness can fail an async check', async () => {
   // Guarding the fix above: before it, this file reported 0 failures while an
   // async case was rejecting into the void.
