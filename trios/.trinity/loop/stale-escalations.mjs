@@ -11,7 +11,8 @@
 //
 //   All three issues visibly contain four acceptance criteria. #1216 has an
 //   English `## Success Criteria` section whose last line is a `grep` that must
-//   exit 0; #1240 and #1244 have `## Готово, когда` with four bullets each.
+//   exit 0; #1240 and #1244 carry the Russian done-when heading, with four
+//   bullets each.
 //
 //   The cause was `QueenSpecQuality.criteriaHeadings`, which knew four headings
 //   and none of the ones those issues use. It was fixed the SAME DAY in
@@ -86,28 +87,53 @@ const tryShell = (c, opts) => { try { return sh(c, opts) } catch { return null }
 /**
  * Strip railway's own chatter, which is not output of the command we ran.
  *
- * ANCHORED, and never applied to a line that looks like data. The first version
- * dropped any line CONTAINING `Migrate`, `Existing`, `Using SSH` or
- * `railway.json` - so a single-line JSON answer carrying a review note that
- * mentioned migration was deleted in full, and the caller reported "unparseable
- * answer" about a query that had worked perfectly. A noise filter that can eat
- * evidence is worse than no filter: it turns a working system into an
- * unexplainable one.
+ * THE DEFECT THIS FOUND (#1422): the first filter dropped any line merely
+ * CONTAINING one of the chatter words, and one of the words was `Migrate`. A
+ * single-line JSON answer carrying a review note that mentioned migration was
+ * therefore deleted in full, and the caller reported "unparseable answer"
+ * about a query that had worked perfectly. A filter that can eat evidence is
+ * worse than no filter: it turns a working system into an unexplainable one,
+ * and it fails silently by construction.
  *
- * Two rules now. A line that begins with `[` or `{` is an answer and is never
- * dropped; anything else must match the chatter from its START to count as
- * chatter.
+ * Two guards, both load-bearing:
+ *   - every noise pattern is anchored to the start of its line, so a word is
+ *     chatter only when railway prints it at the beginning of a line, never
+ *     when the answer merely mentions it mid-sentence (the `\b` keeps a longer
+ *     word that merely starts like chatter, e.g. `Migrations`, out of the
+ *     filter);
+ *   - a line that begins with `[` or `{` is the answer, not chatter, and is
+ *     never dropped, whatever it contains.
+ *
+ * `CHATTER` is the union of every shape two independent fixes observed: this
+ * one, and the one that landed for #112. Railway prints all of them, across
+ * commands and versions. The last entry is deliberately NOT anchored: that
+ * line arrives with a prefix of railway's own choosing, so it is matched as a
+ * contains-shape on purpose, and the answer guard is what keeps it honest.
+ *
+ * Exported so the calibration suite can prove both directions without a
+ * network, a container or a database.
  */
-export const clean = (s) =>
-  s
+const CHATTER = [
+  /^\s*Using SSH\b/,
+  /^\s*warning: Config as Code\b/,
+  /^\s*Migrate\b/,
+  /^\s*\u2192 Migrate\b/,
+  /^\s*Existing\b/,
+  /^\s*railway\.json\b/,
+  /railway\.json \/ railway\.toml/,
+]
+
+export function chatterOnly(out) {
+  return String(out ?? '')
     .split('\n')
-    .filter((l) => {
-      const t = l.trim()
-      if (t.startsWith('[') || t.startsWith('{')) return true
-      return !/^(Using SSH|warning: Config as Code|\s*→ Migrate|\s*Existing files keep working|.*railway\.json \/ railway\.toml)/.test(l)
+    .filter((line) => {
+      const first = line.trimStart()[0]
+      if (first === '[' || first === '{') return true
+      return !CHATTER.some((p) => p.test(line))
     })
     .join('\n')
     .trim()
+}
 
 /**
  * Run a node snippet inside the deployed service.
@@ -122,7 +148,7 @@ export function remote(js) {
   const out = tryShell(`${RAILWAY} --service ${SVC} -- sh -c ${shq(script)}`, {
     cwd: path.join(ROOT, 'trios'),
   })
-  return out === null ? null : clean(out)
+  return out === null ? null : chatterOnly(out)
 }
 
 /**
@@ -187,8 +213,8 @@ export function criteriaToday(body) {
  *
  * THE NEAR MISS. The first working run of this tool called #1244 stale and
  * would have returned it to the pool. Its recorded reason was the criteria bug,
- * and that reason is indeed void. But the issue body carries a section headed
- * `## Почему жду слова` - "why I am waiting for your word" - explaining that the
+ * and that reason is indeed void. But the issue body carries a section whose
+ * Russian heading says "why I am waiting for your word", explaining that the
  * change rewrites the main window's tabs and that the bee will not do that
  * silently while the operator sleeps.
  *
@@ -200,12 +226,18 @@ export function criteriaToday(body) {
  *
  * So: a body that asks for a person is never auto-released, whatever the
  * recorded reason says. The two gates must BOTH open.
+ *
+ * The four Russian phrases below are kept as `\u` escapes, not literals: this
+ * file is ASCII-only by law L3, and the phrases still decode to real Cyrillic
+ * at runtime, which is what the headings are made of. Their meaning, in order:
+ * "why I am waiting for your word", "waiting for your word" twice - once with
+ * the dotted e, once without - because real headings spell it both ways.
  */
 const ASKS_FOR_A_PERSON = [
-  'почему жду слова',
-  'жду слова',
-  'ждёт слова',
-  'ждет слова',
+  '\u043F\u043E\u0447\u0435\u043C\u0443 \u0436\u0434\u0443 \u0441\u043B\u043E\u0432\u0430',
+  '\u0436\u0434\u0443 \u0441\u043B\u043E\u0432\u0430',
+  '\u0436\u0434\u0451\u0442 \u0441\u043B\u043E\u0432\u0430',
+  '\u0436\u0434\u0435\u0442 \u0441\u043B\u043E\u0432\u0430',
   'waiting on your word',
   'waiting for your word',
   'needs your decision',
