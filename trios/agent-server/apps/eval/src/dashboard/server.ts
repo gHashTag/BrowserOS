@@ -468,7 +468,7 @@ app.post('/api/run', async (c) => {
   const configLabel = body.configName || 'dashboard'
   dashboardState.init(tasks, configLabel, config.agent.type, outputDir)
 
-  // Run eval in background — don't await
+  // Run eval in background - don't await
   const executor = new ParallelExecutor({
     numWorkers: config.num_workers || 1,
     config,
