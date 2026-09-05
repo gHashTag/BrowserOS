@@ -27,7 +27,7 @@ export class MonitoringSessionRegistry {
 
   /**
    * Subscribe to "session ended for this agent" events. The listener fires
-   * once per termination — `clearIfMatches` is the only place that drops an
+   * once per termination - `clearIfMatches` is the only place that drops an
    * active session, so each clear notifies all current listeners. Returns an
    * unsubscribe function. Used by `waitForSessionFree` to gate user-chat
    * sends behind in-flight cron / hook turns without polling.
