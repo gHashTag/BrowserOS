@@ -62,11 +62,50 @@ export const RAILWAY = `railway ssh --project 564d9ebd-7aa8-44fe-93ec-e0b03c8715
 
 const BATCH = Number(process.env.PUSH_BATCH ?? 12)
 
-function remote(script, timeout = 280000) {
-  const out = execSync(`${RAILWAY} --service ${SVC} -- sh -c ${shq(script)}`, {
-    encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout,
-  })
-  return clean(out)
+/**
+ * A CHANNEL FAILURE IS NOT AN ANSWER, AND IT IS NOT FATAL EITHER.
+ *
+ * `railway ssh` is a network hop and fails the way network hops fail:
+ * "Operation timed out (os error 60)", "Connection reset by peer",
+ * "client error (SendRequest)". None of those say anything about the branches.
+ *
+ * This step is the ONLY way a bee's work leaves the container. On 2026-09-05 it
+ * threw on one such timeout and died. Three accepted pieces of work - 9 to 15
+ * minutes of a bee each, 23 to 35 thousand output tokens, all three reviewed and
+ * ACCEPTED - stayed invisible on the far side of a dropped connection. A retry
+ * thirty seconds later pushed thirteen branches.
+ *
+ * And I had seen it before. Two rounds earlier the chain printed
+ * `push-work=FAILED`, I re-ran it by hand, it worked, and I wrote it off as
+ * transient without changing anything. "It worked when I tried again" is not a
+ * diagnosis; it is the observation that a retry belongs in the code.
+ */
+export function isChannelFailure(text) {
+  return /Operation timed out|os error 60|Connection reset|connection error|SendRequest|client error|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|502 Bad Gateway|503 Service/i.test(String(text || ''))
+}
+
+function remote(script, timeout = 280000, attempts = 3) {
+  let last = ''
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return clean(execSync(`${RAILWAY} --service ${SVC} -- sh -c ${shq(script)}`, {
+        encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout,
+      }))
+    } catch (e) {
+      last = String(e.stdout || '') + '\n' + String(e.stderr || '') + '\n' + String(e.message || '')
+      if (!isChannelFailure(last)) throw e
+      // A dropped connection says nothing about the branches. Wait and ask again.
+      if (i < attempts - 1) {
+        console.error(`  channel to the container failed (${(last.match(/os error \d+|Operation timed out|Connection reset|SendRequest/i) || ['unknown'])[0]}) - retrying in ${(i + 1) * 15}s`)
+        execSync(`sleep ${(i + 1) * 15}`)
+      }
+    }
+  }
+  // Out of attempts. This is loud and non-zero, because a step that cannot
+  // reach the container has not "found nothing to push" - it has not looked.
+  const err = new Error(`could not reach the container after ${attempts} attempts: ${clean(last).slice(0, 200)}`)
+  err.channel = true
+  throw err
 }
 
 const clean = (out) =>
@@ -115,6 +154,24 @@ const SURVEY = [
 ].join('; ')
 
 if (!isMain) { /* imported for calibration or reuse: do nothing */ } else {
+// A CHANNEL FAILURE MUST NOT LOOK LIKE "NOTHING TO PUSH".
+//
+// The distinction is the whole point. A run that found no unpushed branch and a
+// run that could not reach the container both end without pushing anything, and
+// only one of them is fine. The chain reads this step's words, so the words have
+// to be different.
+process.on('uncaughtException', (e) => {
+  if (e && e.channel) {
+    console.error(`\nCOULD NOT REACH THE CONTAINER after retrying.`)
+    console.error(`  ${e.message}`)
+    console.error('  Nothing was pushed and nothing was inspected. This is NOT "nothing to push":')
+    console.error('  this step is the only way a bee\'s work leaves the container, and it did not run.')
+    process.exit(3)
+  }
+  console.error(e)
+  process.exit(1)
+})
+
 const survey = remote(SURVEY)
 
 const missing = survey.split('\n').filter((l) => l.startsWith('MISSING ')).map((l) => l.split(/\s+/)[1])
