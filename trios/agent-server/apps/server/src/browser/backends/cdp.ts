@@ -482,7 +482,7 @@ class CdpBackend implements ICdpBackend {
   /**
    * Reconnect notification (trios#1368). Fired exactly once, from
    * reconnectWithRetries, after the backend's own recovery machinery has
-   * established a new WebSocket connection following an unexpected close —
+   * established a new WebSocket connection following an unexpected close -
    * never on the initial connect(). Chrome issues new session ids per
    * connection, so a consumer holding session ids from the previous
    * connection must treat all of them as dead when this fires.
