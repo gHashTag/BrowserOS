@@ -38,10 +38,27 @@ const EXPECTED_UNGUARDED_WITHOUT_ALLOWLIST = [
 
 describe('route-guard audit over src/api/server.ts', () => {
   it('sees the full route table', () => {
-    expect(report.totalMounts).toBe(38)
+    // RE-MEASURED 2026-09-06, and one of these moved for a reason worth
+    // recording. The table grew from 38 mounts to 40; `publicReadCount` went 5
+    // to 6 when `/queen/public-agents` was added, which is deliberate - every
+    // public-read entry is an explicit `publicReadCorsMiddleware()` call on a
+    // path that says `public` in its own name.
+    //
+    // `guardedSubAppCount` went 13 to 14 because `/queen/needs-you` was NOT
+    // guarded. Its mount carried a comment saying it sat behind the
+    // trusted-origin catch-all; nothing did. Production answered 200 to a
+    // request with a hostile Origin, returning outstanding escalations with
+    // issue numbers, ages and worker-written reason text. This gate had been
+    // reporting it since it landed, and was red on the branch the whole time.
+    //
+    // A pinned count is a restated list, and a restated list goes stale in
+    // exactly two ways: something was added on purpose, or a hole opened. The
+    // pin cannot tell them apart, so whoever updates it has to look - which is
+    // the only reason this one was found.
+    expect(report.totalMounts).toBe(40)
     expect(report.prefixGuardCount).toBe(18)
-    expect(report.guardedSubAppCount).toBe(13)
-    expect(report.publicReadCount).toBe(5)
+    expect(report.guardedSubAppCount).toBe(14)
+    expect(report.publicReadCount).toBe(6)
   })
 
   it('reports zero unguarded mounts once the reasoned allowlist is applied', () => {

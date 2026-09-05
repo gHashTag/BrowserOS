@@ -237,6 +237,28 @@ export async function createHttpServer(config: HttpServerConfig) {
     .use('/*', requireTrustedAppOrigin())
     .route('/', createQueenRoadmapDataRoute())
 
+  // THE COMMENT AT THE MOUNT SAID THIS WAS GUARDED AND NOTHING GUARDED IT.
+  //
+  // `/queen/needs-you` was mounted as a bare route factory while its own
+  // comment said it "sits behind the trusted-origin catch-all with
+  // /queen/board". There is no catch-all at the mount level: every guarded
+  // sibling here carries `.use('/*', requireTrustedAppOrigin())` INSIDE its own
+  // sub-app, and this one had none. Measured against production on 2026-09-06:
+  // `GET /queen/needs-you` answered 200 to a request carrying a hostile Origin,
+  // returning outstanding escalations with issue numbers, attempt counts, ages
+  // and the worker-written reason text, plus twenty stored report headlines.
+  //
+  // The route-guard gate had been reporting it since it landed. That gate has
+  // been red on this branch for days with pull requests merging across it,
+  // which is how a hole its author did not intend stayed open.
+  //
+  // Wrapped exactly like its siblings rather than with a path-prefix `.use`:
+  // the guard belongs inside the app that serves the data, where no path shape
+  // can route around it.
+  const queenNeedsYouRoutes = new Hono<Env>()
+    .use('/*', requireTrustedAppOrigin())
+    .route('/', createQueenNeedsYouRoute())
+
   const queenBoardRoutes = new Hono<Env>()
     .use('/*', requireTrustedAppOrigin())
     .route('/', createQueenBoardRoute())
@@ -355,7 +377,7 @@ export async function createHttpServer(config: HttpServerConfig) {
     // so it sits behind the trusted-origin catch-all with /queen/board rather
     // than being served to any origin. The five escalations it exists to
     // surface are for the operator, not for a public page.
-    .route('/queen/needs-you', createQueenNeedsYouRoute())
+    .route('/queen/needs-you', queenNeedsYouRoutes)
     .route('/queen/board', queenBoardRoutes)
     .route('/queen/roadmap', createQueenRoadmapRoute())
     .route('/queen/roadmap/data', queenRoadmapDataRoutes)
