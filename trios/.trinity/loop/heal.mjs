@@ -49,6 +49,9 @@ const DRY = isMain && process.argv.includes('--dry')
 // half-pushed. The loop's lock is the same one iterations take, so the two
 // serialise against each other rather than each having a lock of its own.
 //
+let releaseLock = () => {}
+let heldLock = false
+
 // A dry run reads and writes nothing, so it does not queue behind anything.
 // RE-ENTRANT FOR THE SAME LOGICAL RUN. An iteration already holds the lock, and
 // it should still be able to run the chain as one of its steps. So a caller
@@ -66,6 +69,8 @@ if (!DRY) {
       process.exit(0)
     }
     const release = () => { try { L.release() } catch { /* already gone */ } }
+    releaseLock = release
+    heldLock = true
     process.on('exit', release)
     process.on('SIGINT', () => { release(); process.exit(130) })
     process.on('SIGTERM', () => { release(); process.exit(143) })
@@ -219,7 +224,30 @@ const startedAt = Date.now()
 
 const results = []
 for (const s of STEPS) {
-  if (s.reportsOnly && reportPhaseStartedAt === null) reportPhaseStartedAt = Date.now()
+  if (s.reportsOnly && reportPhaseStartedAt === null) {
+    reportPhaseStartedAt = Date.now()
+    // THE AUDITS DO NOT NEED THE LOCK, AND HOLDING IT STARVES THE REFILL.
+    //
+    // Everything above this line changes the swarm's shared state and must not
+    // run twice at once. Everything below only reads it. But the lock covered
+    // both, so a full run held it for up to thirteen minutes - eight for the
+    // freeing phase, five for the audits - and `feed`, which fires every 300
+    // seconds and exists precisely to refill the queue, stood down every single
+    // time.
+    //
+    // Measured 2026-09-05: the swarm sat at zero bees for eleven minutes while
+    // the chain was in `fp-check`, an entirely read-only step.
+    //
+    // So the lock is released at the phase boundary. The reporting steps write
+    // only their own caches and records - a verdict cache, a paired sample, a
+    // dashboard reading - where a second writer costs nothing, and none of them
+    // touches a branch, an issue or a worktree.
+    if (heldLock) {
+      releaseLock()
+      heldLock = false
+      console.log('\n  lock released: everything from here only reads, and the refill needs it')
+    }
+  }
   const budget = s.reportsOnly ? REPORT_DEADLINE_MS : DEADLINE_MS
   const since = s.reportsOnly ? reportPhaseStartedAt : startedAt
   const left = budget - (Date.now() - since)
