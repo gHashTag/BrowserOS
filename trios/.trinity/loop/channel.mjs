@@ -31,6 +31,7 @@
 // dropped connection.
 
 import { execSync } from 'node:child_process'
+import fs from 'node:fs'
 
 export const PROJECT = process.env.TRIOS_RAILWAY_PROJECT || '564d9ebd-7aa8-44fe-93ec-e0b03c87158d'
 
@@ -57,8 +58,46 @@ export const PROJECT = process.env.TRIOS_RAILWAY_PROJECT || '564d9ebd-7aa8-44fe-
  * Named the way PROJECT and SERVICE already are, so a machine with a different
  * layout can say so without editing this file.
  */
-export const RAILWAY_BIN = process.env.TRIOS_RAILWAY_BIN
-  || `${process.env.HOME || ''}/.nvm/versions/node/v22.22.0/bin/railway`
+/**
+ * CHOSEN BY CAPABILITY, NOT BY PATH.
+ *
+ * The first fix pinned `$HOME/.nvm/versions/node/v22.22.0/bin/railway`. An
+ * adversarial reader of that change found the hazard immediately: an nvm version
+ * bump moves that directory and the loop loses its only working client, having
+ * hardcoded a version number nobody will remember to update.
+ *
+ * So the candidates are searched and the first one that reports a major version
+ * of 5 or more wins. 4.5.4 - the June-2025 build that cannot attach and that
+ * `/etc/zprofile`'s path_helper puts first for every scheduled job - is rejected
+ * BY ITS VERSION rather than by its location, which is the property that
+ * actually matters.
+ *
+ * If nothing qualifies it falls back to the bare name and says so. A loop that
+ * silently picks a client which cannot attach is exactly what cost this project
+ * three rounds of measuring the wrong thing.
+ */
+function pickRailway() {
+  if (process.env.TRIOS_RAILWAY_BIN) return process.env.TRIOS_RAILWAY_BIN
+  const home = process.env.HOME || ''
+  const candidates = []
+  try {
+    const nvm = `${home}/.nvm/versions/node`
+    for (const v of fs.readdirSync(nvm).sort().reverse()) candidates.push(`${nvm}/${v}/bin/railway`)
+  } catch { /* no nvm on this machine */ }
+  candidates.push('/opt/homebrew/bin/railway', '/usr/local/bin/railway')
+  for (const c of candidates) {
+    try {
+      if (!fs.existsSync(c)) continue
+      const v = execSync(`${JSON.stringify(c)} --version`, { encoding: 'utf8', timeout: 20000, stdio: ['ignore', 'pipe', 'ignore'] })
+      const major = Number((String(v).match(/(\d+)\./) || [])[1])
+      if (Number.isFinite(major) && major >= 5) return c
+    } catch { /* try the next one */ }
+  }
+  console.error('  no railway client of version 5 or later was found - falling back to the bare name, which may be one that cannot attach')
+  return 'railway'
+}
+
+export const RAILWAY_BIN = pickRailway()
 export const RAILWAY = `${RAILWAY_BIN} ssh --project ${PROJECT} --environment production`
 export const SERVICE = process.env.TRIOS_RAILWAY_SERVICE || 'trios-agent-server'
 
