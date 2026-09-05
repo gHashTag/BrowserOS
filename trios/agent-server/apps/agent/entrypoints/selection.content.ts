@@ -29,7 +29,7 @@ export default defineContentScript({
           })
         })
       } else {
-        // User clicked without selecting — clear this tab's entry only
+        // User clicked without selecting - clear this tab's entry only
         selectedTextStorage.getValue().then((map) => {
           if (map[key]) {
             const { [key]: _, ...rest } = map
