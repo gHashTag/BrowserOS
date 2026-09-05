@@ -2317,6 +2317,23 @@ check('heal and feed declare themselves single-process; nothing else does', () =
   }
 })
 
+check('the audits do not hold the lock the refill needs', () => {
+  const code = codeOf('heal.mjs')
+  // A full run held the lock up to thirteen minutes - eight for the freeing
+  // phase, five for the audits - and feed, which fires every 300 seconds to
+  // refill the queue, stood down every time. The swarm sat at zero bees for
+  // eleven minutes while the chain was in fp-check, a read-only step.
+  if (!/lock released: everything from here only reads/.test(code)) {
+    throw new Error('the lock must be released at the phase boundary')
+  }
+  const boundary = code.indexOf('reportPhaseStartedAt = Date.now()')
+  const rel = code.indexOf('releaseLock()')
+  if (!(boundary > -1 && rel > boundary)) throw new Error('released when the reporting phase starts, not before')
+  // ...and only if this process took it. Releasing a lock held by the turn
+  // around it is how two writers end up running at once.
+  if (!/if \(heldLock\)/.test(code)) throw new Error('never release a lock this process did not take')
+})
+
 check('the harness can fail an async check', async () => {
   // Guarding the fix above: before it, this file reported 0 failures while an
   // async case was rejecting into the void.
