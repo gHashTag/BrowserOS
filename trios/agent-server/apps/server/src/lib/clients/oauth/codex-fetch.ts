@@ -48,7 +48,7 @@ export function createCodexFetch(accountId?: string) {
         if (!json.instructions) {
           json.instructions = 'You are a helpful assistant.'
         }
-        // Strip item IDs — Codex doesn't persist items with store=false.
+        // Strip item IDs - Codex doesn't persist items with store=false.
         // The SDK should already inline content (via providerOptions store=false),
         // but this is a safety net matching OpenCode's approach.
         if (Array.isArray(json.input)) {
