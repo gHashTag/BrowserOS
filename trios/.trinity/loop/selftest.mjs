@@ -2277,6 +2277,46 @@ check('asking does not change the chain verdict', () => {
   if (!/attempts: 1/.test(code)) throw new Error('a single attempt: the question is what the gateway says NOW')
 })
 
+check('a turn-held lock is never judged by pid liveness', async () => {
+  const L = await import('./loop.mjs')
+  // The comment in loop.mjs is right and stopped me from breaking it: an
+  // ITERATION is a Claude turn made of many short-lived processes, so the pid
+  // that took the lock has always exited by the time anyone looks. A liveness
+  // check there would hand the lock straight to a concurrent cron fire.
+  const now = Date.now()
+  const turnHeld = { holder: 'iteration', pid: 999999, at: new Date(now - 10 * 60000).toISOString() }
+  if (L.isStale(turnHeld, now, () => false)) {
+    throw new Error('a turn-held lock is judged by AGE alone, whatever its pid is doing')
+  }
+  // ...and still expires on age.
+  const old = { holder: 'iteration', pid: 999999, at: new Date(now - 50 * 60000).toISOString() }
+  if (!L.isStale(old, now, () => true)) throw new Error('45 minutes is the window and it still applies')
+})
+
+check('a single-process holder that is gone does not hold the swarm for 45 minutes', async () => {
+  const L = await import('./loop.mjs')
+  const now = Date.now()
+  const dead = { holder: 'heal', pid: 12345, singleProcess: true, at: new Date(now - 10 * 60000).toISOString() }
+  if (!L.isStale(dead, now, () => false)) throw new Error('a dead single-process run is not holding anything')
+  const alive = { ...dead }
+  if (L.isStale(alive, now, () => true)) throw new Error('a running chain keeps its lock')
+  // The grace period: a run that has just started is never stolen from, even if
+  // the liveness probe is wrong about it.
+  const young = { ...dead, at: new Date(now - 30000).toISOString() }
+  if (L.isStale(young, now, () => false)) throw new Error('30 seconds in is inside the grace period')
+})
+
+check('heal and feed declare themselves single-process; nothing else does', () => {
+  for (const f of ['heal.mjs', 'feed.mjs']) {
+    if (!/singleProcess: true/.test(codeOf(f))) throw new Error(`${f} must opt in, or liveness cannot apply to it`)
+  }
+  // The default must stay the old behaviour, so a holder that does not opt in
+  // is unaffected by any of this.
+  if (!/Boolean\(opts\.singleProcess\)/.test(codeOf('loop.mjs'))) {
+    throw new Error('the flag defaults to false: nothing that has not opted in may be affected')
+  }
+})
+
 check('the harness can fail an async check', async () => {
   // Guarding the fix above: before it, this file reported 0 failures while an
   // async case was rejecting into the void.

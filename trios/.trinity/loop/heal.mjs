@@ -59,7 +59,7 @@ if (!DRY) {
   const state = L.lockHolder()
   const mine = process.env.LOOP_HOLDER && state && state.holder === process.env.LOOP_HOLDER
   if (!mine) {
-    const got = L.acquire('heal')
+    const got = L.acquire('heal', { singleProcess: true })
     if (!got.ok) {
       console.log(`another run holds the loop lock (${got.held.holder}, ${Math.round(got.ageMs / 60000)} min) - standing down`)
       L.append({ kind: 'heal-skipped', note: `lock held by ${got.held.holder}` })
