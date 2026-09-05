@@ -2670,6 +2670,39 @@ and could not win, because they addressed collection while the problem was
 production. When a resource keeps filling despite correct collection, the next
 measurement is of the creation rate - not a better collector.
 
+## Three negative results are a good night's work
+
+The claim was that one shared package store would collapse the volume growth. An
+hour later: 52% used, +133.6 points per hour, four fresh worktrees carrying 10 GB
+between them. Sharing after the fact is a mop - every dispatch still runs
+`bun install` and writes 2.5 GB.
+
+So three ways to close the tap were tried, each in a scratch worktree, each
+before a line of it entered the system:
+
+| attempt | result |
+|---|---|
+| put the package cache on the same volume | three installs, `links=1`, three different inodes - bun copies out of its cache whatever device either is on |
+| build the link farm BEFORE the install | 159M with the farm, then `bun install` wipes it and writes 2562M |
+| `--backend=symlink`, and a repo `bunfig.toml` | 41M on a single-package project, **2561M on this workspace** - and the bunfig was ignored entirely |
+
+Three refutations, each costing one scratch worktree and a few minutes. The first
+had already been written, tested and committed on a plausible story before an
+intervention test caught it.
+
+**A result that stops a wrong change is worth as much as one that ships a right
+one, and costs far less.** The temptation at four in the morning is to have
+something to show; three measured "no"s and one honest mitigation is a better
+night than one confident fix built on an untested mechanism.
+
+**And name a mitigation as one.** What survives here is sharing after the fact,
+moved from the 10-25 minute chain onto the 300-second timer - which bounds the
+accumulation to about what two bees produce, and removes nothing. The step's own
+description says "bound how long duplicate installs sit on the volume", not
+"fix". The selftest asserts on that string rather than on the comment above it,
+because `codeOf` strips comments precisely so a test cannot pass by matching the
+paragraph that describes the code.
+
 ## The rule that comes out of all of them
 
 Do not add fuel to a stopped swarm until `tri swarm` and `tri fence` say fuel is
