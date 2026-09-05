@@ -47,7 +47,7 @@ export function useOAuthProviderFlow(
     useState<PendingDeviceCode | null>(null)
 
   // Auto-create provider when OAuth completes
-  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional — only trigger on auth status change
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional - only trigger on auth status change
   useEffect(() => {
     if (!status?.authenticated) return
     if (!flowStartedRef.current) return
