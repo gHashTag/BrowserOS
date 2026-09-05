@@ -25,7 +25,7 @@ function isSensitiveKey(key: string): boolean {
 
 /**
  * Recursively walk an object and replace values at sensitive keys with
- * `[REDACTED]`. Returns a new object — the input is never mutated.
+ * `[REDACTED]`. Returns a new object - the input is never mutated.
  */
 export function sanitize<T>(obj: T): T {
   if (obj === null || obj === undefined) return obj
