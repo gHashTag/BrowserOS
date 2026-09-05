@@ -3623,3 +3623,53 @@ one file needed to. What worked:
 
 Five minutes of setup turned "cannot reproduce, see CI" into a root cause. The
 same trick is what makes the *next* server test debuggable here.
+
+## A group is its own process, and that is the repair
+
+`mock.module` cannot be undone. When one test file's module-scope mock poisons
+another file's import, **no edit inside either file fixes it** — the binding is
+already made. The runner here groups by directory and runs a group in its own
+process, so the repair is a **directory**.
+
+Result: the live migration gate went from red-for-days to green, and `tri
+ci-diff` says the whole story — **0 NEW, 3 fixed, 6 already failing.**
+
+## A group nobody runs is a group that passes by default
+
+The runner discovers groups from directories under `tests/`. CI runs them from
+a **hand-written matrix**. Nothing compared the two, so adding a directory
+creates a group whose tests never run and whose absence appears nowhere — the
+same silent-skip shape as a gate that could not find its compiler and a route
+audit that reported health.
+
+Three assertions now read **both** sides — every group has a `server-<group>`
+entry, every entry resolves to a real group, every group has a `test:<group>`
+script — and **neither list is typed into the test.** A fourth fails the file if
+the workflow regex ever matches nothing, **because an empty set is a subset of
+everything**: without it, a parser that stops matching turns every other
+assertion vacuously green.
+
+## Read the diffstat of a move
+
+I almost reverted the previous night's fix. The move was made in a **worktree
+cut from a stale remote-tracking ref**, so it silently dropped a diagnosis added
+hours earlier. Nothing complained: git reported it as a rename, the tests
+passed, the branch pushed.
+
+**What caught it was the diffstat** — *35 deletions in a file this change only
+moves*. A pure move is `N +++++-` with the `-` count near zero. Any move that
+deletes lines is not a move.
+
+The rule that would have prevented it: **build from the shipping ref, not from a
+worktree you cut earlier in the session.** That is the third time this checkout's
+staleness has produced a wrong artifact — first a measurement, then a report,
+now nearly a revert.
+
+## Never force-push, including over your own mistake
+
+The rebuilt commit was not a descendant of what I had already pushed. The
+temptation is `--force-with-lease` on a branch minutes old with no PR on it —
+and the rule has no exception for that, as I learned the hard way two rounds
+ago. Push a **new branch name** and delete the old one. Deleting a branch you
+created minutes ago, with nothing pointing at it, loses nothing; rewriting a
+pushed history loses whatever somebody else already fetched.
