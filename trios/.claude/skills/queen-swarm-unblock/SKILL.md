@@ -3066,6 +3066,46 @@ The same round found the announcement line printing `${f.summary}` for FINDING
 records, where `summary` is set only on SKIPPED ones. Every finding it ever
 announced printed `undefined`: the one word the operator was meant to read.
 
+## Fixing the tool is half the work; the wrong output is still on disk
+
+The 42 judge packets were rewritten. Before: 42 of 42 said the bee had said
+nothing. After: 42 of 42 carry the transcript, none accuse.
+
+A repaired instrument does not repair what it has already written. Anything a
+broken tool produced is still sitting where somebody will read it as fact - and a
+judge opening one of those files would have convicted a worker who had spoken.
+**After fixing an instrument, list what it wrote while broken and reissue it.**
+
+## A transport failure will be recorded as a fact about the thing transported
+
+The first rewrite only fixed 33. Nine came back `COULD NOT BE FETCHED
+(unreadable)` - honest, and still wrong.
+
+#1373's transcript is 183,025 characters and the packet prints only its tail, so
+the tool was fetching about ten times what it uses. Narrowing the query to
+`right(s, N)` was not enough. Measured on that issue:
+
+    raw text, 5 KB tail       ok
+    raw text, 17 KB and up    unreadable
+    base64, 60 KB tail        len=183025, tail=60000
+
+The channel's output cleaning is line-based and a transcript is full of newlines.
+**Encode the payload before it meets a line-based cleaner.**
+
+That failure would have been read as a transcript problem. It was a transport
+one - the fourth time this week a defect in how something was CARRIED was about
+to be recorded as a fact about the thing carried:
+
+    ps absent           -> "no zombies"
+    old railway client  -> "the application is not running"
+    line-based cleaner  -> "the transcript is unreadable"
+    catch { null }      -> "the bee said nothing"
+
+And keep the true length separate from the excerpt. A tail with no length reads
+as the whole thing, and the sentence a packet prints about its omitted middle
+depends on knowing the difference - so ask the database for `length(s)` and do
+not infer it from what arrived.
+
 ## The rule that comes out of all of them
 
 Do not add fuel to a stopped swarm until `tri swarm` and `tri fence` say fuel is
