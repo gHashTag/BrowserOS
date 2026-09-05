@@ -38,11 +38,32 @@ export function readLedger(file = LEDGER) {
  * `failed` for exactly that reason - 0 of 0 and 0 of 66 are different states and
  * a bare failure count cannot tell them apart.
  */
-export function tally(rows, sinceDays = null) {
+/**
+ * TWO OVERLAPPING CAUSES MAKE EACH LOOK LIKE IT WAS NOT THE CAUSE.
+ *
+ * Measured 2026-09-05. Naming the railway client should have collapsed the step
+ * failure rates; split at the fix it read reap 73% -> 70%, author 4% -> 44%, and
+ * I wrote that down as "the fix did nothing". The window after the fix contained
+ * a SERVICE CRASH - three hours in which everything failed for a different
+ * reason entirely.
+ *
+ * Split into the three periods that actually happened:
+ *
+ *   old client      reap 61/83  lease 50/83  push-work 57/100  author 4/96
+ *   crash window    reap 6/6    lease 6/6    push-work 22/22   author 16/22
+ *   after restore   reap 1/2    lease 1/2    push-work 1/7     author 0/7
+ *
+ * Both fixes worked. Neither could be seen while the other's window was mixed
+ * in. A lifetime rate over a record containing two resolved outages is not a
+ * measurement of anything that is true now, which is why the report takes a
+ * number of RUNS as well as a number of days.
+ */
+export function tally(rows, sinceDays = null, lastRuns = null) {
   const cutoff = sinceDays ? Date.now() - sinceDays * 86400000 : null
   const out = new Map()
-  for (const r of rows) {
-    if (!Array.isArray(r.results)) continue
+  const chains = rows.filter((r) => Array.isArray(r.results))
+  const scoped = lastRuns ? chains.slice(-lastRuns) : chains
+  for (const r of scoped) {
     if (cutoff && r.at && new Date(r.at).getTime() < cutoff) continue
     for (const s of r.results) {
       if (!s || !s.step) continue
@@ -104,9 +125,11 @@ if (isMain) {
   const rows = readLedger()
   const sinceIdx = process.argv.indexOf('--since')
   const since = sinceIdx > -1 ? Number(process.argv[sinceIdx + 1]) : null
+  const lastIdx = process.argv.indexOf('--last')
+  const last = lastIdx > -1 ? Number(process.argv[lastIdx + 1]) : null
   const only = process.argv.slice(2).find((a) => !a.startsWith('--') && !/^\d+$/.test(a))
 
-  const t = tally(rows, since)
+  const t = tally(rows, since, last)
   if (only) {
     const one = t.find((r) => r.step === only)
     if (!one) {
@@ -122,7 +145,7 @@ if (isMain) {
     process.exit(0)
   }
 
-  console.log(`chain step failures${since ? ` over the last ${since} day(s)` : ' over the whole ledger'}\n`)
+  console.log(`chain step failures${last ? ` over the last ${last} chain run(s)` : since ? ` over the last ${since} day(s)` : ' over the whole ledger'}\n`)
   console.log(render(t))
   const worst = t.find((r) => r.runs && r.failed / r.runs >= 0.25)
   process.exit(worst ? 2 : 0)

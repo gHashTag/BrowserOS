@@ -77,7 +77,17 @@ export function swarmCounts(run = sh) {
 
 /** The worst-failing chain step, and its rate. */
 export function worstStep(run = sh) {
-  const out = run(`node ${path.join(DIR, 'failures.mjs')}`, 120000)
+  // A WINDOW, NOT A LIFETIME. The whole record contains two resolved outages -
+  // a client that could not attach and a three-hour crash - and a rate over all
+  // of it describes neither the past nor the present.
+  //
+  // EIGHT RUNS, chosen by what a run costs rather than by which number flatters.
+  // A chain run is seven to ten minutes, so eight is about an hour. Measured at
+  // several sizes on 2026-09-05, push-work reads 0/5, 2/8, 6/12, 14/20 - the
+  // gradient IS the crash receding. Eight is short enough to describe now and
+  // long enough that a fresh incident still appears, which is the point of
+  // putting it on a dashboard at all.
+  const out = run(`node ${path.join(DIR, 'failures.mjs')} --last 8`, 120000)
   const rows = out.split('\n')
     .map((l) => l.match(/^\s*(?:!!|\.\.|ok)\s+(\S+)\s+(\d+)\s+(\d+)\s+(\d+)%/))
     .filter(Boolean)
@@ -206,7 +216,7 @@ export function rows(f, prev) {
     { k: 'dispatches finished', v: f.swarm?.finished ?? null, prev: p.swarm?.finished ?? null, goodDown: false },
     { k: 'judged verdicts that prove', v: f.proven?.proven ?? null, prev: p.proven?.proven ?? null, goodDown: false },
     { k: 'briefs with nothing checkable', v: f.proven?.unjudgeable ?? null, prev: p.proven?.unjudgeable ?? null },
-    { k: `worst step: ${f.worstStep?.step ?? '-'}, percent`, v: f.worstStep?.rate ?? null, prev: p.worstStep?.rate ?? null },
+    { k: `worst step, last 8 runs: ${f.worstStep?.step ?? '-'}, percent`, v: f.worstStep?.rate ?? null, prev: p.worstStep?.rate ?? null },
     { k: 'selftest cases', v: f.selftest ?? null, prev: p.selftest ?? null, goodDown: false },
     { k: 'disk this loop runs on, percent', v: f.disk ?? null, prev: p.disk ?? null },
     { k: `ssh gateway answers, last ${GATEWAY_WINDOW}, percent`, v: f.gateway ?? null, prev: p.gateway ?? null, goodDown: false },
