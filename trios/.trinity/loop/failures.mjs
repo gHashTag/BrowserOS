@@ -18,6 +18,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { classifyFailure as CLASSIFY } from './channel.mjs'
 
 const DIR = path.dirname(fileURLToPath(import.meta.url))
 const LEDGER = path.join(DIR, 'ledger.jsonl')
@@ -68,6 +69,25 @@ export function render(rows) {
     const rate = r.runs ? `${Math.round((100 * r.failed) / r.runs)}%` : '-'
     const mark = r.runs && r.failed / r.runs >= 0.25 ? '!!' : r.failed ? '..' : 'ok'
     out.push(`  ${mark} ${r.step.padEnd(16)} ${String(r.runs).padStart(4)} ${String(r.failed).padStart(6)} ${rate.padStart(6)} ${String(r.skipped).padStart(8)} ${String(r.findings).padStart(9)}`)
+  }
+  // WHAT KIND, not just how many. Three recorded reasons turned out to be three
+  // different problems - the service refusing to be attached to, a local trust
+  // store that could not be read, and a dropped connection - and one number
+  // covering all three sends a reader to the wrong place.
+  const kinds = new Map()
+  for (const r of rows) {
+    for (const e of r.evidence) {
+      const k = CLASSIFY(e.text).kind
+      if (!kinds.has(k)) kinds.set(k, { n: 0, sample: e.text })
+      kinds.get(k).n++
+    }
+  }
+  if (kinds.size) {
+    out.push('')
+    out.push('  recorded reasons, by kind:')
+    for (const [k, v] of [...kinds.entries()].sort((a, b) => b[1].n - a[1].n)) {
+      out.push(`    ${String(v.n).padStart(4)}x ${k.padEnd(10)} ${v.sample.replace(/\s+/g, ' ').slice(0, 90)}`)
+    }
   }
   const blind = rows.filter((r) => r.failed && !r.evidence.length)
   if (blind.length) {

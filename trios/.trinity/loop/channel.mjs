@@ -48,15 +48,58 @@ export const clean = (out) =>
     .trim()
 
 /**
- * Is this the connection failing, rather than the command answering?
+ * WHAT KIND OF FAILURE IS THIS? The first version asked a yes/no question and
+ * got the answer wrong for every failure that actually happens.
  *
- * Kept deliberately narrow. Every pattern here is something the transport says
- * when it could not deliver the question; nothing here is something a program
- * says about the question itself.
+ * I saw ONE failure by hand - `Operation timed out (os error 60)` - and wrote a
+ * classifier from it, while holding a ledger with 174 recorded failures I had
+ * not looked at. When the evidence field started recording reasons an hour
+ * later, the three that arrived were:
+ *
+ *   "Your application is not running or in a unexpected state"     x2
+ *   "Expected welcome message, received: ServerMessage {error}"    x2
+ *   "failed to load system trust settings: I/O error"              x1
+ *
+ * NONE of them matched. The retry I had just built and shipped never fired for
+ * any real failure in this system. Generalising from one observation while the
+ * record sits unread is the defect this whole directory exists to catch, and I
+ * committed it in the tool meant to fix it.
+ *
+ * They are also three DIFFERENT problems, and one retry policy cannot be right
+ * for all of them:
+ *
+ *   app-down   railway refuses because the service is not in a state it will
+ *              attach to. A 15-second retry is optimistic; the app may be
+ *              restarting. Worth retrying, with a longer wait, and worth saying
+ *              plainly - because `/health` can answer ok while the ssh gateway
+ *              refuses, which is two views of one service disagreeing.
+ *   local      the railway CLI on THIS machine could not read the system trust
+ *              store. Nothing about the container is wrong and retrying the
+ *              same call changes nothing. Chasing the container for this would
+ *              waste a night.
+ *   transport  the connection dropped. Retry soon; it usually comes straight
+ *              back.
+ *   unknown    say so verbatim and do not retry. An unrecognised failure that
+ *              is quietly treated as "not retryable" and an unrecognised
+ *              failure that is quietly retried are both worse than one printed.
  */
+export function classifyFailure(text) {
+  const s = String(text || '')
+  if (/not running or in a unexpected state|Expected welcome message|application is not running/i.test(s)) {
+    return { kind: 'app-down', retry: true, waitMultiplier: 4, advice: 'railway will not attach to the service; /health may still answer ok - they are different views' }
+  }
+  if (/system trust settings|failed to load system trust|certificate store|keychain/i.test(s)) {
+    return { kind: 'local', retry: false, advice: 'the railway CLI on THIS machine could not read the system trust store - nothing about the container is wrong' }
+  }
+  if (/Operation timed out|os error 60|Connection reset|connection error|SendRequest|client error|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|502 Bad Gateway|503 Service|Temporary failure in name resolution|broken pipe/i.test(s)) {
+    return { kind: 'transport', retry: true, waitMultiplier: 1, advice: 'the connection dropped; it usually comes straight back' }
+  }
+  return { kind: 'unknown', retry: false, advice: 'unrecognised - printed verbatim rather than guessed at' }
+}
+
+/** Kept for callers that only need the yes/no. */
 export function isChannelFailure(text) {
-  return /Operation timed out|os error 60|Connection reset|connection error|SendRequest|client error|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|502 Bad Gateway|503 Service|Temporary failure in name resolution|broken pipe/i
-    .test(String(text || ''))
+  return classifyFailure(text).retry
 }
 
 /**
@@ -77,6 +120,7 @@ export function remote(script, opts = {}) {
   } = opts
 
   let last = ''
+  let kind = { kind: 'unknown', advice: '' }
   for (let i = 0; i < attempts; i++) {
     try {
       return clean(run(`${RAILWAY} --service ${service} -- sh -c ${shq(script)}`, {
@@ -84,17 +128,25 @@ export function remote(script, opts = {}) {
       }))
     } catch (e) {
       last = `${e.stdout || ''}\n${e.stderr || ''}\n${e.message || ''}`
-      // An answer, not a failure of the channel. Hand it back untouched.
-      if (!isChannelFailure(last)) throw e
+      kind = classifyFailure(last)
+      // An answer, or something no retry can help. Hand it back untouched, with
+      // the kind attached so the caller reports the right problem.
+      if (!kind.retry) {
+        e.channelKind = kind.kind
+        e.channelAdvice = kind.advice
+        throw e
+      }
       if (i < attempts - 1) {
-        const why = (last.match(/os error \d+|Operation timed out|Connection reset|SendRequest|broken pipe/i) || ['dropped'])[0]
-        onRetry(`channel to the container failed (${why}) - retrying in ${(i + 1) * 15}s`)
-        sleep((i + 1) * 15)
+        const wait = (i + 1) * 15 * (kind.waitMultiplier || 1)
+        onRetry(`${kind.kind}: ${kind.advice} - retrying in ${wait}s`)
+        sleep(wait)
       }
     }
   }
-  const err = new Error(`could not reach the container after ${attempts} attempts: ${clean(last).slice(0, 200)}`)
+  const err = new Error(`could not reach the container after ${attempts} attempts (${kind.kind}): ${clean(last).slice(0, 200)}`)
   err.channel = true
+  err.channelKind = kind.kind
+  err.channelAdvice = kind.advice
   throw err
 }
 
@@ -109,7 +161,14 @@ export function tryRemote(script, opts = {}) {
   try {
     return { ok: true, out: remote(script, opts), channel: false }
   } catch (e) {
-    return { ok: false, out: clean(`${e.stdout || ''}\n${e.stderr || ''}`), channel: Boolean(e.channel), error: e.message }
+    return {
+      ok: false,
+      out: clean(`${e.stdout || ''}\n${e.stderr || ''}`),
+      channel: Boolean(e.channel),
+      kind: e.channelKind || classifyFailure(`${e.stdout || ''}${e.stderr || ''}${e.message || ''}`).kind,
+      advice: e.channelAdvice || '',
+      error: e.message,
+    }
   }
 }
 
