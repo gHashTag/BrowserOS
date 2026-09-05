@@ -23,6 +23,7 @@
 //   node judge-packet.mjs --unauditable   # every open issue no check can reach
 
 import fs from 'node:fs'
+import * as CH from './channel.mjs'
 import path from 'node:path'
 import { execSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -108,22 +109,44 @@ const SVC = 'trios-agent-server'
  * standing. The id is public - it is in every build URL this repository has
  * ever printed - and carries no credential.
  */
-export const RAILWAY = `railway ssh --project 564d9ebd-7aa8-44fe-93ec-e0b03c87158d --environment production`
+// THE BARE NAME IS GONE. It was the fifth instrument caught measuring something
+// other than what it claimed, and the most expensive of them.
+//
+// This file kept its own `railway` with no path, so under the launchd timers it
+// resolved to the June-2025 4.5.4 that cannot attach - and `catch { return null }`
+// turned that into "the bee said nothing".
+//
+// MEASURED: `transcriptOf(1351)` returns 79568 characters with the 5.49.2
+// client and NULL under `PATH=/usr/local/bin:...`. Same code, same service,
+// same minute; the only variable is which binary the bare name found.
+//
+// THE COST: all 42 judge packets ever written carry
+// "The bee said nothing that was recorded", and all 42 of those bees had a
+// transcript - 4,476,899 characters of worker evidence between them. Forty-two
+// accusations of silence against workers who had spoken.
+//
+// The channel is shared now, and the selftest scans every file in this
+// directory rather than a list of two.
 
-
-/** What the bee actually said, from the transcript the Queen judged it on. */
+/**
+ * What the bee actually said, from the transcript the Queen judged it on.
+ *
+ * Returns `{ said, reason }`. The reason is the point: a query that returned no
+ * rows and a channel that could not be reached are the same `null` and opposite
+ * facts, and rendering the second as the first is what wrote those 42 packets.
+ */
 export function transcriptOf(number) {
   const js = `const {Pool} = require('pg'); const p = new Pool({connectionString: process.env.DATABASE_URL}); p.query("select string_agg(t.text, '' order by t.seq) as said from queen_transcript t join queen_dispatch d on d.conversation_id = t.conversation_id where d.issue = ${number} and t.kind = 'say'").then(r => { console.log(JSON.stringify(r.rows[0] || {})); process.exit(0); }).catch(e => { console.log('ERR ' + e.message); process.exit(1); });`
   try {
-    const script = `cd /app/apps/server && bun -e ${shq(js)}`
-    const out = execSync(`${RAILWAY} --service ${SVC} -- sh -c ${shq(script)}`, {
-      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 200000,
-    })
-    const clean = out.split('\n').filter((l) => !/Using SSH|railway\.json|Migrate|Existing/.test(l)).join('\n').trim()
-    const i = clean.indexOf('{')
-    if (i < 0) return null
-    return JSON.parse(clean.slice(i)).said || null
-  } catch { return null }
+    const out = CH.remote(`cd /app/apps/server && bun -e ${shq(js)}`, { service: SVC, timeout: 200000 })
+    const i = String(out).indexOf('{')
+    if (i < 0) return { said: null, reason: 'unreadable' }
+    const said = JSON.parse(String(out).slice(i)).said || null
+    return { said, reason: said ? 'ok' : 'no-rows' }
+  } catch (e) {
+    // A channel that could not be reached says NOTHING about what the bee said.
+    return { said: null, reason: 'unreachable', detail: String(e.message || '').slice(0, 160) }
+  }
 }
 
 export function packet(number) {
@@ -156,7 +179,8 @@ export function packet(number) {
   // `queen_transcript`, not in the diff. A judge without it can only ever
   // answer UNVERIFIABLE, which is a verdict about the packet rather than the
   // work.
-  const said = transcriptOf(number)
+  const t = transcriptOf(number)
+  const said = t.said
 
   const forkPoint = tryShell(`git merge-base ${BASE} ${branch}`) || BASE
   const stat = tryShell(`git diff --stat ${forkPoint}..${branch}`) || ''
@@ -164,7 +188,19 @@ export function packet(number) {
   let truncated = false
   if (diff.length > MAX_DIFF) { diff = diff.slice(0, MAX_DIFF); truncated = true }
 
-  return { number, criteria, stat, diff, truncated, said, saidChars: said ? said.length : 0, saidTruncated: Boolean(said && said.length > MAX_SAID), title: tryShell(`gh issue view ${number} --repo ${REPO} --json title -q .title`) }
+  return {
+    number,
+    criteria,
+    stat,
+    diff,
+    truncated,
+    said,
+    saidReason: t.reason,
+    saidDetail: t.detail,
+    saidChars: said ? said.length : 0,
+    saidTruncated: Boolean(said && said.length > MAX_SAID),
+    title: tryShell(`gh issue view ${number} --repo ${REPO} --json title -q .title`),
+  }
 }
 
 export function render(p) {
@@ -200,7 +236,12 @@ export function render(p) {
             `The middle is omitted, so a criterion whose evidence would sit there is ` +
             `UNVERIFIABLE by truncation, not by absence - say which if it matters.`
           : '## Everything the bee said, in full - its closing report and VERDICT block')
-      : '## The bee said nothing that was recorded, so every quoted-run criterion is UNVERIFIABLE by absence',
+      : p.saidReason === 'ok' || p.saidReason === 'no-rows'
+        ? '## The bee said nothing that was recorded, so every quoted-run criterion is UNVERIFIABLE by absence'
+        : `## THE TRANSCRIPT COULD NOT BE FETCHED (${p.saidReason}) - this says nothing about the bee\n\n` +
+          'Do not read this as silence. The judge has no evidence either way, and a\n' +
+          'criterion is UNVERIFIABLE by a failure of this tool rather than by anything\n' +
+          'the worker did or did not do.',
     '',
     p.said ? '```' : '',
     p.said ? p.said.slice(-MAX_SAID) : '',

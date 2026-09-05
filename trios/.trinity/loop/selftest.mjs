@@ -2602,10 +2602,23 @@ check('the loop names the railway binary it runs', async () => {
   // working 39% of the time - it was not being asked.
   if (!/^\//.test(CH.RAILWAY_BIN)) throw new Error(`the binary must be an absolute path, not a PATH lookup - got ${CH.RAILWAY_BIN}`)
   if (!CH.RAILWAY.startsWith(CH.RAILWAY_BIN)) throw new Error('the command must use the named binary')
-  for (const f of ['channel.mjs', 'stale-escalations.mjs']) {
-    const code = codeOf(f)
-    if (/`railway ssh/.test(code)) throw new Error(`${f} still starts a command with a bare railway`)
-  }
+  // EVERY FILE, NOT A LIST OF TWO.
+  //
+  // This guard existed for exactly this defect and iterated two filenames.
+  // judge-packet.mjs was not among them: it kept its own bare `railway`,
+  // swallowed the resulting failure with `catch { return null }`, and rendered
+  // "The bee said nothing that was recorded". All 42 judge packets ever written
+  // carry that line; all 42 of those bees had a transcript, 4,476,899
+  // characters between them.
+  //
+  // A guard scoped to a list cannot see the file somebody adds next.
+  const dir = path.dirname(new URL(import.meta.url).pathname)
+  const offenders = fs.readdirSync(dir)
+    .filter((f) => f.endsWith('.mjs'))
+    // The scanner necessarily contains the pattern it scans for.
+    .filter((f) => f !== 'selftest.mjs')
+    .filter((f) => /`railway ssh/.test(codeOf(f)))
+  if (offenders.length) throw new Error(`bare railway in: ${offenders.join(', ')}`)
 })
 
 check('the farm links dotfiles, which is where bun keeps everything', async () => {
@@ -2702,6 +2715,23 @@ check('a failure rate is read over a window, not a lifetime', async () => {
   // written. The reasoning lives in dash.mjs where a reader will meet it.
   if (!/--last 8/.test(code)) throw new Error('the dashboard must not quote a rate spanning two resolved outages')
   if (/--last (?:2\d|[3-9]\d)/.test(code)) throw new Error('a window long enough to reach the crash describes neither now nor then')
+})
+
+check('a fetch that failed is never rendered as a bee that said nothing', async () => {
+  const JP = await import('./judge-packet.mjs')
+  const code = codeOf('judge-packet.mjs')
+  // All 42 judge packets ever written say "The bee said nothing that was
+  // recorded". All 42 of those bees had a transcript - 4,476,899 characters
+  // between them. The file kept its own bare `railway`, which under the timers
+  // resolved to a client that cannot attach, and `catch { return null }` turned
+  // the refusal into a verdict about the worker.
+  if (!/reason: 'unreachable'/.test(code)) throw new Error('a channel failure must carry its own reason, not become null')
+  if (!/THE TRANSCRIPT COULD NOT BE FETCHED/.test(code)) throw new Error('and must render as a failure of this tool, never as silence')
+  if (!/saidReason === 'ok' \|\| p\.saidReason === 'no-rows'/.test(code)) {
+    throw new Error('only a query that really returned nothing may be called silence')
+  }
+  // The shape of the return, so a caller cannot lose the distinction.
+  if (typeof JP.transcriptOf !== 'function') throw new Error('transcriptOf must still be callable')
 })
 
 check('the harness can fail an async check', async () => {
