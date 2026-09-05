@@ -48,16 +48,16 @@ const SVC = 'trios-agent-server'
  * standing. The id is public - it is in every build URL this repository has
  * ever printed - and carries no credential.
  */
-export const RAILWAY = `railway ssh --project 564d9ebd-7aa8-44fe-93ec-e0b03c87158d --environment production`
+// The sixth file, found by the guard on the first run after it was widened from
+// a list of two filenames to the whole directory. This one EXECUTES its bare
+// name - it is a hand tool, so it works from an interactive shell and would have
+// failed from any timer, silently, the way judge-packet.mjs did for 42 packets.
+import * as CH from './channel.mjs'
 
 
 function remote(js) {
   const one = js.replace(/\s*\n\s*/g, ' ').trim()
-  const script = `cd /app/apps/server && bun -e ${shq(one)}`
-  const out = execSync(`${RAILWAY} --service ${SVC} -- sh -c ${shq(script)}`, {
-    encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 280000,
-  })
-  return out.split('\n').filter((l) => !/Using SSH|railway\.json|Migrate|Existing/.test(l)).join('\n').trim()
+  return CH.remote(`cd /app/apps/server && bun -e ${shq(one)}`, { service: SVC })
 }
 
 // Constants inlined rather than passed as placeholders: the payload is quoted

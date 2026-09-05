@@ -62,7 +62,10 @@ const SVC = 'trios-agent-server'
  * standing. The id is public - it is in every build URL this repository has
  * ever printed - and carries no credential.
  */
-export const RAILWAY = `railway ssh --project 564d9ebd-7aa8-44fe-93ec-e0b03c87158d --environment production`
+// The bare RAILWAY constant that used to live here is gone. It was never
+// executed after this file moved to channel.mjs, and a dead copy of a defect is
+// how the next copy-paste resurrects it: judge-packet.mjs kept one, executed it,
+// and wrote 42 packets accusing bees of a silence it had never measured.
 
 const BASE = 'origin/feat/queen-supervisor'
 
