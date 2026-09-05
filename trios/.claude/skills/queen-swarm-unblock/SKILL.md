@@ -2383,6 +2383,67 @@ Say "not yet testable, and here is why", pay the claim when the data arrives, an
 spend the round on something the data can answer now. A loop that always has a
 result at the end of the hour will eventually manufacture one.
 
+## Read the comment before improving the thing it defends
+
+The swarm sat at zero bees and `why` named a chain run holding the loop lock. My
+first instinct: a lock held by a dead process should be reclaimable, add a pid
+liveness check.
+
+`loop.mjs` explains at length why pid liveness was **deliberately rejected**. An
+iteration is a Claude turn made of many short-lived processes, so the pid that
+took the lock has always exited by the time anyone looks, and a liveness check
+would hand the lock straight to a concurrent cron fire. The pid also turned out
+to be alive - the chain was working normally.
+
+Two things follow, and the second is the useful one:
+
+- **A design with a written reason is not a defect waiting to be found.** The
+  comment cost a minute to read and saved a protection that exists to stop two
+  writers.
+- **But the reason may be right about less than the whole.** The lock has two
+  kinds of holder, and it was only ever written for one: `heal` and `feed` are
+  single processes that take it, work and exit in one pid. For those a missing
+  pid does mean the run is gone.
+
+So apply the exception where it is sound and guard it three ways: the holder must
+DECLARE itself single-process, there is a grace period so a run that just started
+is never stolen from, and the default stays the old behaviour so nothing that has
+not opted in can be affected. **A wrongly-held lock costs a wait; a wrongly-taken
+one costs two writers.**
+
+## A protection scoped wider than what it protects starves something else
+
+The loop lock covered a whole chain run. The first half changes shared state -
+reaping worktrees, releasing fences, pushing branches, closing issues - and must
+not run twice at once. The second half only reads. One lock covered both, so a
+run held it up to thirteen minutes, and `feed` - which fires every 300 seconds to
+refill the queue - stood down every time. The swarm sat at zero for eleven
+minutes while the chain was in `fp-check`, a read-only step.
+
+Release at the boundary the file already draws. Guard it: release only a lock
+THIS process took, or a chain running inside an iteration will release the
+iteration's.
+
+**This was the third round running with the same shape.** `close-done` re-deriving
+a rule that lived in `land`; pid liveness rejected for turn-held locks but sound
+for single-process ones; a lock scoped to a whole run when only half of it
+mutates anything. In each case the protection was right and applied to more than
+it should. When something correct is costing you, ask what it is actually
+protecting before you weaken it - the answer is usually a narrower scope, not a
+weaker rule.
+
+## The paired probe paid its claim
+
+Last round's disagreement - `/health` ok while `railway ssh` refused - was
+recorded as an anecdote, because the two were sampled a minute apart. With them
+sampled together: 7 pairs, 6 both-up, and one at 02:01:13 where HTTP returned 200
+with `{"status":"ok"}` and the gateway refused in the same moment, kind
+`app-down`.
+
+Existence confirmed, rate unknown. n=1 of 7 is not a frequency and must not be
+written as one - but the phenomenon is no longer a story, and a green health
+check is now demonstrably not evidence that the channel will connect.
+
 ## The rule that comes out of all of them
 
 Do not add fuel to a stopped swarm until `tri swarm` and `tri fence` say fuel is
