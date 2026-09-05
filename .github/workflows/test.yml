@@ -187,22 +187,6 @@ jobs:
         run: |
           echo "psql present: $(command -v psql || echo no)"
           psql "$TRIOS_PG_TEST_URL" -tAc "select 'REACHABLE as '||current_user||' on '||current_database()" || echo "NOT REACHABLE"
-          # And the test's OWN sequence, in miniature: a scratch database, the
-          # migration applied through the same entry point the container calls
-          # at boot, and a count of what landed. Connectivity is already proven
-          # by the line above; this says whether the migration puts anything in
-          # the database when it plainly can reach one.
-          psql "$TRIOS_PG_TEST_URL" -tAc "CREATE DATABASE trios_witness" >/dev/null 2>&1 || true
-          (cd apps/server && DATABASE_URL="${TRIOS_PG_TEST_URL%/postgres}/trios_witness" bun --eval '
-            const { runPgMigrations } = require("./src/lib/db/pg-migrate")
-            runPgMigrations()
-              .then(() => runPgMigrations())
-              .then(() => console.log("MIGRATION CALL RETURNED"))
-              .catch((e) => console.log("MIGRATION THREW:", String(e.message).slice(0, 200)))
-          ') || echo "witness migration step could not run"
-          psql "${TRIOS_PG_TEST_URL%/postgres}/trios_witness" -tAc \
-            "select 'TABLES AFTER MIGRATION: '||count(distinct table_name) from information_schema.columns where table_schema='public'" \
-            || echo "could not count tables"
         env:
           TRIOS_PG_TEST_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
 
