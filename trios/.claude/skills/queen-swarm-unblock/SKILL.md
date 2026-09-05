@@ -3144,6 +3144,37 @@ dotfiles left out `.bun`, 2242 entries and 2.37 GB. A refutation deserves the
 same scepticism as a confirmation, and this one cost four rounds of treating the
 problem as unfixable.
 
+## One case of fifteen is how a gap hides behind a good aggregate
+
+The tap held: the volume settled at 19% and its rate fell from over a hundred
+points an hour to 5.5, fourteen of fifteen worktrees farmed. It looked finished.
+
+The fifteenth carried 2,562 MB, with a lockfile hash matching an existing store,
+cut AFTER the change went live. Its dispatch said why:
+
+    #1627  reused an existing worktree (clean)
+
+`prepareWorktree` returns from the reuse path before it reaches the farm, which
+had been added after `git worktree add`. **A different code path, invisible in
+every number I was watching.**
+
+The aggregate is what makes this dangerous. 14/15 and a collapsed rate are
+exactly what success looks like, and the remaining case was not noise - it was a
+whole branch of the function nobody had covered. **When a fix leaves one case
+behind, ask which PATH that case took rather than treating it as residue.**
+
+## A silent fallback is how a gap survives being found
+
+`farmNodeModules` returned an empty string when it threw, on the reasoning that
+an optimisation which throws is worse than one that does not run. That reasoning
+is right, and it also meant "the farm could not be built" and "no farm was
+needed" produced identical output.
+
+It says which now, in the same detail line the board and the operator already
+read. **An optimisation may decline to run; it may not decline to say so** - the
+whole cost of silence is that the next person measuring cannot tell the two
+apart, and the number they compute will be confident and wrong.
+
 ## The rule that comes out of all of them
 
 Do not add fuel to a stopped swarm until `tri swarm` and `tri fence` say fuel is
