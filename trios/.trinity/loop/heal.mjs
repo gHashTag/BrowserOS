@@ -115,6 +115,17 @@ const STEPS = [
   // demands LANDED, so without this step nothing would ever close again. The
   // order is push -> land -> close, and each step is the precondition of the
   // next.
+  // RIGHT AFTER THE PUSH, because that is when a worktree stops being needed.
+  //
+  // An hour after the volume went from 95% to 32% it was back at 87%: seventeen
+  // worktrees, only TWO belonging to a running bee. Fifteen were left by
+  // finished dispatches and eleven had their branch on the remote already -
+  // about 27 GB of pure redundancy waiting for a watermark to notice.
+  //
+  // A worktree has a known lifetime. CI deletes a workspace when the job ends;
+  // it does not wait for disk pressure to remember. The watermark reaper stays
+  // as the backstop it should always have been.
+  { name: 'reap-finished', file: 'reap-finished.mjs', act: '--reap', dryArgs: '', why: 'a worktree stops being needed when its work is published' },
   { name: 'land', file: 'land.mjs', act: '--land', dryArgs: '', why: 'put accepted work into the branch it was accepted for' },
   { name: 'close-done', file: 'close-done.mjs', act: '--close', why: 'clear accepted issues from the pool' },
   // An escalation raised by a defect that has SINCE BEEN FIXED is never
@@ -168,6 +179,8 @@ const STEPS = [
 // One line per step, taken from the step's own output rather than invented, so
 // the summary cannot claim more than the step reported.
 const SUMMARY = [
+  [/removed (\d+) of (\d+) redundant worktree\(s\), (\d+) refused/, (m) => `${m[1]} redundant worktree(s) removed, ${m[3]} still hold work`],
+  [/(\d+) worktree\(s\): (\d+) redundant, (\d+) kept/, (m) => `${m[2]} of ${m[1]} worktrees are redundant`],
   [/(\d+) uncommitted path\(s\) across (\d+) tree\(s\), (\d+) tree\(s\) committed/, (m) => `rescued ${m[1]} stranded path(s) from ${m[3]} tree(s)`],
   [/STRANDED total=0/, () => 'nothing stranded in any worktree'],
   [/THEY DISAGREE/, () => 'the two views of the service DISAGREE - a green health check is not evidence the channel will connect'],
