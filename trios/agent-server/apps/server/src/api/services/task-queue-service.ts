@@ -3,7 +3,7 @@
  * Copyright 2025 BrowserOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
- * TaskQueueService — Manage agent task queue with priorities and retry logic
+ * TaskQueueService - Manage agent task queue with priorities and retry logic
  */
 
 import * as crypto from 'node:crypto'
