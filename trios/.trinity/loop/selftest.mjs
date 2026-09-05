@@ -2680,6 +2680,30 @@ check('the process meter reads /proc, because the container has no ps', () => {
   if (!/ZOMBIES/.test(code) || !/PROCS/.test(code)) throw new Error('both the total and the zombie count are needed - 37 of 50 is a different fact from 37 of 5000')
 })
 
+check('a failure rate is read over a window, not a lifetime', async () => {
+  const { tally } = await import('./failures.mjs')
+  // Naming the railway client should have collapsed the step rates. Split at
+  // the fix it read reap 73% -> 70% and I wrote "the fix did nothing" - because
+  // the window after it contained a three-hour SERVICE CRASH. Split into the
+  // three periods that happened, both fixes worked: push-work 57/100 under the
+  // old client, 22/22 during the crash, 1/7 after the restore.
+  const rows = [
+    ...Array.from({ length: 10 }, (_, i) => ({ at: `2026-09-05T0${i}:00:00Z`, results: [{ step: 'a', status: 'FAILED' }] })),
+    ...Array.from({ length: 5 }, (_, i) => ({ at: `2026-09-05T1${i}:00:00Z`, results: [{ step: 'a', status: 'ok' }] })),
+  ]
+  const lifetime = tally(rows).find((r) => r.step === 'a')
+  if (lifetime.failed !== 10 || lifetime.runs !== 15) throw new Error('the whole record is still available by asking for it')
+  const recent = tally(rows, null, 5).find((r) => r.step === 'a')
+  if (recent.failed !== 0 || recent.runs !== 5) throw new Error(`the last 5 runs are all ok - got ${recent.failed}/${recent.runs}`)
+  const code = codeOf('dash.mjs')
+  // The window is code and can be asserted; the JUSTIFICATION for it is a
+  // comment, and codeOf strips comments - which is exactly why it exists, and
+  // which caught this assertion trying to check prose two minutes after being
+  // written. The reasoning lives in dash.mjs where a reader will meet it.
+  if (!/--last 8/.test(code)) throw new Error('the dashboard must not quote a rate spanning two resolved outages')
+  if (/--last (?:2\d|[3-9]\d)/.test(code)) throw new Error('a window long enough to reach the crash describes neither now nor then')
+})
+
 check('the harness can fail an async check', async () => {
   // Guarding the fix above: before it, this file reported 0 failures while an
   // async case was rejecting into the void.
