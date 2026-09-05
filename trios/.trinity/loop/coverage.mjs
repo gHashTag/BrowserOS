@@ -72,6 +72,7 @@ const ACTS = {
   'loop.mjs': { kinds: [], note: 'the library the others import - it has no act path of its own' },
   'brief-gate.mjs': { kinds: [], note: 'a gate: it refuses or permits, and changes nothing' },
   'coverage.mjs': { kinds: [], note: 'this file' },
+  'share-modules.mjs': { kinds: ['share-modules'], note: 'rebuilds each worktree node_modules as a farm of links into one store; never touches a running tree' },
   'reap-finished.mjs': { kinds: ['reap-finished'], note: 'removes a worktree when its dispatch has finished and its branch is on the remote - lifetime, not pressure' },
   'rescue.mjs': { kinds: ['rescue'], note: 'commits work a bee left uncommitted onto its own branch, so reclaiming a worktree cannot destroy it' },
   'two-views.mjs': { kinds: [], note: 'samples the HTTP and ssh views of the service together and records the pair; it concludes nothing' },
