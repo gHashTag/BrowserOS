@@ -2668,6 +2668,18 @@ check('the container process pressure is measured, so the crash is a rising numb
   if (pidPercent(noPids) !== null) throw new Error('a refused attach carries no pid reading and must not be counted as one')
 })
 
+check('the process meter reads /proc, because the container has no ps', () => {
+  const code = codeOf('two-views.mjs')
+  // The first version counted zombies with `ps -eo stat | grep -c "^Z"`. This
+  // image has no ps, so the pipeline produced nothing and the count was 0 for a
+  // full round while /proc showed 37. A check whose tool is absent reports
+  // health - the same defect as a disk guard reading the wrong filesystem,
+  // found in the instrument built to watch for the crash it missed.
+  if (/ps -eo stat/.test(code)) throw new Error('ps is not installed in that image and its absence reads as zero')
+  if (!/\/proc\/\[0-9\]\*/.test(code)) throw new Error('/proc always exists on Linux; that is why it is the instrument')
+  if (!/ZOMBIES/.test(code) || !/PROCS/.test(code)) throw new Error('both the total and the zombie count are needed - 37 of 50 is a different fact from 37 of 5000')
+})
+
 check('the harness can fail an async check', async () => {
   // Guarding the fix above: before it, this file reported 0 failures while an
   // async case was rejecting into the void.

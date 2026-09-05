@@ -82,19 +82,38 @@ export async function sshView(deps = {}) {
     // process nobody was watching. This probe already attaches every chain run;
     // asking two more questions while it is there costs nothing and turns a
     // sudden crash into a rising number.
-    const out = CH.remote(
-      'echo attached; echo PIDS $(cat /sys/fs/cgroup/pids.current 2>/dev/null || echo 0)/$(cat /sys/fs/cgroup/pids.max 2>/dev/null || echo 0); echo ZOMBIES $(ps -eo stat 2>/dev/null | grep -c "^Z" || echo 0)',
-      { attempts: 1, ignoreBreaker: true, onRetry: () => {} },
-    )
+    // READ /proc, NOT ps. THE CONTAINER HAS NO ps.
+    //
+    // The first version of this meter counted zombies with
+    // `ps -eo stat | grep -c '^Z'`. `ps` is not installed in this image, so the
+    // pipeline produced nothing and the count was 0 - which read as "no
+    // zombies" for a full round while there were 37 of them.
+    //
+    // A check whose tool is absent reports health. That is the same defect this
+    // project has found in a disk guard reading the wrong filesystem and in a
+    // scheduled job reaching the wrong command, and here it was in the
+    // instrument I had just built to watch for a crash.
+    //
+    // /proc always exists on Linux. Field 3 of /proc/<pid>/stat is the state
+    // letter, and Z is a zombie.
+    const probe = [
+      'echo attached',
+      'echo PIDS $(cat /sys/fs/cgroup/pids.current 2>/dev/null || echo 0)/$(cat /sys/fs/cgroup/pids.max 2>/dev/null || echo 0)',
+      'z=0; tot=0; for d in /proc/[0-9]*; do s=$(awk \'{print $3}\' "$d/stat" 2>/dev/null) || continue; tot=$((tot+1)); [ "$s" = "Z" ] && z=$((z+1)); done',
+      'echo PROCS $tot ZOMBIES $z',
+    ].join('; ')
+    const out = CH.remote(probe, { attempts: 1, ignoreBreaker: true, onRetry: () => {} })
     const s = String(out)
     const pids = s.match(/PIDS (\d+)\/(\d+)/)
     const zomb = s.match(/ZOMBIES (\d+)/)
+    const procs = s.match(/PROCS (\d+)/)
     return {
       attached: /attached/.test(s),
       kind: 'ok',
       detail: s.replace(/\s+/g, ' ').slice(0, 120),
       pids: pids ? { used: Number(pids[1]), max: Number(pids[2]) } : null,
       zombies: zomb ? Number(zomb[1]) : null,
+      procs: procs ? Number(procs[1]) : null,
     }
   } catch (e) {
     const text = `${e.stdout || ''}${e.stderr || ''}${e.message || ''}`
