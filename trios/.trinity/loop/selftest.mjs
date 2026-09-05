@@ -2334,6 +2334,46 @@ check('the audits do not hold the lock the refill needs', () => {
   if (!/if \(heldLock\)/.test(code)) throw new Error('never release a lock this process did not take')
 })
 
+check('a rescue saves work and refuses to save what is not work', async () => {
+  const { isWork, workPaths, NOT_WORK } = await import('./rescue.mjs')
+  // Nineteen trees refused removal while the volume sat at 95% and every bee
+  // died at `git worktree add`. They held 52 uncommitted paths - nine of them
+  // test files a bee had written and never committed, the only copy of itself.
+  if (!isWork('trios/agent-server/apps/agent/entrypoints/newtab/index/NewTab.test.ts')) {
+    throw new Error('a test file a bee wrote is exactly the work this exists to save')
+  }
+  // `.worktrees/` appeared as an untracked entry INSIDE a worktree. Committing a
+  // directory of checkouts into a branch is hard to undo and easy to avoid.
+  if (isWork('.worktrees/queen-1/')) throw new Error('a nested checkout is not work')
+  if (isWork('node_modules/x/index.js')) throw new Error('an installed package is not work')
+  if (isWork('apps/server/dist/main.js')) throw new Error('a build artifact is not work')
+  if (isWork('')) throw new Error('an empty path is not work')
+  if (!NOT_WORK.length) throw new Error('the exclusions must be named, not implied')
+  const paths = workPaths('?? a/b.test.ts\n M c/d.ts\n?? node_modules/e.js\n')
+  if (paths.length !== 2) throw new Error(`two real paths and one package - got ${paths.join(', ')}`)
+})
+
+check('a rescue is preservation, not delivery', async () => {
+  const code = codeOf('rescue.mjs')
+  // Every one of the first twenty rescue commits failed on lefthook running
+  // biome-check. A pre-commit hook gates work being DELIVERED; this is work
+  // being saved from destruction, and holding it to a formatter's standard
+  // means deleting it instead.
+  if (!/--no-verify/.test(code)) throw new Error('the delivery gate must not stand between abandoned work and its only copy')
+  if (!/NOT REVIEWED/.test(code)) throw new Error('the commit must say it is preserved, not endorsed')
+  if (/--force/.test(code)) throw new Error('nothing here forces anything')
+})
+
+check('an unreadable board is not an empty one', async () => {
+  const code = codeOf('rescue.mjs')
+  // An empty running-set means every tree is abandoned and all may be
+  // committed; an unreadable board means nothing is known and none may be. The
+  // first version used one empty array for both.
+  if (!/boardRead/.test(code)) throw new Error('the two must be distinguishable before anything is written')
+  if (!/ACT && !boardRead/.test(code)) throw new Error('writing is refused when the board could not be read')
+  if (!/still running/.test(code)) throw new Error('a tree whose bee is working is somebody mid-thought')
+})
+
 check('the harness can fail an async check', async () => {
   // Guarding the fix above: before it, this file reported 0 failures while an
   // async case was rejecting into the void.

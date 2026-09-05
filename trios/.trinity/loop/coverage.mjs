@@ -72,6 +72,7 @@ const ACTS = {
   'loop.mjs': { kinds: [], note: 'the library the others import - it has no act path of its own' },
   'brief-gate.mjs': { kinds: [], note: 'a gate: it refuses or permits, and changes nothing' },
   'coverage.mjs': { kinds: [], note: 'this file' },
+  'rescue.mjs': { kinds: ['rescue'], note: 'commits work a bee left uncommitted onto its own branch, so reclaiming a worktree cannot destroy it' },
   'two-views.mjs': { kinds: [], note: 'samples the HTTP and ssh views of the service together and records the pair; it concludes nothing' },
   'dash.mjs': { kinds: [], note: 'measures the dashboard numbers instead of accepting them typed; records a reading and changes nothing else' },
   'channel.mjs': { kinds: [], note: 'the one way into the container - a library the remote steps import; it has no act path of its own' },
