@@ -2454,6 +2454,37 @@ check('reap-finished never forces and refuses on an unreadable board', async () 
   if (!/worktree remove/.test(script(['queen-1']))) throw new Error('it removes by the ordinary route')
 })
 
+check('sharing never touches a running bee, and never empties a bare checkout', async () => {
+  const { decide } = await import('./share-modules.mjs')
+  // Rebuilding node_modules under a live install kills the dispatch for a
+  // reason nobody can reconstruct afterwards.
+  const { share, keep } = decide([
+    { name: 'queen-1', mb: 2500, lock: 'aaa' },
+    { name: 'queen-2', mb: 2500, lock: 'aaa' },
+    { name: 'queen-3', mb: 160, lock: 'aaa' },
+  ], ['queen-2'])
+  if (share.map((t) => t.name).join(',') !== 'queen-1') throw new Error(`only the idle tree with an install - got ${share.map((t) => t.name).join(',')}`)
+  const why = Object.fromEntries(keep.map((k) => [k.name, k.why]))
+  if (!/bee is running/.test(why['queen-2'] || '')) throw new Error('a running tree is left alone and said so')
+  if (!/no private install/.test(why['queen-3'] || '')) throw new Error('a bare checkout has nothing to share and must not be emptied')
+})
+
+check('the store is keyed by the lockfile, and workspace packages link home', async () => {
+  const { shareScript, parseShared, parseSurvey } = await import('./share-modules.mjs')
+  // The obvious version breaks at once:
+  //   error: Cannot find module '@browseros/shared/constants/limits'
+  // A bun workspace links its OWN packages by relative path inside
+  // node_modules; shared away they resolve against the store and find nothing.
+  const s = shareScript([{ name: 'queen-1', lock: 'abc123' }])
+  if (!/@browseros/.test(s)) throw new Error('the workspace packages must be linked back to the worktree')
+  if (!/\$\{pair##\*:\}/.test(s) && !/h=/.test(s)) throw new Error('the store is keyed by the lock hash, so different dependencies get different stores')
+  if (/--force/.test(s)) throw new Error('nothing here forces anything')
+  if (!/SHARED trees=0 saved=0/.test(shareScript([]))) throw new Error('an empty list is a valid answer, not a malformed command')
+  const p = parseSurvey('TREE queen-1 2500 abc123\nnoise\n')
+  if (p.length !== 1 || p[0].mb !== 2500 || p[0].lock !== 'abc123') throw new Error('the survey line carries size and lock together')
+  if (parseShared('SHARED trees=6 saved=14362').savedMb !== 14362) throw new Error('the saving is read back from the tool, not estimated')
+})
+
 check('the harness can fail an async check', async () => {
   // Guarding the fix above: before it, this file reported 0 failures while an
   // async case was rejecting into the void.

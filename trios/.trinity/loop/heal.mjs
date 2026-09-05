@@ -126,6 +126,13 @@ const STEPS = [
   // it does not wait for disk pressure to remember. The watermark reaper stays
   // as the backstop it should always have been.
   { name: 'reap-finished', file: 'reap-finished.mjs', act: '--reap', dryArgs: '', why: 'a worktree stops being needed when its work is published' },
+  // AFTER the redundant trees are gone, share what the rest are duplicating.
+  //
+  // Eight of eleven worktrees carried their own node_modules at ~2.5 GB - about
+  // 19 GB of identical packages on a 46 GB volume, which no collector can
+  // out-pace. One store, a farm of links per worktree, and the workspace
+  // packages linked back home. First run returned 14.3 GB.
+  { name: 'share-modules', file: 'share-modules.mjs', act: '--share', dryArgs: '', why: 'one installed dependency tree, linked into every worktree' },
   { name: 'land', file: 'land.mjs', act: '--land', dryArgs: '', why: 'put accepted work into the branch it was accepted for' },
   { name: 'close-done', file: 'close-done.mjs', act: '--close', why: 'clear accepted issues from the pool' },
   // An escalation raised by a defect that has SINCE BEEN FIXED is never
@@ -179,6 +186,8 @@ const STEPS = [
 // One line per step, taken from the step's own output rather than invented, so
 // the summary cannot claim more than the step reported.
 const SUMMARY = [
+  [/(\d+) tree\(s\) rebuilt against one store, about (\d+) MB returned/, (m) => `${m[1]} tree(s) share one store, ${m[2]} MB returned`],
+  [/(\d+) worktree\(s\): (\d+) with a private install/, (m) => `${m[2]} of ${m[1]} worktrees still carry a private install`],
   [/removed (\d+) of (\d+) redundant worktree\(s\), (\d+) refused/, (m) => `${m[1]} redundant worktree(s) removed, ${m[3]} still hold work`],
   [/(\d+) worktree\(s\): (\d+) redundant, (\d+) kept/, (m) => `${m[2]} of ${m[1]} worktrees are redundant`],
   [/(\d+) uncommitted path\(s\) across (\d+) tree\(s\), (\d+) tree\(s\) committed/, (m) => `rescued ${m[1]} stranded path(s) from ${m[3]} tree(s)`],
