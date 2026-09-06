@@ -197,7 +197,11 @@ describe('probeGatewayReady', () => {
       const closeWaitStarted = Date.now()
       const socketClosed = await waitForCondition(
         () => wedged.closeCount() >= 1,
-        10_000,
+        // 3000, NOT 10000: bun's per-test timeout is 5000ms and the first
+        // attempt at ten seconds hit it before the witness could print - the
+        // measurement was lost to the measuring. Under the cap the line always
+        // runs, which is the whole point of a witness.
+        3_000,
         25,
       )
       console.error(
