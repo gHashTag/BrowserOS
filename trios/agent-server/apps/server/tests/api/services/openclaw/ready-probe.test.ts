@@ -252,8 +252,31 @@ function makeServer(onConnection: (socket: net.Socket) => void): TrackedServer {
 
 /** A server that accepts TCP connections and then never writes a byte. */
 function startWedgedServer(): Promise<TrackedServer> {
-  const tracked = makeServer(() => {
-    // Accept the connection, never respond.
+  const tracked = makeServer((socket) => {
+    // NEVER RESPOND, BUT DO READ - AND THE READ IS THE WHOLE FIX.
+    //
+    // This handler was empty, so the accepted socket stayed PAUSED: nothing
+    // was consuming from it, and the FIN the client sends on teardown was
+    // never processed. No `end`, therefore no auto-close, therefore no
+    // `close` event - and `closeCount` stayed at zero for ever while the
+    // probe had long since torn its side down.
+    //
+    // Measured in CI on 2026-09-06, with the per-test cap raised so the
+    // witness could print:
+    //
+    //   CLOSE-WITNESS: closed=false after 15005ms, closeCount=0,
+    //                  setTimeout(0) took 1ms
+    //
+    // Fifteen seconds and no close, on an event loop answering a zero-delay
+    // callback in ONE millisecond. So the loop was not starved and the probe
+    // was not at fault: this server simply never read. A twenty-line repro of
+    // the same shape passed on the same runner under the same bun - and its
+    // wedged server had a `data` handler, which is exactly the difference.
+    //
+    // `resume()` puts the socket in flowing mode without answering a byte, so
+    // it is still wedged in the sense the test means, and it now observes the
+    // teardown it exists to assert.
+    socket.resume()
   })
   return listen(tracked)
 }

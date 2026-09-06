@@ -2867,6 +2867,50 @@ check('the exposure probe never prints a body', () => {
 // They are not weather; they are broken, and calling them flake is how a real
 // failure gets a permanent excuse. The genuinely intermittent ones appeared
 // once each in twelve.
+// A GREEN RUN IS NOT AN UNREADABLE RUN, AND BOTH MY CI TOOLS SAID IT WAS.
+//
+// `gh run view --log-failed` prints NOTHING when every job passed, so an empty
+// string meant both "the whole suite is green" and "the fetch failed". The very
+// first green run either tool ever saw was reported as "NOTHING was compared" -
+// about the run that proved a four-round hunt was over.
+//
+// That is the empty-versus-absent defect this loop has found in a boundary
+// parser, a judge packet and a config file, committed here by the instruments
+// written to catch it. The run's own job list settles it: completed with no
+// failed job is an EMPTY failure set, which is a fact.
+check('a run with no failures is compared, not called unreadable', async () => {
+  const C = await import('./ci-diff.mjs')
+  const green = C.runLog('123', (cmd) => (cmd.includes('--log-failed') ? '' : '0'))
+  if (green !== '') throw new Error(`a green run returned ${JSON.stringify(green)} instead of an empty failure set`)
+  const r = C.compareRuns('(fail) a > one', green)
+  if (r.unknown) throw new Error('a green candidate was reported as unreadable')
+  if (r.fixed.join() !== 'a > one') throw new Error(`the fix was not counted: ${JSON.stringify(r.fixed)}`)
+})
+
+check('a run whose job list cannot be read is still unreadable', async () => {
+  const C = await import('./ci-diff.mjs')
+  // The distinction only means something if the OTHER branch still exists.
+  const broken = C.runLog('123', () => '')
+  if (broken !== null) throw new Error('an unfetchable run was treated as green')
+  if (!C.compareRuns('x', broken).unknown) throw new Error('an unreadable run was compared anyway')
+})
+
+check('the frequency tool tells a green run from an unfetchable one too', async () => {
+  const F = await import('./flaky.mjs')
+  const green = F.failuresOf('1', { run: (cmd) => (cmd.includes('--log-failed') ? '' : '0') })
+  if (!Array.isArray(green) || green.length) throw new Error(`green run gave ${JSON.stringify(green)}`)
+  const broken = F.failuresOf('2', { run: () => '' })
+  if (broken !== null) throw new Error('an unfetchable run was treated as green')
+  // AND THE CONSEQUENCE, which is why this matters: dropping green runs from
+  // the denominator inflates every surviving failure toward "deterministic"
+  // exactly when it has stopped being one.
+  const t = F.tally([
+    { id: '1', sha: 'a', failures: ['x'] },
+    { id: '2', sha: 'b', failures: [] },
+  ])
+  if (t.rows[0].kind !== 'unstable') throw new Error(`1 of 2 was called ${t.rows[0].kind}`)
+})
+
 check('a failure seen in every readable run is deterministic, not weather', async () => {
   const F = await import('./flaky.mjs')
   const t = F.tally([
