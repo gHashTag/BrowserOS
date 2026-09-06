@@ -180,6 +180,31 @@ jobs:
           EOF
           chmod +x .ci/bin/browseros
 
+      # AN X SERVER, BECAUSE THE BROWSER ASKED FOR ONE BY NAME.
+      #
+      # Three assertions in this suite fail 12 runs of 12 with the browser's own
+      # sentence: "Hidden windows are not yet supported on this platform. Use
+      # X11 (XDG_SESSION_TYPE=x11), macOS, or Windows." Under `--headless=new`
+      # there is no window system at all, so a hidden window cannot exist and
+      # the tests were asserting something the platform could not do.
+      #
+      # Xvfb is preinstalled on ubuntu-latest. Started only for the jobs that
+      # need a browser, and the suite runs non-headless against it - which is
+      # the configuration the message names.
+      - name: Start an X server for the browser
+        if: matrix.needs_browser == true
+        run: |
+          Xvfb :99 -screen 0 1280x1024x24 > /tmp/xvfb.log 2>&1 &
+          for _ in $(seq 1 30); do
+            if xdpyinfo -display :99 > /dev/null 2>&1; then echo "X server ready on :99"; exit 0; fi
+            sleep 1
+          done
+          # A WITNESS, NOT A GATE. If the display never comes up the browser
+          # tests will say so themselves; failing here would hide their verdict
+          # behind this step's.
+          echo "X server did not become ready in 30s - the browser tests will report what that costs"
+          tail -5 /tmp/xvfb.log || true
+
       - name: Create server env file
         working-directory: trios/agent-server/apps/server
         run: cp .env.example .env.development
@@ -207,7 +232,12 @@ jobs:
         id: test
         env:
           BROWSEROS_BINARY: ${{ github.workspace }}/trios/agent-server/.ci/bin/browseros
-          BROWSEROS_TEST_HEADLESS: "true"
+          # Non-headless when there is an X server to be non-headless against.
+          # `--headless=new` has no window system, which is precisely what the
+          # hidden-window tests need and cannot get.
+          BROWSEROS_TEST_HEADLESS: ${{ matrix.needs_browser == true && 'false' || 'true' }}
+          DISPLAY: ':99'
+          XDG_SESSION_TYPE: x11
           BROWSEROS_TEST_EXTRA_ARGS: --no-sandbox --disable-dev-shm-usage
           BROWSEROS_JUNIT_PATH: ${{ github.workspace }}/trios/agent-server/${{ matrix.junit_path }}
           # NEVER DATABASE_URL. The live gate creates and drops databases, and
