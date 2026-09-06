@@ -3035,6 +3035,45 @@ check('no block is unverdicted\'s question, and unreadable rows accuse nobody', 
   }
 })
 
+// A COMMENT CLAIMING TWO FUNCTIONS AGREE IS A TEST THAT HAS NOT BEEN WRITTEN.
+//
+// `unjudgedCriteria` and `missingVerdictSlots` both answer "which promised
+// criteria did the bee answer?" and disagree on 347 of 358 real rows, in BOTH
+// directions - while the comment above the second asserted they could not
+// disagree. That sentence is what kept the defect hidden for weeks.
+check('two identical answers agree whatever order they arrive in', async () => {
+  const AG = await import('./agree.mjs')
+  const r = AG.classify({ id: 1, a: [3, 1, 2], b: [2, 3, 1] })
+  if (r.kind !== 'agree') throw new Error(`the same set in a different order was called ${r.kind}`)
+  // A row neither side could answer is NOT agreement - counting it as one is
+  // how a gate reports health for rows it never looked at.
+  if (AG.classify({ id: 2, skip: 'no verdict block' }).kind !== 'skipped') throw new Error('an unanswerable row was counted as agreement')
+  for (const bad of [null, { id: 3 }, { id: 4, a: [1], b: 'nope' }]) {
+    if (AG.classify(bad).kind !== 'unknown') throw new Error('an unreadable row was counted against a side')
+  }
+})
+
+check('divergence is reported with its DIRECTION, never as a bare count', async () => {
+  const AG = await import('./agree.mjs')
+  const aMissed = AG.classify({ id: 5, tag: 'sendBack', a: [1, 2], b: [1, 2, 3], total: 3 })
+  const bMissed = AG.classify({ id: 6, tag: 'accept', a: [1, 2, 3], b: [], total: 3 })
+  if (aMissed.kind !== 'DIFFER' || bMissed.kind !== 'DIFFER') throw new Error('a real divergence was called agreement')
+  const d = AG.directions([aMissed, bMissed])
+  if (d.aMisses !== 1 || d.bMisses !== 1) throw new Error(`directions counted ${d.aMisses}/${d.bMisses} instead of 1/1`)
+  const both = AG.render({ name: 'p', question: 'q', a: 'A', b: 'B' }, [aMissed, bMissed])
+  if (!both.includes('BOTH directions')) throw new Error('a two-way divergence did not say so, which invites picking a winner')
+  // One-way divergence must NOT claim both directions - that is the branch that
+  // keeps the sentence meaningful when it does appear.
+  const oneWay = AG.render({ name: 'p', question: 'q', a: 'A', b: 'B' }, [aMissed])
+  if (oneWay.includes('BOTH directions')) throw new Error('a one-way divergence claimed both directions')
+})
+
+check('agreement is reported as agreement, never as proof', async () => {
+  const AG = await import('./agree.mjs')
+  const out = AG.render({ name: 'p', question: 'q', a: 'A', b: 'B' }, [AG.classify({ id: 7, a: [1], b: [1] })])
+  if (!/NOT a proof/.test(out)) throw new Error('agreement was reported without the limit that makes it honest')
+})
+
 check('an empty denominator is a dash, never a zero percent', async () => {
   const A = await import('./accept-rate.mjs')
   const s = A.split([{ number: 9999, body: '' }], () => null, () => true)
