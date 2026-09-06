@@ -4033,3 +4033,45 @@ I had proposed chasing "eight open issues whose work landed and nobody closed
 them". One query: **none of the eight carries an `accept` verdict** — four
 `sendBack`, two `escalate`, one `wait`, one `failed`. `close-done` was right to
 refuse them, and the tool I suspected was the one behaving correctly.
+
+## Every tool I suspected was behaving correctly
+
+Chasing eight "stuck" issues:
+
+- **`close-done`** refuses them — none carries an `accept` verdict (four
+  `sendBack`, two `escalate`, one `wait`, one `failed`).
+- **`stale-escalations`** holds both escalations — their stated causes still
+  hold, and one asks for a person *in its own words*.
+- **`unpark`** keeps all five send-backs — they reached the ceiling with
+  criteria actually **tested**, which is a person's decision, not a timer's.
+
+Three tools, three refusals, all correct. **When several instruments agree to do
+nothing, the gap is usually between them, not inside one of them.**
+
+## `wait` means the review parsed nothing at all
+
+176 non-terminal verdicts: 158 `sendBack`, 16 `wait`, 2 `escalate`. Every wait
+note reads *"0 of 4 criteria judged so far"* — not three of five, **zero**.
+
+Checked against the transcripts: **five of five carry no `## VERDICT` anywhere**,
+and the two longest end mid-sentence at 222,468 and 225,283 characters. The
+workers stopped before concluding.
+
+`wait` is deliberately the one valve a timer must not touch — a wait can be a
+review that has not run yet. But **a wait whose transcript exists and has no
+block will never become anything else**, and that is a different fact. Nothing
+was distinguishing them, so nothing looked.
+
+### Report the fact, not the theory
+
+Lengths run 95,066 to 225,283 — a **58% spread**, too wide for one budget cliff.
+So the tool states what is checkable (finished, transcript present, no block →
+never judgeable) and prints the spread rather than asserting a cause it has not
+measured.
+
+### Keep the branch that refutes you
+
+If a transcript **does** carry a block while the review counted zero, the fault
+is the parser and this tool's own thesis is wrong for that row. It is reported
+separately and loudly. A detector with no branch that can contradict it is an
+argument, not an instrument.
