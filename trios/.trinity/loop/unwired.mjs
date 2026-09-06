@@ -139,8 +139,30 @@ export function wiredIn(workflowText) {
  * says why nobody wired it, and a reader may still decide the gate deserves a
  * macOS job. `not-a-gate` is everything else and is not reported by default.
  */
-export function classify(name, recipe) {
-  const looksLikeGate = GATE_WORDS.some((w) => name.toLowerCase().includes(w))
+/**
+ * The gates the repository declares, rather than the ones a word list guesses.
+ *
+ * `make check` names its own suite in one line of prerequisites. That list is
+ * authoritative in a way no heuristic can be, and reading it corrected this file
+ * badly: of thirteen unwired gates it declares, ELEVEN were classified
+ * `not-a-gate` here because they are named after their SUBJECT and not their
+ * function - `t27-rings`, `type-floor`, `recipe-backticks`, `variant-fence`,
+ * `vendor-step`, `skill-frontmatter`. `t27-rings` runs the 460-case parity
+ * between the generated ring and the policy binary, and this file called it not
+ * a gate.
+ *
+ * WHEN THE SYSTEM UNDER AUDIT DECLARES THE THING YOU ARE INFERRING, READ THE
+ * DECLARATION. The word list stays as the fallback for targets outside the
+ * suite, where nothing has declared anything.
+ */
+export function declaredGates(makefile) {
+  const m = String(makefile || '').match(/^check:(.*)$/m)
+  if (!m) return new Set()
+  return new Set(m[1].split(/\s+/).filter(Boolean))
+}
+
+export function classify(name, recipe, declared = false) {
+  const looksLikeGate = declared || GATE_WORDS.some((w) => name.toLowerCase().includes(w))
   if (!looksLikeGate) return { name, kind: 'not-a-gate' }
   const body = (recipe || []).join('\n')
   const needsMac = MAC_ONLY.filter((t) => body.includes(t))
@@ -283,11 +305,14 @@ if (isMain) {
 
   const targets = targetsOf(makefile)
   const wired = wiredIn(workflows)
+  const declared = declaredGates(makefile)
   const rows = []
   for (const [name] of targets) {
     if (wired.has(name)) continue
-    rows.push(classify(name, reachedRecipes(name, targets)))
+    rows.push(classify(name, reachedRecipes(name, targets), declared.has(name)))
   }
+  const declaredUnwired = [...declared].filter((g) => !wired.has(g))
+  console.log(`\`make check\` declares ${declared.size} gate(s); ${declared.size - declaredUnwired.length} of them run in a workflow.\n`)
   console.log(render(rows, targets.size, wired.size, process.argv.includes('--all')))
 
   // MAKE WAS ONLY ONE DIALECT. The same question asked of package scripts found

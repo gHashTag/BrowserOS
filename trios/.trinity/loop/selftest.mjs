@@ -3115,6 +3115,22 @@ check('gaps longer than the tick mean rounds are starting nothing', async () => 
 // byte for byte, and appeared in no workflow. On 2026-09-06 one of the thirteen
 // had already drifted: the ring gained a string-aware literal view on 09-05 and
 // the Linux copy was last touched 08-29.
+check('the declared gate list beats the word list, because names describe subjects', async () => {
+  const U = await import('./unwired.mjs')
+  const mk = ['check: type-floor t27-rings sources-drift', '', 'type-floor:', '\tgrep -c Any src', ''].join('\n')
+  const declared = U.declaredGates(mk)
+  if (!declared.has('type-floor') || !declared.has('t27-rings')) throw new Error('the declaration was not read')
+  // The correction this made: eleven of thirteen unwired gates were classified
+  // `not-a-gate` by the word list, because they are named after what they
+  // check rather than that they check it. `t27-rings` runs the 460-case parity
+  // and carries no gate word at all.
+  if (U.classify('t27-rings', ['\tbash ring.sh'], false).kind !== 'not-a-gate') throw new Error('the word list was expected to miss it')
+  if (U.classify('t27-rings', ['\tbash ring.sh'], true).kind === 'not-a-gate') throw new Error('a declared gate was still dismissed by name')
+  // And a Makefile with no `check:` line yields no declaration rather than a
+  // wrong one - an empty set, not a guess.
+  if (U.declaredGates('build:\n\techo hi\n').size !== 0) throw new Error('a declaration was invented where none exists')
+})
+
 check('an unwired script is not a finding when something says it should not run', async () => {
   const U = await import('./unwired.mjs')
   // A flat first pass listed nineteen unwired scripts and eighteen were fine.
