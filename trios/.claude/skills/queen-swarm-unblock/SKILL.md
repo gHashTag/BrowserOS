@@ -3850,3 +3850,41 @@ bound is one second, in a process running 976 tests on two cores.
 requests were closed, one of them refuting a claim I had made in its own
 description an hour earlier. That is cheaper than a merged product change built
 on a misread number.
+
+## Five candidate causes, eliminated one at a time, and the answer was one line
+
+Four rounds on one assertion. What killed each hypothesis:
+
+| candidate | how it died |
+|---|---|
+| bun version (1.4.2 vs 1.3.x) | the repro reported `closeCount: 1` on the CI runner **itself** |
+| the platform | same repro, same result, Linux and macOS |
+| the probe's own teardown | rewriting it onto a raw socket with explicit `destroy()` changed **nothing** |
+| a leaked connection | that rewrite refuted the reading I had published an hour earlier |
+| event-loop starvation | `setTimeout(0)` took **1ms** while the close was 15s absent |
+
+The answer: `startWedgedServer` registered **no `data` handler**, so the accepted
+socket stayed **paused** and never processed the client's FIN. No `end`, no
+auto-close, no `close` event. `socket.resume()` — one line — and the suite went
+green.
+
+**A test double that does not read is not a server.** The wedged server was
+written to model "accepts and never answers" and accidentally modelled "accepts
+and never listens", which is a different thing and only differs under teardown.
+
+## The instruments were wrong about the run that proved them right
+
+`gh run view --log-failed` prints **nothing** when every job passed. Both my CI
+tools treated an empty string as unreadable, so the **first green run either had
+ever seen** was reported as *"NOTHING was compared"* — about the run that ended a
+four-round hunt.
+
+Worse in `tri flaky`: dropping green runs from the denominator inflates every
+surviving failure toward "deterministic" **exactly when it has stopped being
+one**. The fix would have looked like flake.
+
+**And the fix had the same defect one level down.** Asking the job list for a
+failure count and comparing to zero: when that command fails it returns `''`,
+and **`Number('') === 0`**, so an unreadable job list read as green again. The
+calibration case written in the same commit caught it. Match digits before you
+coerce.
