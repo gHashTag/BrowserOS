@@ -153,22 +153,6 @@ const ISSUE_PAGE_SIZE = 100
 const ISSUE_PAGE_CAP = 5
 
 /**
- * Open issues, read without a credential.
- *
- * Anonymous on purpose: the repository is public, this is a read, and a token
- * here would be a credential in a container for no gain. GitHub's anonymous
- * rate limit is 60/hour against a loop that ticks at most a few times an hour.
- *
- * PAGINATED, and it says whether it got everything. One page of 50 was the
- * whole list for as long as the repository stayed under the horizon - 44 open
- * items on 2026-08-31, of which 4 were pull requests taking slots on the same
- * page - and `rememberIssues` deletes every stored row that is not in the list
- * it is handed. So at 51 open items the oldest backlog issue would have been
- * erased from the board on every round, with nothing anywhere saying so.
- * `complete` is what stops that: a truncated list is still worth deciding
- * against, but it must never be treated as the whole truth.
- */
-/**
  * The headers for a GitHub read, carrying the token when there is one.
  *
  * ANONYMOUS IS SIXTY REQUESTS AN HOUR, and this file has said so in a comment
@@ -206,6 +190,34 @@ export function githubReadHeaders(): Record<string, string> {
   return headers
 }
 
+/**
+ * Open issues.
+ *
+ * WAS ANONYMOUS ON PURPOSE, and the reasoning is kept here because it was
+ * sound and it is instructive that it expired rather than that it was wrong:
+ * "the repository is public, this is a read, and a token here would be a
+ * credential in a container for no gain. GitHub's anonymous rate limit is
+ * 60/hour against a loop that ticks at MOST A FEW TIMES AN HOUR."
+ *
+ * The loop ticks twelve times an hour now. Measured 2026-09-06 from inside the
+ * container, the service burns 77 anonymous requests an hour against that limit
+ * of 60 - and once it is spent every call returns 403 until the hourly reset,
+ * which is why the longest observed idle stretch was 41.7 minutes. The premise
+ * expired quietly; the sentence did not.
+ *
+ * The stated cost is also already paid: `GH_TOKEN` is on this service. It is
+ * the SUPERVISOR's container, not a bee's, and the worker environment is still
+ * built from an allowlist that excludes the token.
+ *
+ * PAGINATED, and it says whether it got everything. One page of 50 was the
+ * whole list for as long as the repository stayed under the horizon - 44 open
+ * items on 2026-08-31, of which 4 were pull requests taking slots on the same
+ * page - and `rememberIssues` deletes every stored row that is not in the list
+ * it is handed. So at 51 open items the oldest backlog issue would have been
+ * erased from the board on every round, with nothing anywhere saying so.
+ * `complete` is what stops that: a truncated list is still worth deciding
+ * against, but it must never be treated as the whole truth.
+ */
 export async function openIssues(repo: string): Promise<{
   issues: Array<{ number: number; body: string; title: string }>
   complete: boolean
@@ -218,7 +230,20 @@ export async function openIssues(repo: string): Promise<{
         `?state=open&per_page=${ISSUE_PAGE_SIZE}&page=${page}`,
       { headers: githubReadHeaders() },
     )
-    if (!response.ok) throw new Error(`GitHub returned ${response.status}`)
+    if (!response.ok) {
+      // A REFUSAL ON A LATER PAGE IS A TRUNCATION, AND THIS FUNCTION ALREADY
+      // HAS A WORD FOR THAT.
+      //
+      // Throwing here took the whole round with it - no review, no choice, no
+      // dispatch - and 135 of 136 round failures measured on 2026-09-06 were
+      // exactly this, leaving the swarm with zero bees for half the day. But
+      // the contract below already covers a list that is not the whole truth:
+      // `complete` stays false and `rememberIssues` is told not to treat it as
+      // the full set. A first page that fails leaves nothing to decide against,
+      // so that one still throws.
+      if (page > 1) break
+      throw new Error(`GitHub returned ${response.status}`)
+    }
     const batch = (await response.json()) as Array<{
       number: number
       title?: string
