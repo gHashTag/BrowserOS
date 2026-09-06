@@ -2995,6 +2995,46 @@ check('attempts are archived plus the live one, and one silent pass is forgiven'
   if (looping.kind !== 'looping') throw new Error(`three attempts charging nothing was classified ${looping.kind}`)
 })
 
+// A VERDICT THAT HAS STOPPED BEING TRUE.
+//
+// 153 send-backs carried a complete VERDICT block, none had a criterion tested
+// and FAILED, and every one had been returned for criteria it had answered -
+// because the brief's own slot number ("1. ") sat in the parsed criterion and
+// not in the promise, which killed one of the two containment directions the
+// matcher documents. Nobody had asked the cheap question: does the recorded
+// verdict still reproduce?
+check('a re-judged row that still fails or omits something is NOT a finding', async () => {
+  const R = await import('./rejudge.mjs')
+  // The branch that refutes the tool. A send-back the code would give again is
+  // the good case, and calling it a disagreement would make every row a finding.
+  const still = R.disagreement({ issue: 1, recorded: 'sendBack', verdictLines: 5, failedNow: 1, unjudgedNow: 0 })
+  if (still.kind !== 'reproducible') throw new Error(`a reproducible send-back was reported as ${still.kind}`)
+  const omitted = R.disagreement({ issue: 2, recorded: 'sendBack', verdictLines: 5, failedNow: 0, unjudgedNow: 2 })
+  if (omitted.kind !== 'reproducible') throw new Error('a genuinely unanswered criterion was called a disagreement')
+})
+
+check('a send-back with everything answered and nothing unmet does not reproduce', async () => {
+  const R = await import('./rejudge.mjs')
+  const r = R.disagreement({ issue: 3, recorded: 'sendBack', verdictLines: 5, failedNow: 0, unjudgedNow: 0 })
+  if (r.kind !== 'UNREPRODUCIBLE') throw new Error(`the 153-row shape was classified ${r.kind}`)
+  // An accept that the code would now refuse is the same question asked the
+  // other way round, and it is the more dangerous direction.
+  const acc = R.disagreement({ issue: 4, recorded: 'accept', verdictLines: 4, failedNow: 2, unjudgedNow: 0 })
+  if (acc.kind !== 'UNREPRODUCIBLE') throw new Error('an accept the code would refuse was not reported')
+})
+
+check('no block is unverdicted\'s question, and unreadable rows accuse nobody', async () => {
+  const R = await import('./rejudge.mjs')
+  const none = R.disagreement({ issue: 5, recorded: 'sendBack', verdictLines: 0, failedNow: 0, unjudgedNow: 0 })
+  if (none.kind !== 'no-block') throw new Error(`a torn transcript was classified ${none.kind}`)
+  for (const bad of [null, { issue: 6 }, { issue: 7, recorded: 'sendBack', verdictLines: 'x' }]) {
+    if (R.disagreement(bad).kind !== 'unknown') throw new Error('an unreadable row was turned into an accusation')
+  }
+  if (!R.render([R.disagreement({ issue: 8, recorded: 'sendBack', verdictLines: 5, failedNow: 0, unjudgedNow: 0 })], 'sendBack').includes('DO NOT reproduce')) {
+    throw new Error('the disagreement was not reported')
+  }
+})
+
 check('an empty denominator is a dash, never a zero percent', async () => {
   const A = await import('./accept-rate.mjs')
   const s = A.split([{ number: 9999, body: '' }], () => null, () => true)
