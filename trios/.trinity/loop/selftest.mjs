@@ -2919,6 +2919,40 @@ check('the exposure probe never prints a body', () => {
 // the audit could not check - history somebody forgot to close - and only SIX
 // have no landed work at all. Six is the number worth acting on and it was
 // buried under two others, in three consecutive reports.
+// A HIGH ACCEPTANCE RATE ON AN UNGATED BRIEF MEASURES THE ABSENCE OF A TEST.
+//
+// Measured 2026-09-06 over the 382 issues carrying a review verdict: 42%
+// accepted when the brief passes the gate, 87% when it fails - and in the
+// newest era, where nearly all the volume is, FORTY OF FORTY failing briefs
+// were accepted. Not forty excellent pieces of work: forty reviews with nothing
+// to fail against.
+check('an empty denominator is a dash, never a zero percent', async () => {
+  const A = await import('./accept-rate.mjs')
+  const s = A.split([{ number: 9999, body: '' }], () => null, () => true)
+  // No verdict means the issue was never judged, so it is excluded entirely -
+  // counting it as a rejection would invent a finding out of no data.
+  if (s.pass.judged !== 0 || s.fail.judged !== 0) throw new Error('an unjudged issue was counted')
+  if (s.passRate !== null) throw new Error(`an empty cell reported ${s.passRate}% instead of absent`)
+  if (!A.render(s).includes('-')) throw new Error('the report printed a number for a cell with no data')
+})
+
+check('the split counts accepted against judged, on both sides and per era', async () => {
+  const A = await import('./accept-rate.mjs')
+  const issues = [
+    { number: 1400, body: 'good' }, { number: 1401, body: 'good' },
+    { number: 1402, body: 'bad' }, { number: 100, body: 'bad' },
+  ]
+  const verdicts = { 1400: 'accept', 1401: 'sendBack', 1402: 'accept', 100: 'accept' }
+  const s = A.split(issues, (i) => verdicts[i.number], (i) => i.body === 'good')
+  if (s.passRate !== 50) throw new Error(`pass rate ${s.passRate}, expected 50`)
+  if (s.failRate !== 100) throw new Error(`fail rate ${s.failRate}, expected 100`)
+  // The era split is what rules out "the failing briefs are simply older", so
+  // an issue must land in exactly one era and be counted there too.
+  const newest = s.byEra[s.byEra.length - 1]
+  if (newest.pass.judged !== 2 || newest.fail.judged !== 1) throw new Error('the era buckets do not add up')
+  if (s.byEra[0].fail.judged !== 1) throw new Error('the oldest era lost its issue')
+})
+
 check('a brief whose work already landed is history, not a warning', async () => {
   const G = await import('./brief-gate.mjs')
   const r = G.classifyFailing(['1', '2', '3'], {
