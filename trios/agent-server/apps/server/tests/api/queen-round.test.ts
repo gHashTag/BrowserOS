@@ -14,10 +14,7 @@ import {
   runRound,
 } from '../../src/api/services/queen-tick'
 import { logger } from '../../src/lib/logger'
-import {
-  queendPathEnvVar,
-  resolveQueendPath,
-} from '../__helpers__/queend-path'
+import { queendPathEnvVar, resolveQueendPath } from '../__helpers__/queend-path'
 
 /**
  * The round itself, driven against the real policy binary.
@@ -161,6 +158,33 @@ afterEach(() => {
 })
 
 describe('queen round, lease lost', () => {
+  /**
+   * A QUIET SKIP IS HOW A GATE REPORTS SUCCESS IT NEVER EARNED, and this file
+   * said exactly that in its own header while doing it.
+   *
+   * Every `it.if(present)` case below skipped on every CI run since they were
+   * written, because nothing in the workflow built the policy binary. The
+   * sentinel beneath this one does not catch that: it asserts the PATH STRING,
+   * which is true whether or not anything is at the end of it.
+   *
+   * A laptop without the binary is a fair place to skip - that is what the
+   * guard is for. CI is not: it is the only machine whose green anybody reads
+   * as coverage. So the absence fails THERE and nowhere else, and it names the
+   * command that fixes it rather than merely refusing.
+   */
+  it('has the policy binary wherever green is read as coverage', () => {
+    if (!process.env.CI) return
+    if (!present) {
+      throw new Error(
+        'the policy binary is missing in CI, so every behaviour test in this ' +
+          'file skipped and the job would have reported green. Build it with ' +
+          '`swift build -c release` inside trios/agent-server/queen-core, as ' +
+          'the Dockerfile and the "Build the Queen policy binary" step do.',
+      )
+    }
+    expect(present).toBe(true)
+  })
+
   it('drives the binary the container drives', () => {
     // The hook above points the round at BIN through the same variable
     // production reads; the shared resolver must name that binary back, or
