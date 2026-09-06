@@ -3931,3 +3931,35 @@ pushed. **Neither alone is enough** — and a calibration case pins both halves
 plus the negative, or the check quietly stops checking.
 
 14 findings became 3.
+
+## Check a claim against the other instrument before reporting it
+
+I reported **19 open briefs** as "the next batch of unauditable verdicts". Asked
+of `verdict-audit` instead of only the gate, five of the nineteen fail on
+nothing but a style rule — and the audit extracts a checkable promise from every
+one. **Four were already `SUPPORTED` against their pushed branch.** The gate was
+refusing briefs whose verdicts the same directory had mechanically confirmed.
+
+Two tools in one folder answering the same question is a **free second opinion**
+and I had not asked for it. When a tool produces a headline number, run the
+neighbouring tool over the same corpus before the number leaves the round.
+
+### Three disagreements, one shape
+
+- **A style rule applied as a hard failure.** "Names a command but does not ask
+  for its raw output" is right, and it should not block a brief that *also*
+  carries a promise the audit can check. It became a **note** — the teaching
+  survives, the false rejection does not.
+- **Two extractors for "what counts as a promise."** The gate had its own regex;
+  the audit has one hardened by five rounds of false accusations. The gate asks
+  the audit's now.
+- **The same rule is right about different moments.** "Identifier already
+  exists" catches a vacuous *draft* criterion. Pointed at a *filed* issue whose
+  bee has landed the work, it reports that success as a defect — the gate looks
+  at the tree now, the audit at the fork point.
+
+### A gate needs two severities
+
+With only "fail", a rule must choose between saying nothing and refusing
+everything, so every useful-but-not-fatal observation gets pushed into one of
+those. Notes are printed, not swallowed.
