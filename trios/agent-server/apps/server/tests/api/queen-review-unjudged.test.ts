@@ -65,7 +65,10 @@ const FIVE = [
 
 /** A verdict block answering the first N criteria, met or unmet as given. */
 const block = (answers: Array<{ of: string; met: boolean }>): string =>
-  ['## VERDICT', ...answers.map((a) => `- ${a.of}: ${a.met ? 'met' : 'unmet'}`)].join('\n')
+  [
+    '## VERDICT',
+    ...answers.map((a) => `- ${a.of}: ${a.met ? 'met' : 'unmet'}`),
+  ].join('\n')
 
 describe('unjudgedCriteria, the difference itself', () => {
   /**
@@ -87,7 +90,10 @@ describe('unjudgedCriteria, the difference itself', () => {
 
   it('returns nothing when the block answered every criterion', () => {
     expect(
-      unjudgedCriteria(FIVE, FIVE.map((c) => ({ criterion: c, met: true }))),
+      unjudgedCriteria(
+        FIVE,
+        FIVE.map((c) => ({ criterion: c, met: true })),
+      ),
     ).toEqual([])
   })
 
@@ -130,9 +136,10 @@ describe('unjudgedCriteria, the difference itself', () => {
    */
   it('does not let a short line judge everything that mentions it', () => {
     expect(
-      unjudgedCriteria(['The warm-up waits for the gate'], [
-        { criterion: 'warm-up', met: true },
-      ]),
+      unjudgedCriteria(
+        ['The warm-up waits for the gate'],
+        [{ criterion: 'warm-up', met: true }],
+      ),
     ).toEqual(['The warm-up waits for the gate'])
   })
 
@@ -140,6 +147,119 @@ describe('unjudgedCriteria, the difference itself', () => {
     expect(
       unjudgedCriteria(['warm-up'], [{ criterion: 'warm-up', met: true }]),
     ).toEqual([])
+  })
+
+  /**
+   * THE CASE THE SUITE ABOVE NEVER SENT, and the only shape that fails.
+   *
+   * Every criterion in the tests above is unnumbered, and production has not
+   * sent an unnumbered one since the brief began handing out numbered slots.
+   * The parsed criterion begins "1. " and the promise does not, so
+   * `want.includes(line)` can never match - the prefix is always in the line
+   * and never in the promise. Only `line.includes(want)` survives, and that
+   * demands the bee reproduce the criterion WHOLE.
+   *
+   * So a numbered line that quotes its criterion in full still matches on the
+   * broken code; it is a bee that SHORTENS one that is lost. That is why this
+   * survived a suite with a case for each direction: the numbered cases were
+   * never written, and the shortening cases were never numbered.
+   *
+   * Measured 2026-09-06 over the 153 send-backs that had spent no retry
+   * budget: every one carried a complete VERDICT block, not one had a
+   * criterion tested and FAILED, and stripping the prefix clears 148.
+   */
+  it('matches a numbered line that shortened a long criterion', () => {
+    const words = Array.from({ length: 50 }, (_, i) => `word${i}`)
+    const long = words.join(' ')
+    const quoted = `7. ${words.slice(0, 30).join(' ')}`
+    expect(long.length).toBeGreaterThan(300)
+    expect(
+      unjudgedCriteria([long], [{ criterion: quoted, met: true }]),
+    ).toEqual([])
+  })
+
+  /**
+   * The production shape, copied from #1527: the issue states the criterion
+   * and then adds a sentence constraining it; the bee answers the criterion
+   * and stops at the sentence boundary. Before the strip this reads as a
+   * criterion nobody answered, and the work is returned for it.
+   */
+  it('matches a numbered line that stopped at the sentence boundary', () => {
+    const promised = [
+      '`LC_ALL=C grep -cP "[^\\x00-\\x7F]" src/LivenessDot.tsx` prints 0, and the ' +
+        'raw output is quoted in the report. The command MUST NOT name or enumerate ' +
+        'the specific items it is counting.',
+    ]
+    const judged = [
+      {
+        criterion:
+          '1. `LC_ALL=C grep -cP "[^\\x00-\\x7F]" src/LivenessDot.tsx` prints 0, and ' +
+          'the raw output is quoted in the report',
+        met: true,
+      },
+    ]
+    expect(unjudgedCriteria(promised, judged)).toEqual([])
+  })
+
+  /**
+   * GUARDS, not bug-catchers. Each of these passes before the strip as well as
+   * after, and they are here so the strip cannot buy the cases above at their
+   * expense - a fix that also made every short line judge everything would
+   * pass the two tests above and be worse than the defect.
+   */
+  it('guard: a numbered line quoting its criterion in full still matches', () => {
+    expect(
+      unjudgedCriteria(
+        ['`make check` exits 0, and the raw output is quoted.'],
+        [
+          {
+            criterion: '1. `make check` exits 0, and the raw output is quoted.',
+            met: true,
+          },
+        ],
+      ),
+    ).toEqual([])
+  })
+
+  it('guard: the number is stripped on both sides, so one rule serves both', () => {
+    expect(
+      unjudgedCriteria(
+        ['2. the gate is red before it is green'],
+        [{ criterion: '2. the gate is red before it is green', met: true }],
+      ),
+    ).toEqual([])
+  })
+
+  it('guard: a short numbered line still does not judge a long criterion', () => {
+    expect(
+      unjudgedCriteria(
+        ['The warm-up waits for the gate'],
+        [{ criterion: '1. warm-up', met: true }],
+      ),
+    ).toEqual(['The warm-up waits for the gate'])
+  })
+
+  it('guard: a criterion that opens with a decimal keeps its meaning', () => {
+    expect(
+      unjudgedCriteria(
+        ['3.5 seconds is the ceiling for a warm start'],
+        [
+          {
+            criterion: '3.5 seconds is the ceiling for a warm start',
+            met: true,
+          },
+        ],
+      ),
+    ).toEqual([])
+  })
+
+  it('guard: a criterion nobody answered is still reported', () => {
+    expect(
+      unjudgedCriteria(
+        ['the first thing', 'the second thing entirely'],
+        [{ criterion: '1. the first thing', met: true }],
+      ),
+    ).toEqual(['the second thing entirely'])
   })
 })
 
@@ -246,9 +366,7 @@ describe('the review, against the real policy', () => {
 
       expect(reviewed.acted).toEqual([`#${ISSUE}:sendBack`])
       // FR-001: judged and unjudged recorded as separate numbers.
-      expect(reviewed.tally).toEqual([
-        { issue: ISSUE, judged: 2, unjudged: 3 },
-      ])
+      expect(reviewed.tally).toEqual([{ issue: ISSUE, judged: 2, unjudged: 3 }])
 
       const update = reviewUpdate(queries)
       expect(update?.params[1]).toBe('sendBack')
@@ -283,9 +401,7 @@ describe('the review, against the real policy', () => {
 
       const reviewed = await reviewFinishedDispatches(pool)
 
-      expect(reviewed.tally).toEqual([
-        { issue: ISSUE, judged: 5, unjudged: 0 },
-      ])
+      expect(reviewed.tally).toEqual([{ issue: ISSUE, judged: 5, unjudged: 0 }])
 
       const update = reviewUpdate(queries)
       expect(update?.params[1]).toBe('sendBack')
@@ -318,9 +434,7 @@ describe('the review, against the real policy', () => {
 
       const reviewed = await reviewFinishedDispatches(pool)
 
-      expect(reviewed.tally).toEqual([
-        { issue: ISSUE, judged: 2, unjudged: 3 },
-      ])
+      expect(reviewed.tally).toEqual([{ issue: ISSUE, judged: 2, unjudged: 3 }])
 
       const update = reviewUpdate(queries)
       expect(update?.params[1]).toBe('sendBack')
@@ -356,22 +470,17 @@ describe('the review, against the real policy', () => {
    * the policy is asked about zero verdicts and answers wait, and nothing is
    * spent. Told apart, too: judged 0 is a different fact from judged 2.
    */
-  it.if(present)(
-    'still reads a wholly absent block as a wait',
-    async () => {
-      const { pool, queries } = reviewPool([
-        finishedRow({ said: 'I finished. It all looks fine to me.' }),
-      ])
+  it.if(present)('still reads a wholly absent block as a wait', async () => {
+    const { pool, queries } = reviewPool([
+      finishedRow({ said: 'I finished. It all looks fine to me.' }),
+    ])
 
-      const reviewed = await reviewFinishedDispatches(pool)
+    const reviewed = await reviewFinishedDispatches(pool)
 
-      expect(reviewed.tally).toEqual([
-        { issue: ISSUE, judged: 0, unjudged: 5 },
-      ])
+    expect(reviewed.tally).toEqual([{ issue: ISSUE, judged: 0, unjudged: 5 }])
 
-      const update = reviewUpdate(queries)
-      expect(update?.params[1]).toBe('wait')
-      expect(update?.params[4]).toBe(false)
-    },
-  )
+    const update = reviewUpdate(queries)
+    expect(update?.params[1]).toBe('wait')
+    expect(update?.params[4]).toBe(false)
+  })
 })
