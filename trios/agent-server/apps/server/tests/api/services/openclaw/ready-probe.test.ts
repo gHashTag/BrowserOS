@@ -185,10 +185,24 @@ describe('probeGatewayReady', () => {
       expect(elapsed).toBeLessThan(1000)
       // The server must observe the connection being torn down: the aborted
       // probe may not linger as a pending request.
+      // DIAGNOSTIC, and it comes out in the PR that reads it.
+      //
+      // This assertion fails 12 runs of 12 in CI and passes everywhere else -
+      // alone and in the group, on macOS and on Linux, and the twenty-line
+      // repro of the underlying behaviour reports closeCount 1 on the CI runner
+      // ITSELF under the same bun. So neither the version nor the platform is
+      // the cause, and the remaining candidate is that a 976-test process is
+      // simply slower to deliver the close than one second. That is a number,
+      // not an opinion: wait ten times as long and print when it arrives.
+      const closeWaitStarted = Date.now()
       const socketClosed = await waitForCondition(
         () => wedged.closeCount() >= 1,
-        1000,
+        10_000,
         25,
+      )
+      console.error(
+        `  CLOSE-WITNESS: closed=${socketClosed} after ${Date.now() - closeWaitStarted}ms ` +
+          `(the shipped bound is 1000ms), closeCount=${wedged.closeCount()}, sockets=${wedged.sockets.size}`,
       )
       expect(socketClosed).toBe(true)
       expect(wedged.sockets.size).toBe(0)
