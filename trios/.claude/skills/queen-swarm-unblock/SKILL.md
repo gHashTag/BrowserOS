@@ -3888,3 +3888,46 @@ failure count and comparing to zero: when that command fails it returns `''`,
 and **`Number('') === 0`**, so an unreadable job list read as green again. The
 calibration case written in the same commit caught it. Match digits before you
 coerce.
+
+## The gate that would have caught all of them had never been pointed at one
+
+*"Unauditable"* was one bucket for weeks — 35 accepted verdicts whose briefs
+state nothing a checker can reach. Nobody had asked **which rule** each fails.
+`brief-gate.mjs` already knew; it had never been run against a filed issue,
+because it only took a file path.
+
+```
+35 brief(s): 0 pass this gate, 35 fail
+ 31  no mechanically checkable criterion
+ 15  a criterion names a command but none asks for its raw output
+  7  missing every heading
+```
+
+**Every one would have been caught before it was filed.** The repair was not a
+judge and not a new rule: it was *running the tool that already existed against
+the thing it was written for.*
+
+**Before building an instrument, check whether one is already in the directory
+and simply pointed elsewhere.** The difference between `gate(file)` and
+`gate(body)` was one refactor and it turned a seven-week open question into a
+distribution.
+
+**And the forward number is the one that matters.** 197 open issues: 178 pass,
+19 fail. The historical count is a postmortem; the 19 are the next batch. It runs
+in the heal chain now, so the number cannot grow silently.
+
+## A path exists in more than one place
+
+The first run produced **fourteen** `path has no existing parent` findings.
+Eleven were this checkout being 385 commits behind: the files are present at the
+shipping ref and absent here. **Fourth time this loop has published a
+measurement of the wrong tree**, so the rule went into the tool rather than my
+head:
+
+> known = the shipping ref has it **or** the working tree does.
+
+The ref covers a stale checkout; the tree covers a draft naming a file not yet
+pushed. **Neither alone is enough** — and a calibration case pins both halves
+plus the negative, or the check quietly stops checking.
+
+14 findings became 3.
