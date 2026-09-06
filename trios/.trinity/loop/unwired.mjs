@@ -106,7 +106,20 @@ export function reachedRecipes(name, targets, seen = new Set()) {
   const node = targets.get(name)
   if (!node) return []
   let lines = [...node.recipe]
-  for (const dep of node.needs) lines = lines.concat(reachedRecipes(dep, targets, seen))
+  // A RECIPE THAT CALLS `make` REACHES THAT TARGET TOO, and missing this was the
+  // second defect of the same family as the first. `check-bypass` is one line -
+  // `$(MAKE) check` - so following only prerequisites saw an empty recipe and
+  // called it portable, while `check` builds an app and opens a window. Its own
+  // echo says "never for CI", which is how it was caught: the tool disagreed
+  // with the target's own description of itself.
+  const submakes = new Set()
+  for (const line of node.recipe) {
+    for (const m of line.matchAll(/\$\((?:MAKE|make)\)[^\n]*?\s([a-zA-Z][a-zA-Z0-9._-]*)/g)) submakes.add(m[1])
+    for (const m of line.matchAll(/\bmake\s+(?:--\S+\s+)*([a-zA-Z][a-zA-Z0-9._-]*)/g)) submakes.add(m[1])
+  }
+  for (const dep of [...node.needs, ...submakes]) {
+    lines = lines.concat(reachedRecipes(dep, targets, seen))
+  }
   return lines
 }
 
@@ -132,11 +145,22 @@ export function classify(name, recipe) {
   const body = (recipe || []).join('\n')
   const needsMac = MAC_ONLY.filter((t) => body.includes(t))
   if (needsMac.length) return { name, kind: 'mac-only', why: `it reaches ${needsMac.slice(0, 3).join(', ')}` }
+  // A RECIPE THAT SHELLS OUT TO A SCRIPT IS OPAQUE FROM HERE, and saying so is
+  // the difference between a heuristic and a claim. `drift-guard` is a single
+  // line - `bash tests/swift/run_chat_sse_e2e.sh` with an env var set - and it
+  // called the Swift compiler inside that script for four minutes before a
+  // 240-second run gave up on it. This scan sees one layer; a script is the
+  // second, and guessing about it is how the first two misclassifications
+  // happened. Third of the same family: prerequisites, then $(MAKE), now this.
+  const scripts = [...body.matchAll(/([\w./$()-]*\.sh)\b/g)].map((m) => m[1])
+  if (scripts.length) {
+    return { name, kind: 'opaque', why: `it runs ${scripts[0].split('/').pop()}, and this cannot see inside a script` }
+  }
   return { name, kind: 'portable', why: 'nothing it reaches needs a desktop, so a runner could do this' }
 }
 
 export function render(rows, targetCount, wiredCount, showAll = false) {
-  const by = { portable: [], 'mac-only': [], 'not-a-gate': [] }
+  const by = { portable: [], 'mac-only': [], opaque: [], 'not-a-gate': [] }
   for (const r of rows) by[r.kind].push(r)
   const out = [
     `${targetCount} make target(s), ${wiredCount} invoked by a workflow`,
@@ -148,6 +172,11 @@ export function render(rows, targetCount, wiredCount, showAll = false) {
   out.push('')
   out.push(`${by['mac-only'].length} more look like gates but need a desktop:`)
   for (const r of by['mac-only']) out.push(`   ${r.name}  -  ${r.why}`)
+  if (by.opaque.length) {
+    out.push('')
+    out.push(`${by.opaque.length} cannot be judged from here - they run a script:`)
+    for (const r of by.opaque) out.push(`   ${r.name}  -  ${r.why}`)
+  }
   if (showAll && by['not-a-gate'].length) {
     out.push('')
     out.push(`${by['not-a-gate'].length} unwired target(s) whose names promise nothing:`)
