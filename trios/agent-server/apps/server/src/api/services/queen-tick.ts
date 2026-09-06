@@ -995,12 +995,38 @@ export async function runRound(
   // own policy, and only an ESCALATION reaches a person. Without this the hold
   // added to stop the six-times loop would have become a different starvation:
   // every issue she finished would be locked out of the pool for ever.
-  const reviewed = await reviewFinishedDispatches(pool)
+  // BOOKKEEPING MUST NOT BE ABLE TO IDLE THE SWARM.
+  //
+  // The same shape as the 403 above, one layer in. Review and reaping are
+  // housekeeping; dispatch is the thing the hive exists to do. An exception in
+  // either used to take the whole round with it, so a transient database error
+  // cost five minutes of every bee - and one round measured on 2026-09-06 died
+  // exactly that way, on `deadlock detected`.
+  //
+  // Neither is lost by continuing: the review re-reads every unjudged dispatch
+  // next round by construction, and the reaper re-finds a stalled one. What IS
+  // lost by throwing is the dispatch that would have happened, and that is the
+  // one thing a later round cannot give back - the idle minutes are spent.
+  //
+  // Logged at warn with the reason, never swallowed: `tri idle` reads these
+  // lines out of the service log and reports what stopped the rounds, so a
+  // review that fails EVERY round is loud rather than merely survivable.
+  const reviewed = await reviewFinishedDispatches(pool).catch((error) => {
+    logger.warn('Queen review failed; dispatching anyway', {
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return { acted: [], strays: [], tally: [] } as ReviewRound
+  })
   if (reviewed.acted.length > 0) {
     logger.info('Queen reviewed her own work', { verdicts: reviewed.acted })
   }
 
-  const reaped = await reapStalledDispatches(pool)
+  const reaped = await reapStalledDispatches(pool).catch((error) => {
+    logger.warn('Queen reap failed; dispatching anyway', {
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return [] as Awaited<ReturnType<typeof reapStalledDispatches>>
+  })
   if (reaped.length > 0) {
     logger.info('Queen tick reaped stalled dispatches', { issues: reaped })
   }
