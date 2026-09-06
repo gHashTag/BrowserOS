@@ -1797,6 +1797,7 @@ export async function reviewFinishedDispatches(
 }
 
 /** The bee's own VERDICT block, or nothing. */
+// CI control: comment only, no behaviour. Delete with this branch.
 export function parseVerdictBlock(
   text: string,
 ): Array<{ criterion: string; met: boolean }> {
@@ -1811,7 +1812,11 @@ export function parseVerdictBlock(
   // Trying each and keeping the longest parse is stable under either
   // convention, so a worker running an older brief is not punished for it.
   const starts: number[] = []
-  for (let i = text.indexOf('## VERDICT'); i >= 0; i = text.indexOf('## VERDICT', i + 1)) {
+  for (
+    let i = text.indexOf('## VERDICT');
+    i >= 0;
+    i = text.indexOf('## VERDICT', i + 1)
+  ) {
     starts.push(i)
   }
   if (!starts.length) return []
