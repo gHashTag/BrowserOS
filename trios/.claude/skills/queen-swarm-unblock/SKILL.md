@@ -3769,3 +3769,41 @@ not break them, it revealed they were never testing what they claimed.
 That is a product question, not a fixture one. **Trading three known failures
 for two new ones plus an unexplained behaviour is not a repair**, and a closed
 PR carrying the measurement is worth more than a merged one carrying a guess.
+
+## Run the same repro in every environment, including the failing one
+
+Used three times this week, and it settled three questions that argument could
+not:
+
+| question | repro | answer |
+|---|---|---|
+| is the migration broken? | apply it to a scratch DB in CI | `TABLES AFTER MIGRATION: 11` — no |
+| can this platform hide a window? | the browser's own refusal | no, and it says so |
+| does an aborted fetch leak a socket? | wedged server, one abort, count closes | no, in all three environments |
+
+The last one is the sharpest, because the obvious story was wrong. CI runs bun
+**1.4.2**, the laptop 1.3.12, the container 1.3.6 — a version gap that explains
+anything you like. Running the same twenty lines in each gave
+`closeCount: 1, stillOpen: 0` **every time, including on the CI runner itself.**
+So neither the version nor the platform is the cause, and a night would have
+gone into a bun upgrade that fixed nothing.
+
+**Put the repro where the failure is.** A repro that only runs where things work
+proves the least interesting half. The environments that matter are the failing
+one first, then the working ones to bound it.
+
+**And a diagnostic in a shared file comes out in the PR that reads it.** All
+three of these were added and removed in the same pull request. A probe that
+outlives its question becomes furniture, and the next person cannot tell whether
+it is load-bearing.
+
+## What is left when platform and version are eliminated
+
+The probe test passes when its file runs alone and fails in the group — which is
+the shape of the `mock.module('pg')` leak: one file's module scope changing
+another file's behaviour. That is now the third time a suite-level interaction
+has produced a failure that looked like a product bug.
+
+**When a test passes alone and fails in its group, stop reading the test.** The
+question is what the group does to it, and the method is a bisect of the file
+list — six runs for fifty-seven files, and it names the culprit exactly.
