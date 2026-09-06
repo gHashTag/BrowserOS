@@ -190,6 +190,11 @@ const STEPS = [
   // Origin with the escalations and their worker-written reasons. A guard added
   // in source is not a guard in production until a deploy happens, and a guard
   // removed is a hole immediately - only a live probe knows which is true now.
+  // THE BACKLOG'S BRIEFS, EVERY ROUND. All 35 accepted verdicts whose briefs
+  // state nothing a checker can reach fail this gate - every one would have
+  // been caught before it was filed. 19 of 197 open issues fail it today, and
+  // those 19 are the next batch of unauditable verdicts unless somebody looks.
+  { name: 'brief-gate', file: 'brief-gate.mjs', reportsOnly: true, act: '--open', dryArgs: '--open', why: 'which open briefs will produce a verdict nothing can check' },
   { name: 'exposure', file: 'exposure.mjs', reportsOnly: true, act: '', dryArgs: '', why: 'what the live service serves to an origin it has never heard of' },
   { name: 'forked-files', file: 'forked-files.mjs', reportsOnly: true, act: '', dryArgs: '', why: 'a file that exists twice must not start saying two things' },
   { name: 't27-parity', file: 't27-parity.mjs', reportsOnly: true, act: '', dryArgs: '', why: 'the generated ring and the twin in production still answer the same' },

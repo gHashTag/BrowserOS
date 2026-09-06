@@ -74,8 +74,54 @@ const UNRUNNABLE = [
 
 const HEADINGS = ['## User Scenarios & Testing', '## Requirements', '## Success Criteria', '## Boundary']
 
+
+/**
+ * Does this path exist anywhere it could legitimately exist?
+ *
+ * THE WORKING TREE IS NOT THE ONLY ANSWER, and reading only it produced
+ * FOURTEEN false accusations the first time this gate was pointed at filed
+ * issues. `rings/SR-00/QueenInterfaceDivergence.swift` is absent from this
+ * checkout and present at the shipping ref: the checkout is 385 commits behind,
+ * so "the file does not exist" was a statement about this laptop.
+ *
+ * That is the fourth time this loop has published a measurement of the wrong
+ * tree, so the rule goes in the tool rather than in my head: a path counts as
+ * known if the SHIPPING REF has it, or the working tree does. The ref covers a
+ * stale checkout; the tree covers a draft that names a file the author has just
+ * created and not yet pushed. Neither alone is enough.
+ */
+const SHIP_REF = process.env.TRIOS_SHIP_REF || 'origin/feat/queen-supervisor'
+
+export function pathIsKnown(p, deps = {}) {
+  const onDisk = deps.onDisk || ((q) => fs.existsSync(atRoot(q)) || fs.existsSync(path.dirname(atRoot(q))))
+  const inRef = deps.inRef || ((q) => {
+    for (const candidate of [`trios/${q}`, q]) {
+      try {
+        execSync(`git cat-file -e ${SHIP_REF}:${JSON.stringify(candidate)}`, { cwd: ROOT, stdio: 'ignore' })
+        return true
+      } catch { /* try the next shape */ }
+    }
+    return false
+  })
+  return inRef(p) || onDisk(p)
+}
+
 export function gate(file) {
-  const body = fs.readFileSync(file, 'utf8')
+  return gateBody(fs.readFileSync(file, 'utf8'), file)
+}
+
+/**
+ * The same rules, against a body that is already in hand.
+ *
+ * SPLIT OUT SO FILED ISSUES CAN BE MEASURED, not only drafts. This gate was
+ * written to judge a draft before it is filed, and it has never once been
+ * pointed at the 39 accepted verdicts whose briefs state nothing a checker can
+ * reach. "Unauditable" has been a single bucket for weeks; the gate already
+ * knows how to say WHICH rule each one fails, and the answer decides whether
+ * the repair is a judge, a template, or the gate itself.
+ */
+export function gateBody(body, label = '(body)') {
+  const file = label
   const problems = []
 
   for (const h of HEADINGS) {
@@ -94,7 +140,7 @@ export function gate(file) {
   for (const p of boundary) {
     const bad = FORBIDDEN.find(([re]) => re.test(p))
     if (bad) { problems.push(`forbidden path ${p} - ${bad[1]}`); continue }
-    if (!fs.existsSync(atRoot(p)) && !fs.existsSync(path.dirname(atRoot(p)))) {
+    if (!pathIsKnown(p)) {
       problems.push(`path has no existing parent: ${p}`)
     }
   }
@@ -298,7 +344,75 @@ export function gate(file) {
 // `fp-check.mjs 4`, imported this and the gate tried to open a file named "4".
 // The same class as the module that ran a production query on import - a file
 // that does work merely by being imported cannot be reused.
-const files = isMain ? process.argv.slice(2) : []
+const argv = isMain ? process.argv.slice(2) : []
+
+// --issues: point the gate at FILED issues instead of drafts.
+//
+// "Unauditable" has been one bucket for weeks - 39 accepted verdicts whose
+// briefs state nothing a checker can reach - and nobody had asked WHICH rule
+// each of them fails. This gate already knows, and the distribution decides the
+// repair: a judge if the criteria are real but prose, a template if the section
+// is missing, this gate itself if it is stricter than the server.
+if (argv[0] === '--issues' || argv[0] === '--open') {
+  const repo = process.env.TRIOS_ISSUE_REPO || 'gHashTag/trios'
+  let bodies = null
+  let numbers = argv.slice(1).filter((a) => /^\d+$/.test(a))
+  if (argv[0] === '--open') {
+    // ONE CALL, NOT ONE PER ISSUE. The backlog is ~200 issues and a `gh issue
+    // view` each is minutes; the list endpoint returns every body at once.
+    let listed = null
+    try {
+      listed = JSON.parse(execSync(`gh issue list --repo ${repo} --state open --limit 500 --json number,body`,
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024 }))
+    } catch { listed = null }
+    if (!listed || !listed.length) {
+      // An empty list is not a clean backlog. This is the same distinction the
+      // rest of this directory keeps having to relearn.
+      console.log('the open issue list could not be read - NOTHING was gated, which is not the same as nothing failing')
+      process.exit(3)
+    }
+    bodies = new Map(listed.map((r) => [String(r.number), r.body || '']))
+    numbers = [...bodies.keys()]
+  }
+  if (!numbers.length) {
+    console.log('usage: brief-gate.mjs --issues <N> [N ...] | --open')
+    process.exit(1)
+  }
+  const tally = new Map()
+  let clean = 0
+  let unread = 0
+  for (const n of numbers) {
+    let body = bodies ? (bodies.get(String(n)) ?? null) : null
+    if (body === null && !bodies) {
+      try {
+        body = execSync(`gh issue view ${n} --repo ${repo} --json body -q .body`,
+          { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+      } catch { body = null }
+    }
+    // A body that could not be read is NOT a clean brief. It is counted apart,
+    // because the one answer this must never give is health for work it never
+    // looked at.
+    if (body === null) { unread++; console.log(`?? #${n}  body unreadable - NOT gated`); continue }
+    const r = gateBody(body, `#${n}`)
+    if (!r.problems.length) { clean++; if (!bodies) console.log(`ok #${n}`); continue }
+    console.log(`!! #${n}  ${r.problems.length} problem(s)`)
+    for (const p of r.problems) {
+      // Tallied by RULE, not by issue: the question is which rule the corpus
+      // fails, and a per-issue list answers a different one.
+      const key = p.replace(/[:\-] .*$/, '').replace(/\b#?\d+\b/g, 'N').trim()
+      tally.set(key, (tally.get(key) || 0) + 1)
+      if (!bodies) console.log(`      ${p.slice(0, 110)}`)
+    }
+  }
+  console.log(`\n${numbers.length} brief(s): ${clean} pass this gate, ${numbers.length - clean - unread} fail, ${unread} unreadable`)
+  console.log('\nby rule, most common first:')
+  for (const [rule, n] of [...tally.entries()].sort((a, b) => b[1] - a[1])) {
+    console.log(`  ${String(n).padStart(3)}  ${rule}`)
+  }
+  process.exit(0)
+}
+
+const files = argv
 if (files.length) {
   let bad = 0
   for (const f of files) {

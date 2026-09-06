@@ -2878,6 +2878,36 @@ check('the exposure probe never prints a body', () => {
 // parser, a judge packet and a config file, committed here by the instruments
 // written to catch it. The run's own job list settles it: completed with no
 // failed job is an EMPTY failure set, which is a fact.
+// THE WORKING TREE IS NOT THE ONLY PLACE A PATH CAN EXIST.
+//
+// Pointed at filed issues for the first time, the brief gate produced FOURTEEN
+// "path has no existing parent" findings. Eleven were this checkout being 385
+// commits behind: the files are present at the shipping ref and absent here.
+// Fourth time this loop has published a measurement of the wrong tree, so the
+// rule lives in the tool now rather than in my head.
+check('a path counts as known if the shipping ref has it, or the tree does', async () => {
+  const G = await import('./brief-gate.mjs')
+  const inRefOnly = G.pathIsKnown('x', { inRef: () => true, onDisk: () => false })
+  if (!inRefOnly) throw new Error('a file present at the shipping ref was called missing - the stale-checkout defect')
+  const onDiskOnly = G.pathIsKnown('x', { inRef: () => false, onDisk: () => true })
+  if (!onDiskOnly) throw new Error('a file a draft has just created was called missing')
+  // AND THE NEGATIVE, which is the half that keeps the rule a rule.
+  if (G.pathIsKnown('x', { inRef: () => false, onDisk: () => false })) {
+    throw new Error('a path in neither place was accepted - the check stopped checking')
+  }
+})
+
+check('the gate can judge a body it was handed, not only a file it opens', async () => {
+  const G = await import('./brief-gate.mjs')
+  // Splitting gateBody out is what let the gate be pointed at 35 filed issues
+  // that had never been measured. A brief with no criteria must still fail.
+  const bare = G.gateBody('## Boundary\n\n`trios/main.swift`\n', '#1')
+  if (!bare.problems.some((p) => p.includes('Success Criteria'))) {
+    throw new Error('a brief with no Success Criteria passed')
+  }
+  if (!bare.file.includes('#1')) throw new Error('the label is not carried into the result')
+})
+
 check('a run with no failures is compared, not called unreadable', async () => {
   const C = await import('./ci-diff.mjs')
   const green = C.runLog('123', (cmd) => (cmd.includes('--log-failed') ? '' : '0'))
