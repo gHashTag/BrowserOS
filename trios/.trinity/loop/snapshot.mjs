@@ -74,6 +74,7 @@ const skipMetric = (key, label, v) =>
 // nothing has been. An absent reading is absent, never zero.
 const recorded = D.lastReading()
 const looping = recorded && recorded.looping ? recorded.looping.looping : null
+const divergent = recorded && recorded.divergent ? recorded.divergent.rows : null
 
 const swarm = j.error
   ? [{ k: 'QUEEN UNREACHABLE', v: j.error.slice(0, 20), prev: null, goodDown: true }]
@@ -90,6 +91,11 @@ const swarm = j.error
       looping === null
         ? { k: 'send-backs looping with no ceiling', v: 'not measured', prev: null, goodDown: true }
         : metric('looping.noCeiling', 'send-backs looping with no ceiling', looping),
+      // Two implementations of one rule, disagreeing. Standing debt: it does
+      // not fall when one side is fixed, only when one of them stops existing.
+      divergent === null
+        ? { k: 'rows where one rule answers two ways', v: 'not measured', prev: null, goodDown: true }
+        : metric('agree.divergent', 'rows where one rule answers two ways', divergent),
     ]
 
 // argv only when this file IS the program. See loop.mjs: an importer's own

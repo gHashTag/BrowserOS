@@ -94,6 +94,21 @@ export function loopingCounts(run = sh) {
   return m ? { examined: Number(m[1]), looping: Number(m[2]) } : null
 }
 
+/**
+ * Rows where two implementations of one rule give different answers.
+ *
+ * Standing debt, not a transient: this does NOT fall to zero when a defect is
+ * fixed on one side. `unjudgedCriteria` and `missingVerdictSlots` will keep
+ * disagreeing on the 156 unnumbered blocks until one of them is deleted or
+ * wired properly, and that is exactly what the row is for - a duplicated rule
+ * is a liability for as long as it exists, not only on the day it bites.
+ */
+export function divergentRows(run = sh) {
+  const out = run(`node ${path.join(DIR, 'agree.mjs')}`, 300000)
+  const m = out.match(/(\d+) pair\(s\) compared, (\d+) diverging row\(s\)/)
+  return m ? { pairs: Number(m[1]), rows: Number(m[2]) } : null
+}
+
 /** The worst-failing chain step, and its rate. */
 export function worstStep(run = sh) {
   // A WINDOW, NOT A LIFETIME. The whole record contains two resolved outages -
@@ -252,6 +267,7 @@ export function facts(deps = {}) {
   return {
     swarm: measure(() => swarmCounts(run)),
     looping: measure(() => loopingCounts(run)),
+    divergent: measure(() => divergentRows(run)),
     worstStep: measure(() => worstStep(run)),
     proven: measure(() => (read ? provenCounts(read) : provenCounts())),
     selftest: measure(() => (read ? selftestCases(read) : selftestCases())),
@@ -313,6 +329,7 @@ export function rows(f, prev) {
     { k: 'judged verdicts that prove', v: f.proven?.proven ?? null, prev: p.proven?.proven ?? null, goodDown: false },
     { k: 'briefs with nothing checkable', v: f.proven?.unjudgeable ?? null, prev: p.proven?.unjudgeable ?? null },
     { k: 'send-backs looping with no ceiling', v: f.looping?.looping ?? null, prev: p.looping?.looping ?? null },
+    { k: 'rows where one rule answers two ways', v: f.divergent?.rows ?? null, prev: p.divergent?.rows ?? null },
     { k: `worst step, last 8 runs: ${f.worstStep?.step ?? '-'}, percent`, v: f.worstStep?.rate ?? null, prev: p.worstStep?.rate ?? null },
     { k: 'selftest cases', v: f.selftest ?? null, prev: p.selftest ?? null, goodDown: false },
     { k: 'ring T27-00 cases agreeing with the twin', v: f.parity?.agree ?? null, prev: p.parity?.agree ?? null, goodDown: false },
