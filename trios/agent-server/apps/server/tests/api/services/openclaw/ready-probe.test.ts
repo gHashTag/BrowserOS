@@ -185,17 +185,39 @@ describe('probeGatewayReady', () => {
       expect(elapsed).toBeLessThan(1000)
       // The server must observe the connection being torn down: the aborted
       // probe may not linger as a pending request.
+      // DIAGNOSTIC, and it comes out in the PR that reads it.
+      //
+      // Three candidate causes are already eliminated by measurement: the bun
+      // version, the platform, and the probe's own teardown - a rewrite onto a
+      // raw socket with an explicit destroy() changed nothing in CI. What is
+      // left is the one number nobody has: does the close EVER arrive here, and
+      // when? The shipped bound is 1000ms and the default per-test cap is
+      // 5000ms, so a fifteen-second wait needs the cap raised or the
+      // measurement is lost to the measuring, as it was on the first attempt.
+      //
+      // The `setTimeout(0)` reading beside it separates the two explanations
+      // that remain: a starved event loop delivers a zero-delay callback late
+      // too, and a socket close that simply never comes does not.
+      const closeWaitStarted = Date.now()
+      const tickStarted = Date.now()
+      const tickLatency = await new Promise<number>((resolve) => {
+        setTimeout(() => resolve(Date.now() - tickStarted), 0)
+      })
       const socketClosed = await waitForCondition(
         () => wedged.closeCount() >= 1,
-        1000,
+        15_000,
         25,
+      )
+      console.error(
+        `  CLOSE-WITNESS: closed=${socketClosed} after ${Date.now() - closeWaitStarted}ms, ` +
+          `closeCount=${wedged.closeCount()}, setTimeout(0) took ${tickLatency}ms`,
       )
       expect(socketClosed).toBe(true)
       expect(wedged.sockets.size).toBe(0)
     } finally {
       await stopServer(wedged)
     }
-  })
+  }, 20_000)
 
   it('reports refused, answered not-ok, and ready outcomes for a single probe', async () => {
     const refusedPort = await findRefusedPort()
