@@ -67,6 +67,14 @@ const skipMetric = (key, label, v) =>
     ? metric(key, label, v)
     : { k: label, v: 'not measured', prev: null, goodDown: true }
 
+// READ THE RECORD, DO NOT RECOMPUTE IT - the rule `provenCounts` already
+// follows. `silent-loop` asks the production database and takes about a minute;
+// this file runs on the tick path and must not grow a remote query. `dash.mjs
+// --record` measures it, and the box shows what was last measured, or `-` if
+// nothing has been. An absent reading is absent, never zero.
+const recorded = D.lastReading()
+const looping = recorded && recorded.looping ? recorded.looping.looping : null
+
 const swarm = j.error
   ? [{ k: 'QUEEN UNREACHABLE', v: j.error.slice(0, 20), prev: null, goodDown: true }]
   : [
@@ -76,6 +84,12 @@ const swarm = j.error
       skipMetric('skip.fileConflict', '  fenced by parked paths', s.fileConflict ?? 0),
       skipMetric('skip.claimed', '  claimed by parked dispatch', s.claimed ?? 0),
       skipMetric('skip.completed', '  done but never closed', s.completed ?? 0),
+      // An attempt is charged against the retry ceiling only when a criterion
+      // was tested and FAILED, so a bee that goes silent is deliberately not
+      // charged. A bee silent EVERY time therefore loops with no ceiling at all.
+      looping === null
+        ? { k: 'send-backs looping with no ceiling', v: 'not measured', prev: null, goodDown: true }
+        : metric('looping.noCeiling', 'send-backs looping with no ceiling', looping),
     ]
 
 // argv only when this file IS the program. See loop.mjs: an importer's own
