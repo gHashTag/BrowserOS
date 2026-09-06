@@ -2912,6 +2912,36 @@ check('the exposure probe never prints a body', () => {
 // commits behind: the files are present at the shipping ref and absent here.
 // Fourth time this loop has published a measurement of the wrong tree, so the
 // rule lives in the tool now rather than in my head.
+// A FAILING BRIEF IS ONE OF THREE THINGS, AND A COUNT HID THAT FOR THREE ROUNDS.
+//
+// I reported "19 open briefs will produce the next unauditable verdicts", then
+// "14". Measured over those 14: EIGHT already have a pushed branch and a verdict
+// the audit could not check - history somebody forgot to close - and only SIX
+// have no landed work at all. Six is the number worth acting on and it was
+// buried under two others, in three consecutive reports.
+check('a brief whose work already landed is history, not a warning', async () => {
+  const G = await import('./brief-gate.mjs')
+  const r = G.classifyFailing(['1', '2', '3'], {
+    hasBranch: (n) => n !== '3',
+    verdictOf: (n) => (n === '1' ? '#1 NO MECHANICAL CLAIM files=1' : '#2 SUPPORTED files=2'),
+  })
+  if (r.history.join() !== '1') throw new Error(`history was ${JSON.stringify(r.history)}`)
+  // A branch with a checkable verdict is not a warning either - it is done and
+  // provable, and lumping it with the forward set would inflate the only number
+  // anybody should act on.
+  if (r.ahead.join() !== '2,3') throw new Error(`ahead was ${JSON.stringify(r.ahead)}`)
+})
+
+check('a brief whose audit could not be run belongs to neither bucket', async () => {
+  const G = await import('./brief-gate.mjs')
+  const r = G.classifyFailing(['9'], { hasBranch: () => true, verdictOf: () => null })
+  if (r.unknown.join() !== '9') throw new Error('an unauditable brief was silently bucketed')
+  if (r.ahead.length || r.history.length) throw new Error('it was counted twice, or counted at all')
+  // An empty string is the same absence and must not read as a verdict.
+  const empty = G.classifyFailing(['9'], { hasBranch: () => true, verdictOf: () => '' })
+  if (empty.unknown.join() !== '9') throw new Error('an empty audit line was read as a verdict')
+})
+
 check('a path counts as known if the shipping ref has it, or the tree does', async () => {
   const G = await import('./brief-gate.mjs')
   const inRefOnly = G.pathIsKnown('x', { inRef: () => true, onDisk: () => false })
