@@ -76,6 +76,35 @@ jobs:
       - name: The test-run parser reads a known transcript correctly
         working-directory: trios
         run: make run-completeness-selftest
+      # THREE MORE, FOUND BY READING THE REPOSITORY'S OWN DECLARATION.
+      #
+      # `make check` names its gate suite in one line of prerequisites: 24 of
+      # them, of which CI ran 8. A word-list audit had missed these three
+      # entirely, because they are named after their SUBJECT rather than their
+      # function - nothing in `type-floor` or `vendor-step` says "gate". When
+      # the system under audit declares the thing you are inferring, read the
+      # declaration.
+      - name: The type floor
+        working-directory: trios
+        run: make type-floor
+      - name: No backticks in a recipe
+        working-directory: trios
+        run: make recipe-backticks
+      - name: Every skill has its frontmatter
+        working-directory: trios
+        run: make skill-frontmatter
+      #
+      # NOT t27-rings, and the reason is worth writing down. It is the best gate
+      # in the suite - it generates Verilog from `rings/T27-00/queen_core.t27`,
+      # compiles it with iverilog, simulates under vvp and checks the answers
+      # against the Swift table, on top of the 460-case Rust parity. It passes.
+      #
+      # It cannot be wired here. `t27c` is built from `$(T27_ROOT)/bootstrap`,
+      # which lives in a SEPARATE repository this checkout does not contain, and
+      # the target is written to SKIP rather than fail when the toolchain is
+      # absent. Wiring it would produce a green job that runs nothing - which is
+      # precisely the defect the rest of this file was added to end. Vendoring
+      # or fetching t27c is a real change and belongs in its own.
 
   server-units:
     runs-on: ubuntu-latest
