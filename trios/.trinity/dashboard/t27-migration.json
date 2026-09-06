@@ -1,0 +1,224 @@
+{
+ "generatedAt": null,
+ "commit": "87f4fd324",
+ "law": "Everything below the interface is written in .t27 and generated to its target. The seed t27/bootstrap is the exception.",
+ "rings": [
+  {
+   "id": "T27-00",
+   "what": "decision core: retry, review, merge gate, capacity",
+   "specFiles": 1,
+   "specLines": 209,
+   "handWrittenIn": "agent-server/queen-core/Sources/QueenPolicy/*.swift",
+   "handFiles": 4,
+   "handLines": 1805,
+   "generated": 0,
+   "state": "spec written, nothing generated, Swift answers",
+   "gate": "trios/tools/ring00-swift-parity.mjs (gHashTag/trios#1337)",
+   "depends": []
+  },
+  {
+   "id": "T27-01",
+   "what": "A2A protocol: message kinds, task states, agent liveness",
+   "specFiles": 1,
+   "specLines": 223,
+   "handWrittenIn": "agent-server/apps/server/src/api/routes/a2a.ts",
+   "handFiles": 1,
+   "handLines": 0,
+   "generated": 0,
+   "state": "spec and code share no vocabulary: 0 of 22 spec constants appear in the source",
+   "gate": "trios/docs/ring01-correspondence.md (gHashTag/trios#1342)",
+   "depends": [
+    "T27-00"
+   ]
+  },
+  {
+   "id": "T27-02",
+   "what": "orchestration: the Queen's tick, delegation, review sweep",
+   "specFiles": 0,
+   "specLines": 0,
+   "handWrittenIn": "agent-server/apps/server/src/api/services/queen-tick.ts",
+   "handFiles": 1,
+   "handLines": 1737,
+   "generated": 0,
+   "state": "no spec yet; 28 module-level functions await purity classification",
+   "gate": "trios/docs/t27-02-tick-survey.md (gHashTag/trios#1341)",
+   "depends": [
+    "T27-00",
+    "T27-01"
+   ]
+  },
+  {
+   "id": "T27-03",
+   "what": "transport: SSE, per-agent buffer, event ids",
+   "specFiles": 0,
+   "specLines": 0,
+   "handWrittenIn": "rings/SR-01/SSETransport.swift",
+   "handFiles": 1,
+   "handLines": 0,
+   "generated": 0,
+   "state": "not started; blocked behind T27-01",
+   "gate": "none yet",
+   "depends": [
+    "T27-01"
+   ]
+  },
+  {
+   "id": "T27-04",
+   "what": "scoring: salience, reliability, latency",
+   "specFiles": 0,
+   "specLines": 0,
+   "handWrittenIn": "agent-server/queen-core/Sources/QueenPolicy/QueenSalience.swift",
+   "handFiles": 1,
+   "handLines": 0,
+   "generated": 0,
+   "state": "not started; blocked behind T27-00",
+   "gate": "none yet",
+   "depends": [
+    "T27-00"
+   ]
+  }
+ ],
+ "blockers": [
+  {
+   "id": "t27c-switch-arms",
+   "what": "switch as a function body emits an empty match; the arms are dropped",
+   "where": "gHashTag/t27 seed",
+   "status": "open"
+  },
+  {
+   "id": "t27c-mut-emit",
+   "what": "collect_mutable_names computes the mutable set and the emitter does not use it",
+   "where": "gHashTag/t27 seed",
+   "status": "open"
+  },
+  {
+   "id": "t27c-enum-paths",
+   "what": "Enum.variant and the .variant shorthand",
+   "where": "gHashTag/t27 seed",
+   "status": "closed upstream in gHashTag/t27#2247"
+  },
+  {
+   "id": "no-compiler-in-image",
+   "what": "the worker image has no rustc, swift, make, python3 or t27c: sh, bash, node, bun, git only",
+   "where": "agent-server/Dockerfile",
+   "status": "by design - generation is the operator's step"
+  }
+ ],
+ "series": [
+  {
+   "day": "08-09",
+   "commit": "b5a960a08",
+   "spec_lines": 0,
+   "hand_lines": 0
+  },
+  {
+   "day": "08-10",
+   "commit": "2721de6f7",
+   "spec_lines": 0,
+   "hand_lines": 0
+  },
+  {
+   "day": "08-11",
+   "commit": "81c3eea1b",
+   "spec_lines": 0,
+   "hand_lines": 0
+  },
+  {
+   "day": "08-12",
+   "commit": "d3e2efbac",
+   "spec_lines": 0,
+   "hand_lines": 0
+  },
+  {
+   "day": "08-17",
+   "commit": "dbb41249e",
+   "spec_lines": 0,
+   "hand_lines": 0
+  },
+  {
+   "day": "08-18",
+   "commit": "8fff0d566",
+   "spec_lines": 0,
+   "hand_lines": 0
+  },
+  {
+   "day": "08-19",
+   "commit": "467f8098c",
+   "spec_lines": 210,
+   "hand_lines": 0
+  },
+  {
+   "day": "08-20",
+   "commit": "392b0ff18",
+   "spec_lines": 434,
+   "hand_lines": 0
+  },
+  {
+   "day": "08-21",
+   "commit": "713d060fa",
+   "spec_lines": 434,
+   "hand_lines": 0
+  },
+  {
+   "day": "08-22",
+   "commit": "89eb3d297",
+   "spec_lines": 434,
+   "hand_lines": 0
+  },
+  {
+   "day": "08-23",
+   "commit": "a249f1a10",
+   "spec_lines": 434,
+   "hand_lines": 0
+  },
+  {
+   "day": "08-24",
+   "commit": "4563ac7c1",
+   "spec_lines": 434,
+   "hand_lines": 0
+  },
+  {
+   "day": "08-26",
+   "commit": "4482d9aa5",
+   "spec_lines": 434,
+   "hand_lines": 0
+  },
+  {
+   "day": "08-27",
+   "commit": "c32b77a6d",
+   "spec_lines": 434,
+   "hand_lines": 0
+  },
+  {
+   "day": "08-28",
+   "commit": "0c529ca7d",
+   "spec_lines": 434,
+   "hand_lines": 0
+  },
+  {
+   "day": "08-29",
+   "commit": "d26a4abfc",
+   "spec_lines": 434,
+   "hand_lines": 2144
+  },
+  {
+   "day": "08-31",
+   "commit": "b7008d7da",
+   "spec_lines": 434,
+   "hand_lines": 3346
+  },
+  {
+   "day": "09-01",
+   "commit": "01e16a13b",
+   "spec_lines": 434,
+   "hand_lines": 3528
+  },
+  {
+   "day": "09-03",
+   "commit": "87f4fd324",
+   "spec_lines": 434,
+   "hand_lines": 3547
+  }
+ ],
+ "seriesNote": "spec_lines counts rings/T27-00 and T27-01; hand_lines counts the Swift policy under queen-core/Sources/QueenPolicy and queen-tick.ts, which are the two hand-written statements of the laws those specs describe. Both are read by walking the tree at each day's last commit."
+}
