@@ -471,9 +471,36 @@ const cmdBrief = (tail) => GOOD.replace(
   `- Running \`node trios/tools/x.mjs\` reports 3 findings${tail}\n- The tool exports a function named \`${ABSENT_ID}\`; that identifier appears nowhere in the tree today.`,
 )
 
-check('a command criterion with no output demand is flagged', () => {
-  const r = G.gate(draft('nostdout.md', cmdBrief('.')))
+// A BRIEF THAT IS PROVABLY AUDITABLE IS NOT REJECTED FOR STYLE.
+//
+// This pinned the raw-output rule as a hard failure whatever else the brief
+// carried. Measured 2026-09-06: five open issues failed the gate on nothing but
+// this rule, and `verdict-audit` extracts a promised identifier from every one
+// of them - four were already proved SUPPORTED against their pushed branch. The
+// gate was rejecting briefs whose verdicts the same directory had confirmed.
+//
+// So the rule keeps its teeth where they bite and becomes a NOTE where they do
+// not, and both halves are pinned: no other checkable claim means a failure,
+// another claim means a note that still says the thing.
+check('a command criterion with no output demand fails when nothing else is checkable', () => {
+  // The fixture's promised identifier removed, so this brief has only the
+  // command criterion - which is exactly when the rule must refuse.
+  const onlyCommand = cmdBrief('.').replace(
+    `- The tool exports a function named \`${ABSENT_ID}\`; that identifier appears nowhere in the tree today.`,
+    '',
+  )
+  const r = G.gate(draft('nostdout.md', onlyCommand))
   if (!r.problems.some((p) => /raw output|raw stdout/.test(p))) throw new Error('accepted a count the worker could reason out')
+})
+
+check('the same criterion is a NOTE when the brief also promises an identifier', () => {
+  const r = G.gate(draft('nostdout-but-promised.md', cmdBrief('.')))
+  if (r.problems.some((p) => /raw output|raw stdout/.test(p))) {
+    throw new Error('a brief the audit can check was rejected for style - the false rejection this replaced')
+  }
+  if (!(r.notes || []).some((n) => /raw output/.test(n))) {
+    throw new Error('the finding disappeared instead of becoming a note - the teaching was lost')
+  }
 })
 
 check('the same criterion demanding raw stdout passes', () => {
