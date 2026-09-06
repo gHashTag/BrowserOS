@@ -5,8 +5,8 @@ import {
   containerQueendPath,
   DOCKERFILE_PATH as DOCKERFILE,
   productionQueendFallback,
-  QUEEN_TICK_PATH as TICK,
   resolveQueendPath,
+  QUEEN_TICK_PATH as TICK,
 } from '../__helpers__/queend-path'
 
 /**
@@ -122,7 +122,7 @@ describe('queend chooses the next bee', () => {
     const answer = ask(board([1176], [task(1176, 'running')]))
     // Swift omits a nil rather than encoding null, so the key is absent.
     expect(answer.chosen ?? null).toBeNull()
-    expect(String(answer.skipped)).toContain('a worker has it')
+    expect(String(answer.skipped)).toContain('a worker already has it')
   })
 
   // rejected means the Queen sent it back and the same bee is expected to
@@ -131,7 +131,9 @@ describe('queend chooses the next bee', () => {
     const answer = ask(board([1175], [task(1175, 'rejected')]))
     // Swift omits a nil rather than encoding null, so the key is absent.
     expect(answer.chosen ?? null).toBeNull()
-    expect(String(answer.skipped)).toContain('expected back')
+    expect(String(answer.skipped)).toContain(
+      'claimed, but no worker is attached yet',
+    )
   })
 
   // A retry running over a past failure is claimed by the retry, whichever
@@ -142,7 +144,7 @@ describe('queend chooses the next bee', () => {
     )
     // Swift omits a nil rather than encoding null, so the key is absent.
     expect(answer.chosen ?? null).toBeNull()
-    expect(String(answer.skipped)).toContain('a worker has it')
+    expect(String(answer.skipped)).toContain('a worker already has it')
   })
 
   /**
@@ -230,7 +232,11 @@ describe('queend refuses to start a bee once the day is spent', () => {
       TRIOS_SWARM_BILLING_MODE: 'api_metered',
       TRIOS_SWARM_DAILY_CAP_USD: '5',
     })
-    expect(answer.allowed).toBe(false)
+    // MATCHED AGAINST THE WHOLE ANSWER, so a failure prints what the binary
+    // actually said. `expect(answer.allowed).toBe(false)` reports only
+    // "Received: undefined", which is the least useful half of the fact when
+    // the policy is answering from a platform you cannot reproduce locally.
+    expect(answer).toMatchObject({ allowed: false })
     // Swift omits a nil rather than encoding null, so the key is absent.
     expect(answer.chosen ?? null).toBeNull()
     // ModelPricing.format drops the cents above $10, so $12.00 prints as $12.
