@@ -159,6 +159,63 @@ export function classify(name, recipe) {
   return { name, kind: 'portable', why: 'nothing it reaches needs a desktop, so a runner could do this' }
 }
 
+/**
+ * A package script, sorted the way a make target is - but the categories differ
+ * because the dialect does.
+ *
+ * MOST UNWIRED SCRIPTS ARE LEGITIMATELY UNWIRED, and this is the lesson that
+ * shaped the classes. A first pass listed nineteen and eighteen of them were
+ * fine: `test:all` and `test:core` are aggregates CI deliberately splits into
+ * per-group jobs, `test:cdp` is an alias for a script that IS wired,
+ * `test:cleanup` is a helper other scripts call, `lint:fix` mutates and must
+ * never run in CI, `test:watch` is interactive. Reported flat, that list would
+ * bury the one row worth reading.
+ *
+ * THE ONE IT CANNOT DECIDE, and says so: a script whose WORK is wired under a
+ * different command. `lint` is `bunx biome check`, and CI runs `biome ci .` -
+ * the linting happens, the script name never appears. That is the same shape as
+ * `drift-guard`, whose script the macOS job already runs. Named in the output
+ * rather than silently dropped, because guessing either way has been wrong.
+ */
+export function classifyScript(name, body) {
+  const looksLikeGate = GATE_WORDS.some((w) => name.toLowerCase().includes(w))
+  if (!looksLikeGate) return { name, kind: 'not-a-gate' }
+  const text = String(body || '')
+  if (/--write|--fix|--unsafe/.test(text)) return { name, kind: 'mutating', why: 'it rewrites files, so CI is the wrong place for it' }
+  if (/--watch/.test(text)) return { name, kind: 'interactive', why: 'it watches, so it never exits' }
+  if (/\brun-test-group|run-test-suite\b/.test(text) && /\b(all|core|main)\b/.test(text)) {
+    return { name, kind: 'aggregate', why: 'it runs every group at once; CI splits them into jobs on purpose' }
+  }
+  const alias = text.match(/^\s*bun run ([\w:.-]+)\s*$/)
+  if (alias) return { name, kind: 'alias', why: `it is just \`${alias[1]}\`` }
+  return { name, kind: 'portable', why: 'nothing about it says CI is the wrong place' }
+}
+
+export function renderScripts(rows, total, wired) {
+  const by = {}
+  for (const r of rows) (by[r.kind] ||= []).push(r)
+  const out = [`${total} gate-shaped package script(s), ${wired} invoked by a workflow`, '']
+  const portable = by.portable || []
+  out.push(`${portable.length} that nothing runs and nothing says should not run:`)
+  for (const r of portable) out.push(`   ${r.pkg}  ${r.name}`)
+  if (!portable.length) out.push('   (none)')
+  for (const kind of ['aggregate', 'alias', 'mutating', 'interactive']) {
+    const g = by[kind] || []
+    if (!g.length) continue
+    out.push(`  ${g.length} ${kind}: ${g.map((r) => r.name).join(' ')}`)
+  }
+  out.push('')
+  out.push('A script whose WORK is wired under a different command still appears above:')
+  out.push('`lint` is `biome check` and CI runs `biome ci .` - the linting happens and')
+  out.push('the name never does. Read the row before acting on it.')
+  out.push('')
+  out.push('NOT AUDITED HERE: `test:*` scripts. The word is missing from the gate list')
+  out.push('on purpose - including it buries the report in aggregates and aliases - and')
+  out.push('that coverage already has a better guard: run-test-group.test.ts reads the')
+  out.push('CI matrix and fails when a group has no job, in both directions.')
+  return out.join('\n')
+}
+
 export function render(rows, targetCount, wiredCount, showAll = false) {
   const by = { portable: [], 'mac-only': [], opaque: [], 'not-a-gate': [] }
   for (const r of rows) by[r.kind].push(r)
@@ -232,7 +289,40 @@ if (isMain) {
     rows.push(classify(name, reachedRecipes(name, targets)))
   }
   console.log(render(rows, targets.size, wired.size, process.argv.includes('--all')))
+
+  // MAKE WAS ONLY ONE DIALECT. The same question asked of package scripts found
+  // the t27.ai dashboard's 194-check review-lifecycle contract, which appeared
+  // in no workflow at all - the string `apps/website` matched nothing.
+  let manifests = []
+  try {
+    manifests = String(execFileSync('git', ['ls-tree', '-r', '--name-only', REF], {
+      cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'],
+    })).split('\n').filter((f) => f.endsWith('package.json') && !f.includes('node_modules'))
+  } catch { manifests = [] }
+
+  const scriptRows = []
+  let scriptTotal = 0
+  let scriptWired = 0
+  for (const file of manifests) {
+    let scripts = {}
+    try { scripts = JSON.parse(show(file) || '{}').scripts || {} } catch { continue }
+    const pkg = file.replace(/^trios\/(agent-server\/)?/, '').replace(/\/package\.json$/, '') || 'root'
+    for (const [name, body] of Object.entries(scripts)) {
+      const row = classifyScript(name, body)
+      if (row.kind === 'not-a-gate') continue
+      scriptTotal++
+      const called = new RegExp(`\\b(?:bun|npm|pnpm|yarn)\\s+(?:run\\s+)?${name.replace(/[.*+?^\${}()|[\]\\]/g, '\\$&')}(?:\\s|$|\\))`, 'm')
+      if (called.test(workflows)) { scriptWired++; continue }
+      scriptRows.push({ ...row, pkg })
+    }
+  }
+  if (scriptTotal) {
+    console.log('')
+    console.log(renderScripts(scriptRows, scriptTotal, scriptWired))
+  }
+
   const portable = rows.filter((r) => r.kind === 'portable').length
-  console.log(`\n${portable} portable gate(s) that nothing runs`)
-  process.exit(portable ? 2 : 0)
+  const scriptPortable = scriptRows.filter((r) => r.kind === 'portable').length
+  console.log(`\n${portable} portable make gate(s) and ${scriptPortable} package script(s) that nothing runs`)
+  process.exit(portable + scriptPortable ? 2 : 0)
 }
