@@ -1516,11 +1516,24 @@ async function boundaryStrays(
  * was finished and returned over the Queen's own numbering.
  *
  * Stripped on BOTH sides, inside `normalize`, so this stays one rule rather
- * than a special case at one call site. `missingVerdictSlots` already strips it
- * to match by slot number and already reported these 153 as complete; the two
- * functions disagreed, and its own comment claimed they could not. Symmetry is
- * what makes that claim true instead of aspirational, and the filter returns
- * the ORIGINAL strings, so nothing a person reads loses its number.
+ * than a special case at one call site, and the filter returns the ORIGINAL
+ * strings, so nothing a person reads loses its number.
+ *
+ * DO NOT "SIMPLIFY" THIS INTO SLOT MATCHING. `missingVerdictSlots` reports
+ * these same 153 as complete, which makes it look like the answer this should
+ * have been using all along. It is not. It counts a slot covered only when a
+ * parsed line BEGINS with its number, and measured across the whole board on
+ * 2026-09-06: of 358 blocks with criteria, 156 carry no numbering at all - and
+ * on every one of those 156, slot matching finds NOTHING covered. Wiring it as
+ * the review's matcher would have marked every criterion in 44% of the board
+ * unanswered, which is the present defect with a wider blast radius.
+ *
+ * The two functions answer the same question and disagree on 347 of 358 rows,
+ * in BOTH directions, while the comment on `missingVerdictSlots` asserts they
+ * cannot disagree. Neither is right alone: text matching was blind to the
+ * number, slot matching is blind to its absence. Stripping the number and then
+ * matching by text is the only rule that reads both the numbered briefs and
+ * the unnumbered ones, which is why the fix is here and not a swap.
  */
 export function unjudgedCriteria(
   promised: string[],
@@ -1915,10 +1928,20 @@ function parseVerdictFrom(
  *
  * The second half of the same defect: the brief now hands the bee a template
  * with numbered slots, and this is the check that names the numbers a given
- * report did not fill. It reads the SAME block `parseVerdictBlock` reads -
- * one parser, so a line this counts as answered is exactly a line the review
- * counts as judged - and calls a slot covered only when a parsed verdict
- * line carries its number.
+ * report did not fill. It reads the same block `parseVerdictBlock` reads, and
+ * calls a slot covered only when a parsed verdict line carries its number.
+ *
+ * IT DOES NOT AGREE WITH THE REVIEW, and the sentence that used to sit here
+ * said it did: "one parser, so a line this counts as answered is exactly a
+ * line the review counts as judged". Sharing a parser is not sharing a rule.
+ * The review matches by TEXT and this matches by NUMBER, and measured across
+ * the whole board on 2026-09-06 they disagree on 347 of 358 rows, in both
+ * directions - 156 blocks carry no numbering at all, and this reports every
+ * criterion in every one of them unanswered.
+ *
+ * A comment claiming two functions agree is a test that has not been written.
+ * This one was false for as long as it stood, and it is what made the numbered
+ * prefix in `unjudgedCriteria` look like someone else's already-solved problem.
  *
  * A NUMBER, NOT A POSITION. The old contract was order-based: the third
  * verdict line was the third criterion whether or not it said so, which is
