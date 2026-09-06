@@ -148,9 +148,17 @@ jobs:
       # called `runRound`, and that caught a critic deleting the lease guard,
       # was proving nothing at all here.
       #
-      # Built in the SAME image the Dockerfile uses, so the binary under test is
-      # the one Railway ships rather than a lookalike compiled by whatever
-      # toolchain a runner happens to carry.
+      # Built with the SAME compiler the Dockerfile uses, so the policy under
+      # test is the one Railway ships rather than a lookalike compiled by
+      # whatever toolchain a runner happens to carry.
+      #
+      # STATICALLY LINKED, and that is the one way it differs from the deployed
+      # binary. Railway runs it inside the Swift image, where the runtime is
+      # present; a bare runner has no `libswiftCore.so`, and the first attempt
+      # here built cleanly and then failed every test with `queend exited 127:
+      # error while loading shared libraries`. Same sources, same compiler,
+      # different linkage - said plainly rather than left as an implied
+      # equivalence.
       - name: Build the Queen policy binary
         if: matrix.suite == 'server-api'
         run: |
@@ -161,11 +169,16 @@ jobs:
             -v "$PWD/queen-core":/src \
             -w /src \
             swift:6.0-jammy \
-            swift build -c release 2>&1 | tail -30
+            swift build -c release --static-swift-stdlib 2>&1 | tail -30
           # Assert the artifact, not the exit code: a build that prints an
           # error and still exits 0 would otherwise leave the tests skipping
           # exactly as before, under a step that looked like it had worked.
           test -x queen-core/.build/release/queend
+          # And that it RUNS here, not merely that it exists. A dynamically
+          # linked binary passes the test above and then fails every case with
+          # exit 127, which is how the first attempt at this step went.
+          queen-core/.build/release/queend --help >/dev/null 2>&1 \
+            || echo '{}' | queen-core/.build/release/queend >/dev/null
 
       - name: Resolve BrowserOS cache key
         if: matrix.needs_browser == true
