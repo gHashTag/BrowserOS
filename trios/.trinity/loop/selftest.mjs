@@ -3035,6 +3035,216 @@ check('no block is unverdicted\'s question, and unreadable rows accuse nobody', 
   }
 })
 
+// A COMMENT CLAIMING TWO FUNCTIONS AGREE IS A TEST THAT HAS NOT BEEN WRITTEN.
+//
+// `unjudgedCriteria` and `missingVerdictSlots` both answer "which promised
+// criteria did the bee answer?" and disagree on 347 of 358 real rows, in BOTH
+// directions - while the comment above the second asserted they could not
+// disagree. That sentence is what kept the defect hidden for weeks.
+check('two identical answers agree whatever order they arrive in', async () => {
+  const AG = await import('./agree.mjs')
+  const r = AG.classify({ id: 1, a: [3, 1, 2], b: [2, 3, 1] })
+  if (r.kind !== 'agree') throw new Error(`the same set in a different order was called ${r.kind}`)
+  // A row neither side could answer is NOT agreement - counting it as one is
+  // how a gate reports health for rows it never looked at.
+  if (AG.classify({ id: 2, skip: 'no verdict block' }).kind !== 'skipped') throw new Error('an unanswerable row was counted as agreement')
+  for (const bad of [null, { id: 3 }, { id: 4, a: [1], b: 'nope' }]) {
+    if (AG.classify(bad).kind !== 'unknown') throw new Error('an unreadable row was counted against a side')
+  }
+})
+
+check('divergence is reported with its DIRECTION, never as a bare count', async () => {
+  const AG = await import('./agree.mjs')
+  const aMissed = AG.classify({ id: 5, tag: 'sendBack', a: [1, 2], b: [1, 2, 3], total: 3 })
+  const bMissed = AG.classify({ id: 6, tag: 'accept', a: [1, 2, 3], b: [], total: 3 })
+  if (aMissed.kind !== 'DIFFER' || bMissed.kind !== 'DIFFER') throw new Error('a real divergence was called agreement')
+  const d = AG.directions([aMissed, bMissed])
+  if (d.aMisses !== 1 || d.bMisses !== 1) throw new Error(`directions counted ${d.aMisses}/${d.bMisses} instead of 1/1`)
+  const both = AG.render({ name: 'p', question: 'q', a: 'A', b: 'B' }, [aMissed, bMissed])
+  if (!both.includes('BOTH directions')) throw new Error('a two-way divergence did not say so, which invites picking a winner')
+  // One-way divergence must NOT claim both directions - that is the branch that
+  // keeps the sentence meaningful when it does appear.
+  const oneWay = AG.render({ name: 'p', question: 'q', a: 'A', b: 'B' }, [aMissed])
+  if (oneWay.includes('BOTH directions')) throw new Error('a one-way divergence claimed both directions')
+})
+
+// THE ONE NUMBER NOBODY MEASURED: is the swarm WORKING?
+//
+// Twenty instruments counted issues, verdicts, briefs and disagreements. The
+// dashboard's `bees running (of 4)` is an INSTANT, sampled once an iteration,
+// of a quantity that turned out to be bimodal - it read 4 as often as 0 and
+// could never have shown that half the day had no bee running at all.
+check('an instant is not a rate: idleness is counted over a window', async () => {
+  const I = await import('./idle.mjs')
+  const t0 = 1_000_000_000_000
+  const min = 60_000
+  // One bee for the first 10 minutes of a 20-minute window: half idle.
+  const u = I.utilisation([[t0, t0 + 10 * min]], t0, t0 + 20 * min, 4)
+  if (u.idlePercent !== 50) throw new Error(`half an idle window measured ${u.idlePercent}%`)
+  if (u.fullPercent !== 0) throw new Error('one bee of four was counted as full capacity')
+  // A window with nothing sampled is absent, not idle.
+  if (I.utilisation([], t0, t0 - 1, 4) !== null) throw new Error('an empty window returned a number instead of nothing')
+})
+
+check('overlapping bees are one burst, so no gap is invented between them', async () => {
+  const I = await import('./idle.mjs')
+  const t0 = 1_000_000_000_000
+  const min = 60_000
+  // Two bees running at once, then a real 10-minute gap, then another.
+  const g = I.gapsOf([[t0, t0 + 5 * min], [t0 + 2 * min, t0 + 6 * min], [t0 + 16 * min, t0 + 18 * min]])
+  if (g.bursts !== 2) throw new Error(`two overlapping bees made ${g.bursts} bursts instead of one`)
+  if (g.gaps.length !== 1) throw new Error('an overlap invented a gap that never existed')
+  if (Math.round(g.gaps[0]) !== 10) throw new Error(`the gap measured ${g.gaps[0]} instead of 10 minutes`)
+})
+
+check('gaps longer than the tick mean rounds are starting nothing', async () => {
+  const I = await import('./idle.mjs')
+  // Most gaps far longer than a five-minute tick: the rounds are running and
+  // dispatching nothing, which is a different fault from "rounds are rare".
+  const bad = I.verdictOnGaps([20, 22, 30, 41], 300)
+  if (bad.kind !== 'ROUNDS-ARE-NOT-DISPATCHING') throw new Error(`long gaps were read as ${bad.kind}`)
+  // And the branch that refutes it: gaps within the cadence blame the cadence.
+  const ok = I.verdictOnGaps([1, 2, 3, 4], 300)
+  if (ok.kind !== 'within-cadence') throw new Error(`short gaps were read as ${ok.kind}`)
+  if (I.verdictOnGaps([], 300).kind !== 'no-gaps') throw new Error('no gaps at all produced a verdict about gaps')
+})
+
+// A GATE THAT EXISTS AND RUNS NOWHERE.
+//
+// `make queen-core-sync` compares the eleven policy files that exist twice,
+// byte for byte, and appeared in no workflow. On 2026-09-06 one of the thirteen
+// had already drifted: the ring gained a string-aware literal view on 09-05 and
+// the Linux copy was last touched 08-29.
+check('the declared gate list beats the word list, because names describe subjects', async () => {
+  const U = await import('./unwired.mjs')
+  const mk = ['check: type-floor t27-rings sources-drift', '', 'type-floor:', '\tgrep -c Any src', ''].join('\n')
+  const declared = U.declaredGates(mk)
+  if (!declared.has('type-floor') || !declared.has('t27-rings')) throw new Error('the declaration was not read')
+  // The correction this made: eleven of thirteen unwired gates were classified
+  // `not-a-gate` by the word list, because they are named after what they
+  // check rather than that they check it. `t27-rings` runs the 460-case parity
+  // and carries no gate word at all.
+  if (U.classify('t27-rings', ['\tbash ring.sh'], false).kind !== 'not-a-gate') throw new Error('the word list was expected to miss it')
+  if (U.classify('t27-rings', ['\tbash ring.sh'], true).kind === 'not-a-gate') throw new Error('a declared gate was still dismissed by name')
+  // And a Makefile with no `check:` line yields no declaration rather than a
+  // wrong one - an empty set, not a guess.
+  if (U.declaredGates('build:\n\techo hi\n').size !== 0) throw new Error('a declaration was invented where none exists')
+})
+
+check('an unwired script is not a finding when something says it should not run', async () => {
+  const U = await import('./unwired.mjs')
+  // A flat first pass listed nineteen unwired scripts and eighteen were fine.
+  // The classes are what leave one row worth reading.
+  const cases = [
+    ['lint:fix', 'bunx biome check --write --unsafe', 'mutating'],
+    // `test:*` is outside the gate-word list on purpose, so these never reach a
+    // class at all - the audit says so in its own output rather than letting a
+    // count imply completeness.
+    ['test:watch', 'bun --watch test', 'not-a-gate'],
+    ['test:all', 'bun run ./tests/__helpers__/run-test-group.ts all', 'not-a-gate'],
+    ['check:watch', 'bun --watch qa', 'interactive'],
+    ['verify:all', 'bun run ./scripts/run-test-suite.ts all', 'aggregate'],
+    ['lint:cdp', 'bun run lint:browser', 'alias'],
+    ['check', 'bun run typecheck && bun run qa && bun run build', 'portable'],
+    ['dev', 'bun run server', 'not-a-gate'],
+  ]
+  for (const [name, body, want] of cases) {
+    const got = U.classifyScript(name, body).kind
+    if (got !== want) throw new Error(`${name} classified ${got}, expected ${want}`)
+  }
+  // The dashboard contract is the one that mattered: it must survive as a
+  // finding, not be filed away as an aggregate because it chains with &&.
+  const out = U.renderScripts([{ ...U.classifyScript('check', 'bun run typecheck && bun run qa'), pkg: 'apps/website' }], 14, 9)
+  if (!out.includes('apps/website')) throw new Error('the real finding was not reported')
+  if (!/biome ci/.test(out)) throw new Error('the limit about work wired under another command was not stated')
+})
+
+check('a recipe that calls make reaches that target, and a script is not judged', async () => {
+  const U = await import('./unwired.mjs')
+  // check-bypass is ONE LINE - `$(MAKE) check` - so following only
+  // prerequisites saw an empty recipe and called it portable, while `check`
+  // opens a window. Its own echo says "never for CI".
+  const t = U.targetsOf(['heavy:', '\tswiftc thing.swift', '', 'bypass-guard:', '\t$(MAKE) --no-print-directory heavy', ''].join('\n'))
+  const reached = U.reachedRecipes('bypass-guard', t)
+  if (U.classify('bypass-guard', reached).kind !== 'mac-only') throw new Error('a sub-make call was not followed')
+  // And the layer this cannot see at all: drift-guard is `bash script.sh`, with
+  // the compiler inside the script. Guessing there is how the first two
+  // misclassifications happened, so it answers `opaque` instead.
+  const sc = U.targetsOf(['deep-guard:', '\tbash tests/swift/run_chat_sse_e2e.sh', ''].join('\n'))
+  const r = U.classify('deep-guard', U.reachedRecipes('deep-guard', sc))
+  if (r.kind !== 'opaque') throw new Error(`a target running a script was classified ${r.kind}`)
+  if (!/run_chat_sse_e2e\.sh/.test(r.why)) throw new Error('the report did not name the script it cannot see into')
+})
+
+check('a target with no recipe inherits what its prerequisites reach', async () => {
+  const U = await import('./unwired.mjs')
+  // The defect this file's own output caught before it shipped: `check:` and
+  // `verify:` have NO recipe - they are a list of other targets - so reading
+  // only the recipe called both portable while their prerequisites open a
+  // window and run swiftc.
+  const t = U.targetsOf(['heavy:', '\tswiftc thing.swift', '', 'check-all: heavy', ''].join('\n'))
+  const reached = U.reachedRecipes('check-all', t)
+  if (!reached.join('\n').includes('swiftc')) throw new Error('a prerequisite recipe was not reached')
+  if (U.classify('check-all', reached).kind !== 'mac-only') throw new Error('a target reaching swiftc was called portable')
+})
+
+check('a cycle in the Makefile does not hang the audit', async () => {
+  const U = await import('./unwired.mjs')
+  const t = U.targetsOf(['a-guard: b-guard', '\techo one', '', 'b-guard: a-guard', '\techo two', ''].join('\n'))
+  const reached = U.reachedRecipes('a-guard', t)
+  // Both recipes reached, each once, and the call returned at all.
+  if (!reached.join('\n').includes('echo two')) throw new Error('the cycle stopped before reaching the other side')
+})
+
+check('a wired target is not reported, and a plain name is not a gate', async () => {
+  const U = await import('./unwired.mjs')
+  const wired = U.wiredIn('    - run: make queen-core-sync\n    - run: make  other-thing\n')
+  if (!wired.has('queen-core-sync') || !wired.has('other-thing')) throw new Error('a workflow invocation was not seen')
+  // The branch that keeps the list short enough to read: most targets are not
+  // gates, and a report naming all fifty-seven would be ignored by week two.
+  if (U.classify('relaunch', ['\topen trios.app']).kind !== 'not-a-gate') throw new Error('a plain target was reported as a gate')
+})
+
+check('every declared pair can actually be run for its kind', async () => {
+  const AG = await import('./agree.mjs')
+  if (!AG.PAIRS.length) throw new Error('the registry is empty, so the gate compares nothing')
+  for (const pair of AG.PAIRS) {
+    for (const field of ['name', 'kind', 'question', 'a', 'b']) {
+      if (!pair[field]) throw new Error(`pair ${pair.name || '(unnamed)'} has no ${field}`)
+    }
+    if (pair.kind === 'remote' && !pair.program) throw new Error(`remote pair ${pair.name} has no program`)
+    if (pair.kind === 'local' && !(pair.script && typeof pair.pick === 'function')) {
+      throw new Error(`local pair ${pair.name} has no script and pick`)
+    }
+    if (!['remote', 'local'].includes(pair.kind)) throw new Error(`pair ${pair.name} has kind ${pair.kind}`)
+  }
+  // Two pairs must not share a name, or --pair picks whichever comes first and
+  // the other can never be run.
+  const names = AG.PAIRS.map((p) => p.name)
+  if (new Set(names).size !== names.length) throw new Error('two pairs share a name')
+})
+
+check('a side that could not be built is unknown, never agreement', async () => {
+  const AG = await import('./agree.mjs')
+  const boundary = AG.PAIRS.find((p) => p.name === 'boundary-ts-vs-swift')
+  if (!boundary) throw new Error('the cross-language pair is not registered')
+  // What `boundary-parity.ts` emits when swiftc is absent: the row is present
+  // and its Swift side is null. Counting that as agreement is how "all green"
+  // comes to mean "we looked at one of the two".
+  const picked = boundary.pick({ id: 42, js: ['a/b.ts'], ts: ['a/b.ts'], swift: null })
+  const r = AG.classify(picked)
+  if (r.kind !== 'unknown') throw new Error(`an unbuilt side was classified ${r.kind}`)
+  // And with both sides present it must compare them rather than pass anything.
+  const both = AG.classify(boundary.pick({ id: 43, ts: ['a/b.ts'], swift: ['c/d.ts'] }))
+  if (both.kind !== 'DIFFER') throw new Error('two different answers were not reported as a divergence')
+})
+
+check('agreement is reported as agreement, never as proof', async () => {
+  const AG = await import('./agree.mjs')
+  const out = AG.render({ name: 'p', question: 'q', a: 'A', b: 'B' }, [AG.classify({ id: 7, a: [1], b: [1] })])
+  if (!/NOT a proof/.test(out)) throw new Error('agreement was reported without the limit that makes it honest')
+})
+
 check('an empty denominator is a dash, never a zero percent', async () => {
   const A = await import('./accept-rate.mjs')
   const s = A.split([{ number: 9999, body: '' }], () => null, () => true)
