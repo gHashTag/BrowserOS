@@ -106,6 +106,56 @@ jobs:
       # precisely the defect the rest of this file was added to end. Vendoring
       # or fetching t27c is a real change and belongs in its own.
 
+  # THE RINGS, ANSWERED BY THREE LANGUAGES AND A SIMULATOR.
+  #
+  # `t27-rings` generates Rust from `rings/T27-00/queen_core.t27` and checks 14
+  # rows and 21 constants against the Swift table, does the same for the A2A
+  # rules in T27-01, then generates VERILOG from the same source, compiles it
+  # with iverilog and simulates it under vvp. It is the strongest claim this
+  # repository makes about itself, and it ran nowhere.
+  #
+  # It was left unwired one round ago on purpose, because `t27c` is built from a
+  # SEPARATE repository and the target SKIPS - exit 0 - when that toolchain is
+  # absent. Wiring it as-is would have produced a green job that measured
+  # nothing. The repository is public, so the honest version is to fetch it.
+  #
+  # AND THEN PROVE IT MEASURED. The target says `[SKIP] ... NOT MEASURED` in
+  # plain words when it cannot run, which is good manners and useless to CI: the
+  # exit code is still 0. The last step reads the log and fails on that phrase,
+  # and additionally demands both halves by name. A gate that can silently skip
+  # needs a second gate on top of it, and this is that.
+  t27-rings:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Public, and read-only here: cloned into the runner's temp, never into the
+      # checkout, and nothing writes back to it. `--depth 1` because the history
+      # of the compiler is not part of the claim.
+      - name: Fetch the T27 compiler sources
+        run: git clone --depth 1 https://github.com/gHashTag/t27.git "$RUNNER_TEMP/t27"
+      - name: Verilog toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends iverilog
+      - name: The rings answer the same as the policy
+        working-directory: trios
+        env:
+          T27_ROOT: ${{ runner.temp }}/t27
+        run: |
+          set -euo pipefail
+          make t27-rings 2>&1 | tee "$RUNNER_TEMP/t27-rings.log"
+          log="$RUNNER_TEMP/t27-rings.log"
+          if grep -q 'NOT MEASURED' "$log"; then
+            echo "::error::t27-rings skipped instead of measuring - the toolchain it needs was not there"
+            grep -A2 'NOT MEASURED' "$log"
+            exit 1
+          fi
+          # Both halves by name, so a future edit that quietly drops one cannot
+          # pass by leaving the other green.
+          grep -q 'OK] ring00_parity' "$log"
+          grep -q 'OK] ring01_rules' "$log"
+          grep -q 'OK] ring00_verilog' "$log"
+
   server-units:
     runs-on: ubuntu-latest
     steps:
