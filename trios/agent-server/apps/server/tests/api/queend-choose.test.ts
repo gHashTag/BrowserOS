@@ -286,7 +286,12 @@ describe('queend refuses to start a bee once the day is spent', () => {
   // Yesterday's spend is not today's. Without the day filter the cap would
   // latch shut permanently the first time a swarm had an expensive afternoon.
   it.skipIf(!present)('ignores spend from another day', () => {
-    const yesterday = new Date(Date.now() - 36 * 60 * 60 * 1000).toISOString()
+    // Seconds, no fraction - see `spentTask` above. Overriding `updatedAt`
+    // here put the milliseconds straight back and kept this one case red
+    // after the shared fixture was fixed.
+    const yesterday = new Date(Date.now() - 36 * 60 * 60 * 1000)
+      .toISOString()
+      .replace(/\.\d{3}Z$/, 'Z')
     const stale = { ...spentTask(999, 800_000), updatedAt: yesterday }
     const answer = ask(board([1201], [stale]), {
       TRIOS_SWARM_DAILY_CAP_USD: '5',

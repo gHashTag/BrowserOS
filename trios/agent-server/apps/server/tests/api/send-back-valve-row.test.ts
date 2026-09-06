@@ -336,9 +336,11 @@ describe('the send-back valve on the stored rows for #1316 and #1318', () => {
       expect(
         String(answer.skipped),
         'control - both issues skipped as claimed, the sentence the claimed bucket is made of',
-      ).toContain('#1316: a worker has it or is expected back (rejected)')
+      ).toContain(
+        '#1316: it is rejected - claimed, but no worker is attached yet',
+      )
       expect(String(answer.skipped)).toContain(
-        '#1318: a worker has it or is expected back (rejected)',
+        '#1318: it is rejected - claimed, but no worker is attached yet',
       )
     },
   )
