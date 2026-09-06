@@ -3807,3 +3807,46 @@ has produced a failure that looked like a product bug.
 **When a test passes alone and fails in its group, stop reading the test.** The
 question is what the group does to it, and the method is a bisect of the file
 list — six runs for fifty-seven files, and it names the culprit exactly.
+
+## Two numbers from the same callback are one number
+
+I read this as a leak and nearly shipped a product change on it:
+
+```
+CLOSE-WITNESS: closed=false after 3015ms, closeCount=0, sockets=1
+```
+
+Two independent-looking facts agreeing — the socket is open *and* no close was
+counted. They are not independent. In the helper:
+
+```ts
+socket.on('close', () => {
+  sockets.delete(socket)
+  closed += 1
+})
+```
+
+Both are mutated **in the same handler**. `closeCount=0, sockets=1` says exactly
+one thing — *that handler had not run* — and nothing about whether the
+connection was open. **I treated one fact as its own corroboration.**
+
+The change refuted itself, which is the only reason it did not merge: with the
+probe rewritten to own a raw socket and call `destroy()` explicitly, CI still
+reported `0 NEW, 0 fixed`. A client-side leak cannot survive an explicit
+`destroy()`.
+
+**Before believing two measurements corroborate each other, find where each one
+is produced.** If they are written by the same line, you have one measurement
+printed twice, and it will read as confirmation exactly when you most want it.
+
+### What the round actually established
+
+Three candidate causes eliminated **by measurement, not argument** — the bun
+version, the platform, and the probe's own teardown. What remains is the shape
+that has now appeared four times: **passes alone, fails in the group.** The
+bound is one second, in a process running 976 tests on two cores.
+
+**Closing a PR with a correction is a result.** Two of this round's three pull
+requests were closed, one of them refuting a claim I had made in its own
+description an hour earlier. That is cheaper than a merged product change built
+on a misread number.
