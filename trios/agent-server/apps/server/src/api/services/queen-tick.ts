@@ -1495,6 +1495,32 @@ async function boundaryStrays(
  * line's text and not the other way round. The containment guard exists
  * because a one-word line would otherwise be contained by everything and mark
  * every criterion judged; an exact match always counts, however short.
+ *
+ * THE TEMPLATE'S OWN NUMBER IS NOT PART OF THE CRITERION, and leaving it in
+ * disabled one of those two directions completely.
+ *
+ * The brief hands the bee numbered slots and asks for `- 1. <criterion>: met`,
+ * so `parseVerdictBlock` returns a criterion that BEGINS "1. ". The promised
+ * text carries no such number. `want.includes(line)` therefore could not match
+ * once - not for a long criterion, not for a short one, not ever - because the
+ * line always held a prefix the promise did not. Only `line.includes(want)`
+ * survived, and that direction demands the bee reproduce the criterion whole:
+ * shorten it by one trailing sentence and the criterion reads as never
+ * answered.
+ *
+ * Measured 2026-09-06 over the 153 send-backs that had spent no retry budget:
+ * EVERY ONE had a complete, parseable VERDICT block, and every one was sent
+ * back for criteria it had answered. Stripping this prefix clears 148 of the
+ * 153; the remaining five are unjudged for reasons of their own. None of the
+ * 153 had a single criterion tested and FAILED - the entire group is work that
+ * was finished and returned over the Queen's own numbering.
+ *
+ * Stripped on BOTH sides, inside `normalize`, so this stays one rule rather
+ * than a special case at one call site. `missingVerdictSlots` already strips it
+ * to match by slot number and already reported these 153 as complete; the two
+ * functions disagreed, and its own comment claimed they could not. Symmetry is
+ * what makes that claim true instead of aspirational, and the filter returns
+ * the ORIGINAL strings, so nothing a person reads loses its number.
  */
 export function unjudgedCriteria(
   promised: string[],
@@ -1502,6 +1528,7 @@ export function unjudgedCriteria(
 ): string[] {
   const normalize = (text: string): string =>
     text
+      .replace(/^\s*\d{1,3}\.\s+/, '')
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, ' ')
       .replace(/\s+/g, ' ')
@@ -1811,7 +1838,11 @@ export function parseVerdictBlock(
   // Trying each and keeping the longest parse is stable under either
   // convention, so a worker running an older brief is not punished for it.
   const starts: number[] = []
-  for (let i = text.indexOf('## VERDICT'); i >= 0; i = text.indexOf('## VERDICT', i + 1)) {
+  for (
+    let i = text.indexOf('## VERDICT');
+    i >= 0;
+    i = text.indexOf('## VERDICT', i + 1)
+  ) {
     starts.push(i)
   }
   if (!starts.length) return []
