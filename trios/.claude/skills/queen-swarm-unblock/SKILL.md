@@ -3963,3 +3963,33 @@ neighbouring tool over the same corpus before the number leaves the round.
 With only "fail", a rule must choose between saying nothing and refusing
 everything, so every useful-but-not-fatal observation gets pushed into one of
 those. Notes are printed, not swallowed.
+
+## A count is not a decision until you know what it is counting
+
+Three rounds, three headline numbers about the same thing, each one wrong in a
+different way:
+
+| round | claim | what it actually was |
+|---|---|---|
+| #82 | "19 open briefs will produce the next unauditable verdicts" | one tool's opinion, unchecked |
+| #83 | "14" | five had been false rejections |
+| #84 | **6** | eight of the fourteen were *history*, not warnings |
+
+Eight already had a pushed branch **and** a verdict the audit judged
+`NO MECHANICAL CLAIM` — work somebody forgot to close. Nothing about them is
+forward-looking, and they had been inflating the only number worth acting on.
+
+**Each correction came from asking one more question, not from being told.** The
+questions were cheap: *ask the other instrument* (round #83), then *ask whether
+the work already exists* (this one). A second of `git rev-parse` and a second of
+the audit turned a count into a decision.
+
+**Before publishing a number, ask what a member of the set actually is.** If two
+members want opposite responses from the reader, it is at least two numbers.
+
+### Unknown is a third bucket, always
+
+A brief whose audit could not be run belongs to neither side. Putting it in
+either is the empty-versus-absent defect, and an **empty string is absence too**
+— `''` is not a verdict. The calibration pins that, and pins the negative just
+as hard: a branch with a *checkable* verdict is not a warning either.
