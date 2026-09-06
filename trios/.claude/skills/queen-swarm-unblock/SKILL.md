@@ -3993,3 +3993,43 @@ A brief whose audit could not be run belongs to neither side. Putting it in
 either is the empty-versus-absent defect, and an **empty string is absence too**
 — `''` is not a verdict. The calibration pins that, and pins the negative just
 as hard: a branch with a *checkable* verdict is not a warning either.
+
+## A brief that cannot be failed is accepted every time
+
+Split every issue carrying a review verdict by whether its brief passes the
+gate — whether it states anything a checker could fail the work against:
+
+```
+brief PASSES the gate    42% accepted   (n = 290)
+brief FAILS  the gate    87% accepted   (n =  92)
+
+after #1350   pass 38% (n=271)   fail 100% (n=40)
+```
+
+**Forty of forty.** In the recent era, where nearly all the volume is, a brief
+with no checkable criterion has never once been rejected — and the effect is
+*sharpest* there, which is what rules out "the failing briefs are simply older".
+
+That is not forty pieces of excellent work. It is forty reviews with **nothing
+to fail against**: the self-report problem `judge-packet.mjs` already quotes at
+the top, where Terminal-Bench stopped accepting self-reported results after the
+top of two boards turned out to sit 13.5 and 2.5 points above independent
+re-runs.
+
+**A high acceptance rate on an ungated brief measures the absence of a test.**
+Every acceptance number this project has printed should be read that way, and
+the gate is what makes rejection possible at all.
+
+### The first version of this measurement was confounded
+
+Run over **open** issues it said 3% versus 11% — the opposite sign. Accepted
+issues get closed, so the open set is *by construction* the ones that were not
+accepted. **The population was the finding, not the rate.** When a rate
+surprises you, check what selected the rows before you check the rate.
+
+### The recommendation it started from was also wrong
+
+I had proposed chasing "eight open issues whose work landed and nobody closed
+them". One query: **none of the eight carries an `accept` verdict** — four
+`sendBack`, two `escalate`, one `wait`, one `failed`. `close-done` was right to
+refuse them, and the tool I suspected was the one behaving correctly.
