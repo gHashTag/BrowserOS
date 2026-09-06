@@ -3115,6 +3115,34 @@ check('gaps longer than the tick mean rounds are starting nothing', async () => 
 // byte for byte, and appeared in no workflow. On 2026-09-06 one of the thirteen
 // had already drifted: the ring gained a string-aware literal view on 09-05 and
 // the Linux copy was last touched 08-29.
+check('an unwired script is not a finding when something says it should not run', async () => {
+  const U = await import('./unwired.mjs')
+  // A flat first pass listed nineteen unwired scripts and eighteen were fine.
+  // The classes are what leave one row worth reading.
+  const cases = [
+    ['lint:fix', 'bunx biome check --write --unsafe', 'mutating'],
+    // `test:*` is outside the gate-word list on purpose, so these never reach a
+    // class at all - the audit says so in its own output rather than letting a
+    // count imply completeness.
+    ['test:watch', 'bun --watch test', 'not-a-gate'],
+    ['test:all', 'bun run ./tests/__helpers__/run-test-group.ts all', 'not-a-gate'],
+    ['check:watch', 'bun --watch qa', 'interactive'],
+    ['verify:all', 'bun run ./scripts/run-test-suite.ts all', 'aggregate'],
+    ['lint:cdp', 'bun run lint:browser', 'alias'],
+    ['check', 'bun run typecheck && bun run qa && bun run build', 'portable'],
+    ['dev', 'bun run server', 'not-a-gate'],
+  ]
+  for (const [name, body, want] of cases) {
+    const got = U.classifyScript(name, body).kind
+    if (got !== want) throw new Error(`${name} classified ${got}, expected ${want}`)
+  }
+  // The dashboard contract is the one that mattered: it must survive as a
+  // finding, not be filed away as an aggregate because it chains with &&.
+  const out = U.renderScripts([{ ...U.classifyScript('check', 'bun run typecheck && bun run qa'), pkg: 'apps/website' }], 14, 9)
+  if (!out.includes('apps/website')) throw new Error('the real finding was not reported')
+  if (!/biome ci/.test(out)) throw new Error('the limit about work wired under another command was not stated')
+})
+
 check('a recipe that calls make reaches that target, and a script is not judged', async () => {
   const U = await import('./unwired.mjs')
   // check-bypass is ONE LINE - `$(MAKE) check` - so following only
