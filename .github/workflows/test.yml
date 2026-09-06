@@ -152,13 +152,20 @@ jobs:
       # test is the one Railway ships rather than a lookalike compiled by
       # whatever toolchain a runner happens to carry.
       #
-      # STATICALLY LINKED, and that is the one way it differs from the deployed
-      # binary. Railway runs it inside the Swift image, where the runtime is
-      # present; a bare runner has no `libswiftCore.so`, and the first attempt
-      # here built cleanly and then failed every test with `queend exited 127:
-      # error while loading shared libraries`. Same sources, same compiler,
-      # different linkage - said plainly rather than left as an implied
-      # equivalence.
+      # DYNAMICALLY LINKED, exactly as Railway builds it, with the runtime
+      # lifted out of the image beside it.
+      #
+      # The first attempt linked dynamically and failed every test with `queend
+      # exited 127: error while loading shared libraries` - a bare runner has no
+      # `libswiftCore.so`. The obvious repair, `--static-swift-stdlib`, worked
+      # and is WRONG here: the static toolchain links
+      # `/usr/lib/swift_static/linux/libFoundationEssentials.a`, a different
+      # Foundation from the dynamic one, and four daily-cap cases that pass on a
+      # dynamic build failed under it. A gate that changes the thing it measures
+      # is measuring itself.
+      #
+      # So the linkage matches production and the runtime travels with the
+      # binary. Same sources, same compiler, same Foundation.
       - name: Build the Queen policy binary
         if: matrix.suite == 'server-api'
         run: |
@@ -169,7 +176,14 @@ jobs:
             -v "$PWD/queen-core":/src \
             -w /src \
             swift:6.0-jammy \
-            swift build -c release --static-swift-stdlib 2>&1 | tail -30
+            swift build -c release 2>&1 | tail -30
+          # The runtime the binary needs, taken from the image that built it.
+          docker run --rm \
+            -u "$(id -u):$(id -g)" \
+            -v "$PWD/queen-core":/out \
+            swift:6.0-jammy \
+            sh -c 'mkdir -p /out/.build/swift-runtime && cp -a /usr/lib/swift/linux/*.so* /out/.build/swift-runtime/'
+          echo "LD_LIBRARY_PATH=$PWD/queen-core/.build/swift-runtime" >> "$GITHUB_ENV"
           # Assert the artifact, not the exit code: a build that prints an
           # error and still exits 0 would otherwise leave the tests skipping
           # exactly as before, under a step that looked like it had worked.
@@ -186,7 +200,8 @@ jobs:
           # linkage. Any other code means the process ran, which is the whole
           # claim being made.
           set +e
-          printf '{}' | queen-core/.build/release/queend >/dev/null 2>&1
+          LD_LIBRARY_PATH="$PWD/queen-core/.build/swift-runtime" \
+            sh -c 'printf "{}" | queen-core/.build/release/queend' >/dev/null 2>&1
           started=$?
           set -e
           if [ "$started" -eq 127 ]; then
