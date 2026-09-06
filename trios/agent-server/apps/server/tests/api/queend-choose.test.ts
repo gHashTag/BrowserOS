@@ -215,11 +215,31 @@ describe('queend refuses to start a bee once the day is spent', () => {
   // $15 per million input tokens for claude-opus in ModelPricing.table, so
   // 800k input tokens is $12.00 exactly. Dated now, because the budget is a
   // DAILY one and a task updated yesterday must not count against today.
+  //
+  // SECONDS, NO FRACTION - the shape `boardTask` emits, not the shape
+  // `toISOString()` does.
+  //
+  // This fixture wrote `new Date().toISOString()`, which always carries
+  // milliseconds, and `queend` decodes with Swift's `.iso8601` strategy, which
+  // does not accept a fractional second. On Linux it answers
+  // `{"kind":"error","error":"could not decode the question: ... Expected date
+  // string to be ISO8601-formatted."}` and chooses nothing, so all four cases
+  // below failed there while passing on a Mac.
+  //
+  // The PRODUCT has been right about this for months: `isoSeconds` in
+  // `queen-tick.ts` strips the fraction before any task reaches the policy, and
+  // its comment records the same error at `codingPath: ["tasks", "Index 67"]`.
+  // The fixture was reproducing a bug the product had already fixed, and
+  // nothing noticed because these cases had never run in CI.
+  //
+  // A fixture that builds a shape production never emits tests a program that
+  // does not exist.
   function spentTask(issue: number, inputTokens: number) {
+    const seconds = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
     return {
       ...task(issue, 'accepted'),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      createdAt: seconds,
+      updatedAt: seconds,
       provider: 'anthropic',
       model: 'claude-opus-4.5',
       inputTokens,
