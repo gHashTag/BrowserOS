@@ -180,6 +180,22 @@ jobs:
           EOF
           chmod +x .ci/bin/browseros
 
+      # WITNESS: does an aborted fetch close the socket under THIS bun?
+      #
+      # `probeGatewayReady > aborts the pending request instead of leaving it
+      # hanging` fails 12 runs of 12 in CI and PASSES locally and inside the
+      # production container. The three differ only in bun: 1.4.2 here, 1.3.12
+      # on the laptop, 1.3.6 in the container. This runs the same twenty-line
+      # repro - a wedged raw socket server, one aborted fetch, count the closes
+      # the server observes - so the difference is measured rather than guessed.
+      #
+      # Diagnostic. It comes out in the same PR that reads it.
+      - name: Witness the abort behaviour of this bun
+        run: |
+          echo Ly8gU3RhbmRhbG9uZSByZXBybzogZG9lcyBhbiBhYm9ydGVkIGJ1biBmZXRjaCBjbG9zZSB0aGUgc29ja2V0IHRoZSBzZXJ2ZXIgc2Vlcz8KaW1wb3J0IG5ldCBmcm9tICdub2RlOm5ldCcKbGV0IGNsb3NlQ291bnQgPSAwCmNvbnN0IHNvY2tldHMgPSBuZXcgU2V0KCkKY29uc3Qgc2VydmVyID0gbmV0LmNyZWF0ZVNlcnZlcigocykgPT4gewogIHNvY2tldHMuYWRkKHMpCiAgcy5vbignY2xvc2UnLCAoKSA9PiB7IGNsb3NlQ291bnQrKzsgc29ja2V0cy5kZWxldGUocykgfSkKICAvLyBXZWRnZWQ6IGFjY2VwdCwgcmVhZCwgbmV2ZXIgYW5zd2VyLgogIHMub24oJ2RhdGEnLCAoKSA9PiB7fSkKfSkKYXdhaXQgbmV3IFByb21pc2UoKHIpID0+IHNlcnZlci5saXN0ZW4oMCwgJzEyNy4wLjAuMScsIHIpKQpjb25zdCBwb3J0ID0gc2VydmVyLmFkZHJlc3MoKS5wb3J0CmNvbnN0IGNvbnRyb2xsZXIgPSBuZXcgQWJvcnRDb250cm9sbGVyKCkKY29uc3QgdGltZXIgPSBzZXRUaW1lb3V0KCgpID0+IGNvbnRyb2xsZXIuYWJvcnQoKSwgMTUwKQpsZXQgb3V0Y29tZSA9ICdub25lJwp0cnkgewogIGF3YWl0IGZldGNoKGBodHRwOi8vMTI3LjAuMC4xOiR7cG9ydH0vcmVhZHl6YCwgeyBzaWduYWw6IGNvbnRyb2xsZXIuc2lnbmFsIH0pCiAgb3V0Y29tZSA9ICdyZXNwb25kZWQnCn0gY2F0Y2ggeyBvdXRjb21lID0gY29udHJvbGxlci5zaWduYWwuYWJvcnRlZCA/ICdhYm9ydGVkJyA6ICdlcnJvcicgfQpjbGVhclRpbWVvdXQodGltZXIpCi8vIFdhaXQgdXAgdG8gYSBzZWNvbmQgZm9yIHRoZSBzZXJ2ZXIgdG8gb2JzZXJ2ZSBhIGNsb3NlLCBleGFjdGx5IGFzIHRoZSB0ZXN0IGRvZXMuCmNvbnN0IGRlYWRsaW5lID0gRGF0ZS5ub3coKSArIDEwMDAKd2hpbGUgKERhdGUubm93KCkgPCBkZWFkbGluZSAmJiBjbG9zZUNvdW50IDwgMSkgYXdhaXQgbmV3IFByb21pc2UoKHIpID0+IHNldFRpbWVvdXQociwgMjUpKQpjb25zb2xlLmxvZyhKU09OLnN0cmluZ2lmeSh7CiAgcGxhdGZvcm06IHByb2Nlc3MucGxhdGZvcm0sCiAgYnVuOiB0eXBlb2YgQnVuICE9PSAndW5kZWZpbmVkJyA/IEJ1bi52ZXJzaW9uIDogJ25vdC1idW4nLAogIG91dGNvbWUsCiAgY2xvc2VDb3VudCwKICBzdGlsbE9wZW46IHNvY2tldHMuc2l6ZSwKfSkpCnNlcnZlci5jbG9zZSgpCnByb2Nlc3MuZXhpdCgwKQo= | base64 -d > /tmp/probe-repro.mjs
+          bun --version
+          bun /tmp/probe-repro.mjs || echo "repro did not complete"
+
       - name: Create server env file
         working-directory: trios/agent-server/apps/server
         run: cp .env.example .env.development
