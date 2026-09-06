@@ -37,13 +37,45 @@ jobs:
   #
   # Ubuntu and no Swift: this is `cmp`, and it costs seconds. The comparison
   # does not need the compiler that consumes its result.
-  queen-core-sync:
+  # FOUR MORE GATES THAT RAN NOWHERE, from the same audit.
+  #
+  # 68 make targets, 11 invoked by a workflow. Most of the rest should be local -
+  # `make` builds an app, `relaunch` needs a window server - but these five need
+  # no desktop at all, and each was MEASURED against the shipping ref before
+  # being wired here rather than assumed to pass:
+  #
+  #   sources-drift              the build's source list against the tree
+  #   sources-drift-selftest     ...and the proof that gate can still fail
+  #   binary-drift               the shipped binary against what the tree builds
+  #   run-completeness-selftest  the test-run parser, against known transcripts
+  #
+  # NOT drift-guard, which the same audit surfaced: it is one line invoking
+  # run_chat_sse_e2e.sh with an extra scenario enabled, it drives the Swift
+  # compiler, and it did not finish inside four minutes. Its own comment says it
+  # is "slow, explicit, never accidental". The script it wraps already runs in
+  # swift-logic below.
+  portable-gates:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Separate steps, not one `make a b c d`: make stops at the first failure,
+      # and a single step would report one broken gate and hide the state of the
+      # three behind it. Which gate failed is the whole content of the answer.
       - name: The Linux copy of the policy matches the ring, byte for byte
         working-directory: trios
         run: make queen-core-sync
+      - name: The build's source list matches the tree
+        working-directory: trios
+        run: make sources-drift
+      - name: ...and that gate can still fail
+        working-directory: trios
+        run: make sources-drift-selftest
+      - name: The shipped binary matches what the tree builds
+        working-directory: trios
+        run: make binary-drift
+      - name: The test-run parser reads a known transcript correctly
+        working-directory: trios
+        run: make run-completeness-selftest
 
   server-units:
     runs-on: ubuntu-latest
