@@ -20,6 +20,9 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { execSync } from 'node:child_process'
+// ONE RULE, ONE IMPLEMENTATION: the gate asks the extractor that does the
+// checking rather than keeping a second opinion about what counts as checkable.
+import { promisedIdentifiers } from './verdict-audit.mjs'
 
 // IMPORT-SAFE. This module ran its production query and called process.exit at
 // import time, so importing it hit the live database and killed the importer -
@@ -120,9 +123,22 @@ export function gate(file) {
  * knows how to say WHICH rule each one fails, and the answer decides whether
  * the repair is a judge, a template, or the gate itself.
  */
-export function gateBody(body, label = '(body)') {
+export function gateBody(body, label = '(body)', opts = {}) {
+  // A FILED ISSUE MAY ALREADY BE DONE, AND A DRAFT MAY NOT BE.
+  //
+  // The "identifier already exists" rule catches a vacuous DRAFT criterion -
+  // one satisfiable by an empty patch. Pointed at a filed issue whose bee has
+  // already landed the work, it reports that success as a brief defect: #1090
+  // is SUPPORTED by the audit ("absent at the fork point, present on the
+  // branch") and the gate calls its identifier already-existing, because the
+  // gate looks at the tree NOW and the audit looks at the fork point. Both are
+  // right about different moments. In `filed` mode the finding is a note.
+  const filed = opts.filed === true
   const file = label
   const problems = []
+  // Findings that teach without blocking. A gate with only one severity has to
+  // choose between saying nothing and refusing everything.
+  const notes = []
 
   for (const h of HEADINGS) {
     if (!body.split('\n').some((l) => l.trim().startsWith(h))) problems.push(`missing heading ${h}`)
@@ -160,11 +176,16 @@ export function gateBody(body, label = '(body)') {
   // backticked identifiers AND asserts their absence, in any of the phrasings
   // this backlog actually uses.
   const criteriaLines = (body.split('## Success Criteria')[1] || '').split('\n')
-  const promised = []
-  for (const l of criteriaLines) {
-    if (!/appears (nowhere|anywhere)|does not (exist|appear)|no such identifier/i.test(l)) continue
-    for (const m of l.matchAll(/`([A-Za-z_][A-Za-z0-9_]{2,})`/g)) promised.push(m[1])
-  }
+  // ONE EXTRACTOR, NOT TWO. This file had its own regex for "what counts as a
+  // promise" and `verdict-audit` has another - two opinions about the same
+  // question, which is the defect this loop keeps finding elsewhere and had
+  // here. Measured 2026-09-06: #1090 was rejected by this gate as having no
+  // mechanically checkable criterion while the audit extracted `briefShape`
+  // from the same body and proved it against the pushed branch. The audit's
+  // extractor is the one hardened by five rounds of false accusations - the
+  // mention-versus-definition rule, the `node_modules` case, the tree-search
+  // form - so the gate asks it rather than keeping a narrower copy.
+  const promised = promisedIdentifiers(body)
 
   // ...and there must be at least one such promise, because it is the ONLY
   // criterion that can be checked without a human or a model. Measured on the
@@ -237,7 +258,15 @@ export function gateBody(body, label = '(body)') {
   for (const id of promised) {
     try {
       const n = execSync(`git grep -w '${id}' -- . 2>/dev/null | grep -vc worktrees || true`, { cwd: ROOT, encoding: 'utf8' }).trim()
-      if (n !== '0') problems.push(`identifier ${id} already exists (${n} hits) - the criterion is already met`)
+      if (n !== '0') {
+        const already = `identifier ${id} already exists (${n} hits) - the criterion is already met`
+        // On a FILED issue this may simply mean the bee's work has landed: the
+        // audit judges the same identifier at the FORK POINT and calls #1090
+        // SUPPORTED for exactly that reason. Both are right about different
+        // moments, so only a draft is failed for it.
+        if (filed) notes.push(`${already}; on a filed issue this may mean the work has landed`)
+        else problems.push(already)
+      }
     } catch { problems.push(`could not check identifier ${id}`) }
   }
 
@@ -323,7 +352,28 @@ export function gateBody(body, label = '(body)') {
   if (commandish.length) {
     const demandsOutput = criteriaLines.some((l) =>
       /raw stdout|unedited|quoted? (?:in|the)|paste|verbatim|its output/i.test(l))
-    if (!demandsOutput) {
+    // A BRIEF THAT IS PROVABLY AUDITABLE IS NOT REJECTED FOR STYLE.
+    //
+    // This rule is right about a command criterion - a described result is not
+    // an observed one - and it was applied as a hard failure regardless of what
+    // else the brief carried. Measured 2026-09-06: FIVE open issues fail this
+    // gate on nothing but this rule, and `verdict-audit` extracts a promised
+    // identifier from every one of them. Four of the five were already proved
+    // SUPPORTED against their pushed branch - so the gate was rejecting briefs
+    // whose verdicts the same directory had mechanically confirmed.
+    //
+    // ONE RULE, ONE IMPLEMENTATION: rather than keep a second opinion about
+    // what counts as checkable, this asks the extractor that actually does the
+    // checking. If it finds a promise, the raw-output finding is a note - the
+    // teaching survives, the false rejection does not.
+    const alsoCheckable = promisedIdentifiers(body).length > 0
+    if (!demandsOutput && alsoCheckable) {
+      notes.push(
+        `${commandish.length} criterion(s) name a command without asking for its raw output - ` +
+          'a described result is not an observed one. Not a failure here: the brief also ' +
+          'promises an identifier the audit can check on its own.',
+      )
+    } else if (!demandsOutput) {
       problems.push(
         `${commandish.length} criterion(s) name a command but none asks for its raw output. ` +
         'A described result, a count, or an exit code without its stdout is a number the ' +
@@ -333,7 +383,7 @@ export function gateBody(body, label = '(body)') {
     }
   }
 
-  return { file: path.basename(file), problems, boundary, promised }
+  return { file: path.basename(file), problems, notes, boundary, promised }
 }
 
 // GATED ON isMain, not merely on "were there arguments".
@@ -393,8 +443,15 @@ if (argv[0] === '--issues' || argv[0] === '--open') {
     // because the one answer this must never give is health for work it never
     // looked at.
     if (body === null) { unread++; console.log(`?? #${n}  body unreadable - NOT gated`); continue }
-    const r = gateBody(body, `#${n}`)
-    if (!r.problems.length) { clean++; if (!bodies) console.log(`ok #${n}`); continue }
+    const r = gateBody(body, `#${n}`, { filed: true })
+    if (!r.problems.length) {
+      clean++
+      if (!bodies) {
+        console.log(`ok #${n}`)
+        ;(r.notes || []).forEach((x) => console.log(`      ~   ${x.slice(0, 110)}`))
+      }
+      continue
+    }
     console.log(`!! #${n}  ${r.problems.length} problem(s)`)
     for (const p of r.problems) {
       // Tallied by RULE, not by issue: the question is which rule the corpus
@@ -420,6 +477,9 @@ if (files.length) {
     console.log(`${r.problems.length ? 'FAIL  ' : 'ok    '}${r.file}   parser sees ${r.boundary.length} path(s)`)
     r.boundary.forEach((p) => console.log(`        boundary  ${p}`))
     r.problems.forEach((p) => console.log(`        !!  ${p}`))
+    // Notes are findings that teach without blocking. A gate with one severity
+    // must choose between saying nothing and refusing everything.
+    ;(r.notes || []).forEach((n) => console.log(`        ~   ${n}`))
     if (r.problems.length) bad++
   }
   console.log(`\nfailing: ${bad} of ${files.length}`)
