@@ -3068,6 +3068,40 @@ check('divergence is reported with its DIRECTION, never as a bare count', async 
   if (oneWay.includes('BOTH directions')) throw new Error('a one-way divergence claimed both directions')
 })
 
+check('every declared pair can actually be run for its kind', async () => {
+  const AG = await import('./agree.mjs')
+  if (!AG.PAIRS.length) throw new Error('the registry is empty, so the gate compares nothing')
+  for (const pair of AG.PAIRS) {
+    for (const field of ['name', 'kind', 'question', 'a', 'b']) {
+      if (!pair[field]) throw new Error(`pair ${pair.name || '(unnamed)'} has no ${field}`)
+    }
+    if (pair.kind === 'remote' && !pair.program) throw new Error(`remote pair ${pair.name} has no program`)
+    if (pair.kind === 'local' && !(pair.script && typeof pair.pick === 'function')) {
+      throw new Error(`local pair ${pair.name} has no script and pick`)
+    }
+    if (!['remote', 'local'].includes(pair.kind)) throw new Error(`pair ${pair.name} has kind ${pair.kind}`)
+  }
+  // Two pairs must not share a name, or --pair picks whichever comes first and
+  // the other can never be run.
+  const names = AG.PAIRS.map((p) => p.name)
+  if (new Set(names).size !== names.length) throw new Error('two pairs share a name')
+})
+
+check('a side that could not be built is unknown, never agreement', async () => {
+  const AG = await import('./agree.mjs')
+  const boundary = AG.PAIRS.find((p) => p.name === 'boundary-ts-vs-swift')
+  if (!boundary) throw new Error('the cross-language pair is not registered')
+  // What `boundary-parity.ts` emits when swiftc is absent: the row is present
+  // and its Swift side is null. Counting that as agreement is how "all green"
+  // comes to mean "we looked at one of the two".
+  const picked = boundary.pick({ id: 42, js: ['a/b.ts'], ts: ['a/b.ts'], swift: null })
+  const r = AG.classify(picked)
+  if (r.kind !== 'unknown') throw new Error(`an unbuilt side was classified ${r.kind}`)
+  // And with both sides present it must compare them rather than pass anything.
+  const both = AG.classify(boundary.pick({ id: 43, ts: ['a/b.ts'], swift: ['c/d.ts'] }))
+  if (both.kind !== 'DIFFER') throw new Error('two different answers were not reported as a divergence')
+})
+
 check('agreement is reported as agreement, never as proof', async () => {
   const AG = await import('./agree.mjs')
   const out = AG.render({ name: 'p', question: 'q', a: 'A', b: 'B' }, [AG.classify({ id: 7, a: [1], b: [1] })])

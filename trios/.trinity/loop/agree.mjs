@@ -66,6 +66,7 @@ const isMain = process.argv[1] && process.argv[1].endsWith('/agree.mjs')
 export const PAIRS = [
   {
     name: 'answered-criteria',
+    kind: 'remote',
     question: 'which promised criteria did the bee answer?',
     a: 'unjudgedCriteria (matches by text)',
     b: 'missingVerdictSlots (matches by slot number)',
@@ -94,6 +95,40 @@ export const PAIRS = [
         out.push({ id: r.id, tag: r.review_state, a, b, total: promised.length })
       }
     `,
+  },
+  // THE SAME QUESTION, ASKED ACROSS THREE LANGUAGES.
+  //
+  // "Which paths may this bee touch?" is answered in the loop's own JavaScript,
+  // in the deployed TypeScript, and in the SR-00 Swift ring - and a fourth copy
+  // sits in `queen-brief-shape.ts`, whose comment justifies itself by saying the
+  // other TypeScript copy "is module-private". That copy is exported now. The
+  // reason expired and nobody noticed, which is the whole argument for testing
+  // the claim instead of reading it.
+  //
+  // This rule has already cost real work: two copies knew `## Границы` and one
+  // did not, and seven bees were accused of straying outside a boundary they had
+  // honoured. The heading was added everywhere; nothing was added that would
+  // notice the next divergence.
+  //
+  // Two pairs rather than one three-way comparison, because "A and B and C agree"
+  // hides WHICH two parted company, and that is the only part anybody can act on.
+  {
+    name: 'boundary-js-vs-ts',
+    kind: 'local',
+    script: 'boundary-parity.ts',
+    question: 'which paths may this bee touch?',
+    a: "the loop's own verdict-audit.mjs (JavaScript)",
+    b: 'the deployed queen-tick.ts (TypeScript)',
+    pick: (r) => ({ id: r.id, a: r.js, b: r.ts }),
+  },
+  {
+    name: 'boundary-ts-vs-swift',
+    kind: 'local',
+    script: 'boundary-parity.ts',
+    question: 'which paths may this bee touch?',
+    a: 'the deployed queen-tick.ts (TypeScript)',
+    b: 'the QueenIssueBoundary ring (Swift)',
+    pick: (r) => ({ id: r.id, a: r.ts, b: r.swift }),
   },
 ]
 
@@ -176,6 +211,7 @@ export function render(pair, rows, limit = 6) {
 if (isMain) {
   const CH = await import(path.join(DIR, 'channel.mjs'))
   const L = await import(path.join(DIR, 'loop.mjs'))
+  const { execFileSync } = await import('node:child_process')
 
   const at = process.argv.indexOf('--limit')
   const limit = at >= 0 ? Number(process.argv[at + 1]) || 6 : 6
@@ -187,9 +223,8 @@ if (isMain) {
     process.exit(2)
   }
 
-  let diverged = 0
-  let measured = 0
-  for (const pair of pairs) {
+  /** Rows from the container, for a pair whose implementations live there. */
+  const remoteRows = (pair) => {
     const prog = `
       const {Pool} = require('pg')
       const mod = await import('/app/apps/server/src/api/services/queen-tick.ts')
@@ -199,23 +234,74 @@ if (isMain) {
       console.log('@@' + JSON.stringify(out))
       process.exit(0)
     `
-    let rows = null
     try {
       const res = String(CH.remote(`cd /app/apps/server && bun -e ${L.shq(prog)}`, { attempts: 2 }))
       const i = res.indexOf('@@[')
-      if (i >= 0) rows = JSON.parse(res.slice(i + 2))
-    } catch { rows = null }
+      return i >= 0 ? { rows: JSON.parse(res.slice(i + 2)) } : null
+    } catch { return null }
+  }
+
+  // ONE RUN PER SCRIPT, SHARED BY EVERY PAIR THAT READS IT. Building the Swift
+  // ring twice to answer two questions about the same rows would double the
+  // slowest step for nothing, and - worse - could produce two different answers
+  // for one run, which is the confusion this whole tool exists to remove.
+  const localCache = new Map()
+  const localRun = (script) => {
+    if (localCache.has(script)) return localCache.get(script)
+    let got = null
+    try {
+      const out = String(execFileSync('bun', ['run', path.join(DIR, script)], {
+        encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, timeout: 600000, stdio: ['ignore', 'pipe', 'ignore'],
+      }))
+      const i = out.indexOf('@@')
+      if (i >= 0) got = JSON.parse(out.slice(i + 2))
+    } catch { got = null }
+    localCache.set(script, got)
+    return got
+  }
+
+  let diverged = 0
+  let measured = 0
+  for (const pair of pairs) {
+    let rows = null
+    let sides = null
+    if (pair.kind === 'local') {
+      const got = localRun(pair.script)
+      if (got && Array.isArray(got.rows)) {
+        rows = got.rows.map(pair.pick)
+        sides = got.sides
+      }
+    } else {
+      const got = remoteRows(pair)
+      if (got) rows = got.rows
+    }
     if (!rows) {
-      console.log(`pair "${pair.name}": the rows could not be read - NOTHING was compared. An unreachable board is not an agreeing one.`)
+      console.log(`pair "${pair.name}": the rows could not be read - NOTHING was compared. An unreachable source is not an agreeing one.\n`)
       continue
     }
-    measured++
     const judged = rows.map(classify)
+    // COMPARED, not merely attempted. A pair whose rows all came back unreadable
+    // - because a side would not build - has measured NOTHING, and counting it
+    // as a pair that ran is how "0 diverging rows" comes to mean "we could not
+    // look". The exit code has to be able to tell those apart.
+    const compared = judged.filter((r) => r.kind === 'agree' || r.kind === 'DIFFER').length
+    if (compared > 0) measured++
     console.log(render(pair, judged, limit))
+    // A SIDE THAT COULD NOT BE BUILT IS NAMED, not silently dropped. `classify`
+    // already returns `unknown` for it rather than agreement, and this says out
+    // loud which side that was - "all green" must never be able to mean "we
+    // looked at one of the two".
+    if (sides) {
+      const absent = Object.entries(sides).filter(([, ok]) => !ok).map(([k]) => k)
+      if (absent.length) console.log(`  NOT BUILT, so nothing is claimed about it: ${absent.join(', ')}`)
+    }
     console.log('')
     diverged += judged.filter((r) => r.kind === 'DIFFER').length
   }
-  if (!measured) process.exit(3)
+  if (!measured) {
+    console.log('NOTHING was compared. An unbuildable side is not an agreeing one.')
+    process.exit(3)
+  }
   console.log(`${measured} pair(s) compared, ${diverged} diverging row(s)`)
   process.exit(diverged ? 2 : 0)
 }
