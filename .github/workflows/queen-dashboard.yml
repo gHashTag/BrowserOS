@@ -1,0 +1,47 @@
+name: queen dashboard
+
+# THE PUBLIC FACE HAD A CONTRACT AND NO WORKFLOW.
+#
+# `trios/apps/website` is the t27.ai dashboard - the page anyone reads to see
+# what the Queen is doing. It carries `qa/queen-review-lifecycle-contract.mjs`,
+# which imports the REAL page module (the same `src/pages/Queen.tsx` the site
+# builds) and pins the review lifecycle against the closed set of states the
+# server publishes: 194 checks.
+#
+# Measured 2026-09-06: the string `apps/website` appeared in NO workflow in this
+# repository. Typecheck, the contract and the build all pass and always had -
+# nothing was broken. What was missing was anything that would notice when the
+# server's published states and the page's copy of them stop agreeing, which is
+# the one thing this contract exists to catch.
+#
+# ITS OWN WORKFLOW, not a job in `trios logic`: that one runs a macOS Swift job,
+# and a paragraph of website CSS should not wake a Mac runner. The path filter
+# is the point of putting it here.
+on:
+  pull_request:
+    paths:
+      - 'trios/apps/website/**'
+      - '.github/workflows/queen-dashboard.yml'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      # `--frozen-lockfile`, because a gate that quietly resolves a different
+      # dependency tree than the one committed is testing a build nobody ships.
+      - name: Install
+        working-directory: trios/apps/website
+        run: bun install --frozen-lockfile
+      # Separate steps, so the answer says WHICH of the three failed. `bun run
+      # check` chains all three with `&&` and reports only the first.
+      - name: Types
+        working-directory: trios/apps/website
+        run: bun run typecheck
+      - name: The review lifecycle contract, against the real page module
+        working-directory: trios/apps/website
+        run: bun run qa
+      - name: The page still builds
+        working-directory: trios/apps/website
+        run: bun run build
