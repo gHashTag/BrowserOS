@@ -194,6 +194,10 @@ const STEPS = [
   // state nothing a checker can reach fail this gate - every one would have
   // been caught before it was filed. 19 of 197 open issues fail it today, and
   // those 19 are the next batch of unauditable verdicts unless somebody looks.
+  // A FINISHED DISPATCH WITH NO VERDICT BLOCK WAITS FOR EVER, and `wait` is
+  // deliberately the one valve a timer must not touch - so nothing else looks.
+  // Sixteen sit there now, every note saying "0 of N criteria judged".
+  { name: 'unverdicted', file: 'unverdicted.mjs', reportsOnly: true, act: '--limit 6', dryArgs: '--limit 6', why: 'a finished dispatch whose worker never wrote a verdict block' },
   { name: 'brief-gate', file: 'brief-gate.mjs', reportsOnly: true, act: '--open', dryArgs: '--open', why: 'which open briefs will produce a verdict nothing can check' },
   { name: 'exposure', file: 'exposure.mjs', reportsOnly: true, act: '', dryArgs: '', why: 'what the live service serves to an origin it has never heard of' },
   { name: 'forked-files', file: 'forked-files.mjs', reportsOnly: true, act: '', dryArgs: '', why: 'a file that exists twice must not start saying two things' },
