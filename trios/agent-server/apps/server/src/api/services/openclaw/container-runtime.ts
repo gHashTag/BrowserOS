@@ -17,6 +17,7 @@ import type {
   LogFn,
   WaitForContainerNameReleaseOptions,
 } from '../../../lib/container'
+import net from 'node:net'
 import { isContainerNameInUse } from '../../../lib/container'
 import { logger } from '../../../lib/logger'
 import {
@@ -483,36 +484,116 @@ export type GatewayReadyProbeResult =
  * port, a wedged port, and a gateway answering non-2xx are three different
  * operational problems.
  */
+/**
+ * Is the gateway answering /readyz, and is the connection gone when it is not?
+ *
+ * WRITTEN ON A RAW SOCKET, NOT `fetch`, AND THAT IS THE WHOLE POINT.
+ *
+ * The previous implementation was `fetch` with an `AbortController`. Aborting a
+ * fetch cancels the REQUEST; whether it destroys the underlying connection is
+ * the runtime's business, and under load it does not. Measured in CI on
+ * 2026-09-06, inside the 976-test group where this leaks:
+ *
+ *   CLOSE-WITNESS: closed=false after 3015ms, closeCount=0, sockets=1
+ *
+ * The wedged server still had the socket open three seconds after the probe had
+ * returned `timed-out`. Not late and not merely unobserved - open. Alone, and
+ * on two other machines, the same probe closed in 29ms, which is why this took
+ * four rounds to see: it only leaks under the load it will actually meet, and
+ * this function is called in a retry loop against a gateway that is by
+ * definition not answering.
+ *
+ * A socket we own can be destroyed. `destroy()` on timeout is a guarantee about
+ * a file descriptor rather than a request about a request, and the readiness
+ * probe stops depending on fetch's pooling semantics to avoid leaking one
+ * connection per attempt.
+ *
+ * `Connection: close` is sent as well, so a gateway that DOES answer tears the
+ * connection down itself rather than leaving it pooled for a caller that will
+ * never reuse it.
+ *
+ * The four outcomes and their exact shapes are unchanged; the tests that pin
+ * them did not move.
+ */
 export async function probeGatewayReady(
   hostPort: number,
   timeoutMs: number = GATEWAY_READY_PROBE_TIMEOUT_MS,
 ): Promise<GatewayReadyProbeResult> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
-  try {
-    const res = await fetch(`http://127.0.0.1:${hostPort}/readyz`, {
-      signal: controller.signal,
-    })
-    if (res.ok) {
-      return { ready: true }
+  return new Promise<GatewayReadyProbeResult>((resolve) => {
+    const socket = new net.Socket()
+    let settled = false
+    let received = ''
+
+    // Every exit runs through here, so there is no path that leaves the socket
+    // alive - which is the defect this replaces.
+    const finish = (result: GatewayReadyProbeResult): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      socket.destroy()
+      resolve(result)
     }
-    return { ready: false, reason: 'not-ok', detail: `HTTP ${res.status}` }
-  } catch (err) {
-    if (controller.signal.aborted) {
-      return {
+
+    const timer = setTimeout(() => {
+      finish({
         ready: false,
         reason: 'timed-out',
         detail: `no response within ${timeoutMs}ms`,
+      })
+    }, timeoutMs)
+
+    socket.setTimeout(timeoutMs)
+    socket.on('timeout', () => {
+      finish({
+        ready: false,
+        reason: 'timed-out',
+        detail: `no response within ${timeoutMs}ms`,
+      })
+    })
+
+    socket.on('error', (err: Error) => {
+      // A connection that was never established is `refused`; anything after a
+      // successful connect is reported the same way, because the caller's only
+      // question is whether the gateway answered.
+      finish({ ready: false, reason: 'refused', detail: err.message })
+    })
+
+    socket.on('close', () => {
+      // Closed before a status line arrived: the gateway hung up on us.
+      finish({
+        ready: false,
+        reason: 'refused',
+        detail: 'connection closed before a response',
+      })
+    })
+
+    socket.on('data', (chunk: Buffer) => {
+      received += chunk.toString('latin1')
+      const statusLine = received.split('\r\n', 1)[0]
+      if (!received.includes('\r\n')) return
+      const match = statusLine.match(/^HTTP\/1\.[01] (\d{3})/)
+      if (!match) {
+        finish({
+          ready: false,
+          reason: 'refused',
+          detail: `unparseable status line: ${statusLine.slice(0, 60)}`,
+        })
+        return
       }
-    }
-    return {
-      ready: false,
-      reason: 'refused',
-      detail: err instanceof Error ? err.message : String(err),
-    }
-  } finally {
-    clearTimeout(timer)
-  }
+      const status = Number(match[1])
+      if (status >= 200 && status < 300) {
+        finish({ ready: true })
+        return
+      }
+      finish({ ready: false, reason: 'not-ok', detail: `HTTP ${status}` })
+    })
+
+    socket.connect(hostPort, '127.0.0.1', () => {
+      socket.write(
+        `GET /readyz HTTP/1.1\r\nHost: 127.0.0.1:${hostPort}\r\nConnection: close\r\n\r\n`,
+      )
+    })
+  })
 }
 
 function imageMatchesExpectedRef(
