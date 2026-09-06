@@ -2926,6 +2926,40 @@ check('the exposure probe never prints a body', () => {
 // newest era, where nearly all the volume is, FORTY OF FORTY failing briefs
 // were accepted. Not forty excellent pieces of work: forty reviews with nothing
 // to fail against.
+// A FINISHED DISPATCH WITH NO VERDICT BLOCK WAITS FOR EVER.
+//
+// Sixteen dispatches sit in `wait`, every review note saying "0 of 4 criteria
+// judged so far" - not three of five, ZERO. Five of five readable transcripts
+// carry no `## VERDICT` anywhere, and the two longest end mid-sentence at
+// 222,468 and 225,283 characters. The workers stopped before concluding, and
+// `wait` is the one valve a timer must not touch, so nothing else notices.
+check('a transcript that could not be fetched accuses nobody', async () => {
+  const U = await import('./unverdicted.mjs')
+  for (const reason of ['unreachable', 'unreadable']) {
+    const r = U.classify(1, { reason, said: '', len: 0 })
+    if (r.kind !== 'unknown') throw new Error(`${reason} was classified ${r.kind} - the forty-two-bees accusation again`)
+  }
+  const none = U.classify(2, null)
+  if (none.kind !== 'unknown') throw new Error('a missing transcript object was classified as a finding')
+})
+
+check('a transcript carrying a verdict block the review missed is a PARSER fault, not a worker one', async () => {
+  const U = await import('./unverdicted.mjs')
+  // The branch that keeps this tool honest: if the block IS there, this file's
+  // own thesis is wrong for that row and it must say so loudly rather than
+  // fold it into the count.
+  const r = U.classify(3, { reason: 'ok', said: 'blah\n## VERDICT\n- a: met\n', len: 30 })
+  if (r.kind !== 'PARSER') throw new Error(`a present block was classified ${r.kind}`)
+  if (!U.render([r]).includes('PARSER FAULT')) throw new Error('the parser fault was not reported loudly')
+})
+
+check('no rows and no block are different answers', async () => {
+  const U = await import('./unverdicted.mjs')
+  if (U.classify(4, { reason: 'no-rows', said: '', len: 0 }).kind !== 'no-transcript') throw new Error('an empty board answer was called a missing block')
+  const noBlock = U.classify(5, { reason: 'ok', said: 'a long report that never concludes', len: 34 })
+  if (noBlock.kind !== 'no-block') throw new Error(`a real transcript without a block was classified ${noBlock.kind}`)
+})
+
 check('an empty denominator is a dash, never a zero percent', async () => {
   const A = await import('./accept-rate.mjs')
   const s = A.split([{ number: 9999, body: '' }], () => null, () => true)
