@@ -130,10 +130,14 @@ export function render(r) {
 export function runLog(id, run = sh) {
   const out = run(`gh run view ${id} --repo ${REPO} --log-failed 2>/dev/null`)
   if (out && out.trim()) return out
-  const failed = run(`gh run view ${id} --repo ${REPO} --json jobs -q '[.jobs[]|select(.conclusion=="failure")]|length' 2>/dev/null`)
-  const n = Number(String(failed).trim())
+  const failed = String(run(`gh run view ${id} --repo ${REPO} --json jobs -q '[.jobs[]|select(.conclusion=="failure")]|length' 2>/dev/null`) ?? '').trim()
+  // AN EMPTY STRING IS NOT A ZERO, and `Number('')` is 0 - which turned "the
+  // job list could not be read" straight back into "green", one level below the
+  // defect this whole function was written to fix. My own calibration case
+  // caught it: the stub that fails every command was reported as a clean run.
+  if (!/^\d+$/.test(failed)) return null
   // A completed run whose job list is readable and has no failure is green.
-  return Number.isFinite(n) && n === 0 ? '' : null
+  return Number(failed) === 0 ? '' : null
 }
 
 /** The most recent completed run id for a pull request. */

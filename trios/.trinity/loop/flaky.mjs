@@ -115,9 +115,11 @@ export function failuresOf(id, deps = {}) {
     // every job passed, and counting that as unreadable would drop the very
     // runs that prove something was fixed - inflating every remaining failure's
     // frequency toward "deterministic" exactly when it stopped being one.
-    const failed = run(`gh run view ${id} --repo ${REPO} --json jobs -q '[.jobs[]|select(.conclusion=="failure")]|length' 2>/dev/null`)
-    const n = Number(String(failed).trim())
-    return Number.isFinite(n) && n === 0 ? [] : null
+    // AN EMPTY STRING IS NOT A ZERO. `Number('')` is 0, so an unreadable job
+    // list would have read as "no failures" - the same defect one level down.
+    const failed = String(run(`gh run view ${id} --repo ${REPO} --json jobs -q '[.jobs[]|select(.conclusion=="failure")]|length' 2>/dev/null`) ?? '').trim()
+    if (!/^\d+$/.test(failed)) return null
+    return Number(failed) === 0 ? [] : null
   }
   if (parse) return parse(out)
   return [...new Set(
