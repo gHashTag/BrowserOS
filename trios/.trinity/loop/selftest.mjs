@@ -2960,6 +2960,41 @@ check('no rows and no block are different answers', async () => {
   if (noBlock.kind !== 'no-block') throw new Error(`a real transcript without a block was classified ${noBlock.kind}`)
 })
 
+// A ROW COUNT FROM A TABLE KEYED BY THE THING BEING COUNTED ANSWERS NOTHING.
+//
+// This round first "proved" that no issue is ever re-dispatched: 391 dispatches
+// across 391 issues, one each. `queen_dispatch` is written with
+// `ON CONFLICT (issue) DO UPDATE`, so that result was the schema, not a finding.
+// The archive holds 602 attempts across 170 issues, one of them attempted
+// thirteen times. These cases pin the tool that replaced that mistake.
+check('an unreadable attempt history accuses nobody', async () => {
+  const S = await import('./silent-loop.mjs')
+  for (const row of [{ issue: 1, archived: null, spent: 0 }, { issue: 2, archived: undefined, spent: 0 }, null]) {
+    const r = S.classify(row || { issue: 3, archived: null, spent: 0 })
+    if (r.kind !== 'unknown') throw new Error(`a missing history was classified ${r.kind} - the forty-two-bees accusation again`)
+  }
+  if (S.attemptsOf({ archived: 'not a number' }) !== null) throw new Error('an unparseable count became an attempt total')
+})
+
+check('an issue that DID charge the ceiling refutes the thesis rather than feeding it', async () => {
+  const S = await import('./silent-loop.mjs')
+  const counted = S.classify({ issue: 10, archived: 8, spent: 2, hours: 3 })
+  if (counted.kind !== 'counted') throw new Error(`a charged attempt was classified ${counted.kind}`)
+  // The branch that keeps this honest: when the mechanism is working on more
+  // issues than it is failing on, the report must SAY the thesis failed.
+  const report = S.render([counted, S.classify({ issue: 11, archived: 0, spent: 0 })])
+  if (!report.includes('REFUTES THE THESIS')) throw new Error('a board that contradicts the tool was reported as if it confirmed it')
+})
+
+check('attempts are archived plus the live one, and one silent pass is forgiven', async () => {
+  const S = await import('./silent-loop.mjs')
+  if (S.attemptsOf({ archived: 2 }) !== 3) throw new Error('the attempt on the board was not counted')
+  const young = S.classify({ issue: 12, archived: 0, spent: 0 })
+  if (young.kind !== 'young') throw new Error(`a single silent pass was classified ${young.kind} - the rule intends to forgive it`)
+  const looping = S.classify({ issue: 13, archived: 2, spent: 0 })
+  if (looping.kind !== 'looping') throw new Error(`three attempts charging nothing was classified ${looping.kind}`)
+})
+
 check('an empty denominator is a dash, never a zero percent', async () => {
   const A = await import('./accept-rate.mjs')
   const s = A.split([{ number: 9999, body: '' }], () => null, () => true)

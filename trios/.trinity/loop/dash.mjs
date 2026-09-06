@@ -76,6 +76,24 @@ export function swarmCounts(run = sh) {
   return m ? { running: Number(m[1]), finished: Number(m[2]) } : null
 }
 
+/**
+ * Send-backs that are re-attempted while their retry ceiling never moves.
+ *
+ * An attempt is charged only when a criterion was tested and FAILED, so a bee
+ * that goes silent is deliberately not charged (#1420 FR-003) and work nobody
+ * assessed never reaches a person. A bee silent EVERY time therefore loops with
+ * no ceiling at all, and this is the count of issues in that state.
+ *
+ * `silent-loop.mjs` exits 2 when it finds any, which is precisely when this row
+ * matters - `sh` above returns the output whatever the exit code, so the fact
+ * is not lost at the moment it becomes interesting.
+ */
+export function loopingCounts(run = sh) {
+  const out = run(`node ${path.join(DIR, 'silent-loop.mjs')}`, 200000)
+  const m = out.match(/(\d+) examined, (\d+) looping with no ceiling/)
+  return m ? { examined: Number(m[1]), looping: Number(m[2]) } : null
+}
+
 /** The worst-failing chain step, and its rate. */
 export function worstStep(run = sh) {
   // A WINDOW, NOT A LIFETIME. The whole record contains two resolved outages -
@@ -233,6 +251,7 @@ export function facts(deps = {}) {
   const { run = sh, read } = deps
   return {
     swarm: measure(() => swarmCounts(run)),
+    looping: measure(() => loopingCounts(run)),
     worstStep: measure(() => worstStep(run)),
     proven: measure(() => (read ? provenCounts(read) : provenCounts())),
     selftest: measure(() => (read ? selftestCases(read) : selftestCases())),
@@ -293,6 +312,7 @@ export function rows(f, prev) {
     { k: 'dispatches finished', v: f.swarm?.finished ?? null, prev: p.swarm?.finished ?? null, goodDown: false },
     { k: 'judged verdicts that prove', v: f.proven?.proven ?? null, prev: p.proven?.proven ?? null, goodDown: false },
     { k: 'briefs with nothing checkable', v: f.proven?.unjudgeable ?? null, prev: p.proven?.unjudgeable ?? null },
+    { k: 'send-backs looping with no ceiling', v: f.looping?.looping ?? null, prev: p.looping?.looping ?? null },
     { k: `worst step, last 8 runs: ${f.worstStep?.step ?? '-'}, percent`, v: f.worstStep?.rate ?? null, prev: p.worstStep?.rate ?? null },
     { k: 'selftest cases', v: f.selftest ?? null, prev: p.selftest ?? null, goodDown: false },
     { k: 'ring T27-00 cases agreeing with the twin', v: f.parity?.agree ?? null, prev: p.parity?.agree ?? null, goodDown: false },

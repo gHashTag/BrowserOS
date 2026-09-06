@@ -198,6 +198,7 @@ const STEPS = [
   // deliberately the one valve a timer must not touch - so nothing else looks.
   // Sixteen sit there now, every note saying "0 of N criteria judged".
   { name: 'unverdicted', file: 'unverdicted.mjs', reportsOnly: true, act: '--limit 6', dryArgs: '--limit 6', why: 'a finished dispatch whose worker never wrote a verdict block' },
+  { name: 'silent-loop', file: 'silent-loop.mjs', reportsOnly: true, act: '', dryArgs: '', why: 'an attempt that charges no retry budget can be repeated for ever' },
   { name: 'brief-gate', file: 'brief-gate.mjs', reportsOnly: true, act: '--open', dryArgs: '--open', why: 'which open briefs will produce a verdict nothing can check' },
   { name: 'exposure', file: 'exposure.mjs', reportsOnly: true, act: '', dryArgs: '', why: 'what the live service serves to an origin it has never heard of' },
   { name: 'forked-files', file: 'forked-files.mjs', reportsOnly: true, act: '', dryArgs: '', why: 'a file that exists twice must not start saying two things' },
