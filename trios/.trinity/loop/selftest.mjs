@@ -3068,6 +3068,47 @@ check('divergence is reported with its DIRECTION, never as a bare count', async 
   if (oneWay.includes('BOTH directions')) throw new Error('a one-way divergence claimed both directions')
 })
 
+// THE ONE NUMBER NOBODY MEASURED: is the swarm WORKING?
+//
+// Twenty instruments counted issues, verdicts, briefs and disagreements. The
+// dashboard's `bees running (of 4)` is an INSTANT, sampled once an iteration,
+// of a quantity that turned out to be bimodal - it read 4 as often as 0 and
+// could never have shown that half the day had no bee running at all.
+check('an instant is not a rate: idleness is counted over a window', async () => {
+  const I = await import('./idle.mjs')
+  const t0 = 1_000_000_000_000
+  const min = 60_000
+  // One bee for the first 10 minutes of a 20-minute window: half idle.
+  const u = I.utilisation([[t0, t0 + 10 * min]], t0, t0 + 20 * min, 4)
+  if (u.idlePercent !== 50) throw new Error(`half an idle window measured ${u.idlePercent}%`)
+  if (u.fullPercent !== 0) throw new Error('one bee of four was counted as full capacity')
+  // A window with nothing sampled is absent, not idle.
+  if (I.utilisation([], t0, t0 - 1, 4) !== null) throw new Error('an empty window returned a number instead of nothing')
+})
+
+check('overlapping bees are one burst, so no gap is invented between them', async () => {
+  const I = await import('./idle.mjs')
+  const t0 = 1_000_000_000_000
+  const min = 60_000
+  // Two bees running at once, then a real 10-minute gap, then another.
+  const g = I.gapsOf([[t0, t0 + 5 * min], [t0 + 2 * min, t0 + 6 * min], [t0 + 16 * min, t0 + 18 * min]])
+  if (g.bursts !== 2) throw new Error(`two overlapping bees made ${g.bursts} bursts instead of one`)
+  if (g.gaps.length !== 1) throw new Error('an overlap invented a gap that never existed')
+  if (Math.round(g.gaps[0]) !== 10) throw new Error(`the gap measured ${g.gaps[0]} instead of 10 minutes`)
+})
+
+check('gaps longer than the tick mean rounds are starting nothing', async () => {
+  const I = await import('./idle.mjs')
+  // Most gaps far longer than a five-minute tick: the rounds are running and
+  // dispatching nothing, which is a different fault from "rounds are rare".
+  const bad = I.verdictOnGaps([20, 22, 30, 41], 300)
+  if (bad.kind !== 'ROUNDS-ARE-NOT-DISPATCHING') throw new Error(`long gaps were read as ${bad.kind}`)
+  // And the branch that refutes it: gaps within the cadence blame the cadence.
+  const ok = I.verdictOnGaps([1, 2, 3, 4], 300)
+  if (ok.kind !== 'within-cadence') throw new Error(`short gaps were read as ${ok.kind}`)
+  if (I.verdictOnGaps([], 300).kind !== 'no-gaps') throw new Error('no gaps at all produced a verdict about gaps')
+})
+
 check('every declared pair can actually be run for its kind', async () => {
   const AG = await import('./agree.mjs')
   if (!AG.PAIRS.length) throw new Error('the registry is empty, so the gate compares nothing')

@@ -109,6 +109,21 @@ export function divergentRows(run = sh) {
   return m ? { pairs: Number(m[1]), rows: Number(m[2]) } : null
 }
 
+/**
+ * The share of the last twelve hours with NO bee working.
+ *
+ * The row beside it, `bees running (of 4)`, is an INSTANT - one sample per
+ * iteration of a quantity that turned out to be bimodal. It read 4 as often as
+ * 0 and could never have shown that half the day had no bee running at all. A
+ * rate needs a window; an instant needs none, which is exactly why the instant
+ * is the one that got measured for weeks.
+ */
+export function idlePercent(run = sh) {
+  const out = run(`node ${path.join(DIR, 'idle.mjs')} --hours 12`, 300000)
+  const m = out.match(/(\d+)% of the window had no bee working/)
+  return m ? Number(m[1]) : null
+}
+
 /** The worst-failing chain step, and its rate. */
 export function worstStep(run = sh) {
   // A WINDOW, NOT A LIFETIME. The whole record contains two resolved outages -
@@ -267,6 +282,7 @@ export function facts(deps = {}) {
   return {
     swarm: measure(() => swarmCounts(run)),
     looping: measure(() => loopingCounts(run)),
+    idle: measure(() => idlePercent(run)),
     divergent: measure(() => divergentRows(run)),
     worstStep: measure(() => worstStep(run)),
     proven: measure(() => (read ? provenCounts(read) : provenCounts())),
@@ -328,6 +344,7 @@ export function rows(f, prev) {
     { k: 'dispatches finished', v: f.swarm?.finished ?? null, prev: p.swarm?.finished ?? null, goodDown: false },
     { k: 'judged verdicts that prove', v: f.proven?.proven ?? null, prev: p.proven?.proven ?? null, goodDown: false },
     { k: 'briefs with nothing checkable', v: f.proven?.unjudgeable ?? null, prev: p.proven?.unjudgeable ?? null },
+    { k: 'hours 12: no bee working, percent', v: f.idle ?? null, prev: p.idle ?? null },
     { k: 'send-backs looping with no ceiling', v: f.looping?.looping ?? null, prev: p.looping?.looping ?? null },
     { k: 'rows where one rule answers two ways', v: f.divergent?.rows ?? null, prev: p.divergent?.rows ?? null },
     { k: `worst step, last 8 runs: ${f.worstStep?.step ?? '-'}, percent`, v: f.worstStep?.rate ?? null, prev: p.worstStep?.rate ?? null },
