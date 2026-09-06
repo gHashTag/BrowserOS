@@ -110,7 +110,15 @@ export function failuresOf(id, deps = {}) {
   const run = deps.run || sh
   const parse = deps.parse
   const out = run(`gh run view ${id} --repo ${REPO} --log-failed 2>/dev/null`)
-  if (!out || !out.trim()) return null
+  if (!out || !out.trim()) {
+    // A GREEN RUN IS NOT AN UNREADABLE ONE. `--log-failed` prints nothing when
+    // every job passed, and counting that as unreadable would drop the very
+    // runs that prove something was fixed - inflating every remaining failure's
+    // frequency toward "deterministic" exactly when it stopped being one.
+    const failed = run(`gh run view ${id} --repo ${REPO} --json jobs -q '[.jobs[]|select(.conclusion=="failure")]|length' 2>/dev/null`)
+    const n = Number(String(failed).trim())
+    return Number.isFinite(n) && n === 0 ? [] : null
+  }
   if (parse) return parse(out)
   return [...new Set(
     (out.match(/\(fail\)[^\n]*/g) || [])

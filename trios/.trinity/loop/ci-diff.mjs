@@ -63,6 +63,7 @@ export function failuresIn(log) {
  * looked at.
  */
 export function compareRuns(baseLog, headLog) {
+  // `null` is unreadable; `''` is a green run, and they are different answers.
   if (baseLog === null || headLog === null) return { unknown: true }
   const base = failuresIn(baseLog)
   const head = failuresIn(headLog)
@@ -111,10 +112,28 @@ export function render(r) {
   return out.join('\n')
 }
 
-/** The failing-step log of one run, or null if it cannot be read. */
+/**
+ * The failing-step log of one run, or null if it cannot be read.
+ *
+ * AND A RUN WITH NO FAILURES IS NOT AN UNREADABLE RUN - which this got wrong on
+ * the first green suite it ever saw. `gh run view --log-failed` prints NOTHING
+ * when every job passed, so an empty string meant both "the whole suite is
+ * green" and "the fetch failed", and the tool answered "NOTHING was compared"
+ * about the run that finally proved a four-round hunt was over.
+ *
+ * That is the empty-versus-absent defect this loop has found in a boundary
+ * parser, a judge packet and a config file, committed here by the instrument
+ * written to catch it. The run's own conclusion settles it: a completed run
+ * with no failed job has an EMPTY failure set, which is a fact, and only a
+ * fetch that fails is unreadable.
+ */
 export function runLog(id, run = sh) {
   const out = run(`gh run view ${id} --repo ${REPO} --log-failed 2>/dev/null`)
-  return out && out.trim() ? out : null
+  if (out && out.trim()) return out
+  const failed = run(`gh run view ${id} --repo ${REPO} --json jobs -q '[.jobs[]|select(.conclusion=="failure")]|length' 2>/dev/null`)
+  const n = Number(String(failed).trim())
+  // A completed run whose job list is readable and has no failure is green.
+  return Number.isFinite(n) && n === 0 ? '' : null
 }
 
 /** The most recent completed run id for a pull request. */
