@@ -3115,6 +3115,23 @@ check('gaps longer than the tick mean rounds are starting nothing', async () => 
 // byte for byte, and appeared in no workflow. On 2026-09-06 one of the thirteen
 // had already drifted: the ring gained a string-aware literal view on 09-05 and
 // the Linux copy was last touched 08-29.
+check('a recipe that calls make reaches that target, and a script is not judged', async () => {
+  const U = await import('./unwired.mjs')
+  // check-bypass is ONE LINE - `$(MAKE) check` - so following only
+  // prerequisites saw an empty recipe and called it portable, while `check`
+  // opens a window. Its own echo says "never for CI".
+  const t = U.targetsOf(['heavy:', '\tswiftc thing.swift', '', 'bypass-guard:', '\t$(MAKE) --no-print-directory heavy', ''].join('\n'))
+  const reached = U.reachedRecipes('bypass-guard', t)
+  if (U.classify('bypass-guard', reached).kind !== 'mac-only') throw new Error('a sub-make call was not followed')
+  // And the layer this cannot see at all: drift-guard is `bash script.sh`, with
+  // the compiler inside the script. Guessing there is how the first two
+  // misclassifications happened, so it answers `opaque` instead.
+  const sc = U.targetsOf(['deep-guard:', '\tbash tests/swift/run_chat_sse_e2e.sh', ''].join('\n'))
+  const r = U.classify('deep-guard', U.reachedRecipes('deep-guard', sc))
+  if (r.kind !== 'opaque') throw new Error(`a target running a script was classified ${r.kind}`)
+  if (!/run_chat_sse_e2e\.sh/.test(r.why)) throw new Error('the report did not name the script it cannot see into')
+})
+
 check('a target with no recipe inherits what its prerequisites reach', async () => {
   const U = await import('./unwired.mjs')
   // The defect this file's own output caught before it shipped: `check:` and
