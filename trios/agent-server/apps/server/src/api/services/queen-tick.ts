@@ -153,11 +153,61 @@ const ISSUE_PAGE_SIZE = 100
 const ISSUE_PAGE_CAP = 5
 
 /**
- * Open issues, read without a credential.
+ * The headers for a GitHub read, carrying the token when there is one.
  *
- * Anonymous on purpose: the repository is public, this is a read, and a token
- * here would be a credential in a container for no gain. GitHub's anonymous
- * rate limit is 60/hour against a loop that ticks at most a few times an hour.
+ * ANONYMOUS IS SIXTY REQUESTS AN HOUR, and this file has said so in a comment
+ * since it was written - "a second round trip per candidate against an
+ * anonymous rate limit that is 60 an hour" - while every call it makes went out
+ * unauthenticated anyway. The limit was designed around instead of lifted.
+ *
+ * WHAT IT COST. Measured 2026-09-06 over twelve hours: 144 rounds ended in
+ * `GitHub returned 403`, the swarm had ZERO bees running for 50% of the wall
+ * clock, and the median gap between one burst of work and the next was 22
+ * minutes against a five-minute tick. The pattern is bimodal - 36% of the time
+ * all four bees ran, 50% of the time none did - because a round either got its
+ * issue list or died whole. `openIssues` throws on a bad status, so one 403
+ * takes the entire round with it: no review, no choice, no dispatch.
+ *
+ * The token was in the environment the whole time. `GH_TOKEN` is set on this
+ * service and `/rate_limit` answers 15000 of 15000 remaining, which is the
+ * measurement that turns "we are being throttled" into "we are throttled at
+ * the anonymous tier while holding a key to the other one".
+ *
+ * THIS HANDS NOTHING TO A BEE. It is the supervisor's own outbound read. The
+ * worker environment is built from a ten-entry allowlist that deliberately
+ * excludes the GitHub token, and that stays exactly as it is - a bee still gets
+ * no credential from here.
+ *
+ * Falls back to anonymous when no token is set, so a local run without secrets
+ * behaves as it always has rather than failing to start.
+ */
+export function githubReadHeaders(): Record<string, string> {
+  const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN
+  const headers: Record<string, string> = {
+    Accept: 'application/vnd.github+json',
+  }
+  if (token) headers.Authorization = `Bearer ${token}`
+  return headers
+}
+
+/**
+ * Open issues.
+ *
+ * WAS ANONYMOUS ON PURPOSE, and the reasoning is kept here because it was
+ * sound and it is instructive that it expired rather than that it was wrong:
+ * "the repository is public, this is a read, and a token here would be a
+ * credential in a container for no gain. GitHub's anonymous rate limit is
+ * 60/hour against a loop that ticks at MOST A FEW TIMES AN HOUR."
+ *
+ * The loop ticks twelve times an hour now. Measured 2026-09-06 from inside the
+ * container, the service burns 77 anonymous requests an hour against that limit
+ * of 60 - and once it is spent every call returns 403 until the hourly reset,
+ * which is why the longest observed idle stretch was 41.7 minutes. The premise
+ * expired quietly; the sentence did not.
+ *
+ * The stated cost is also already paid: `GH_TOKEN` is on this service. It is
+ * the SUPERVISOR's container, not a bee's, and the worker environment is still
+ * built from an allowlist that excludes the token.
  *
  * PAGINATED, and it says whether it got everything. One page of 50 was the
  * whole list for as long as the repository stayed under the horizon - 44 open
@@ -178,9 +228,22 @@ export async function openIssues(repo: string): Promise<{
     const response = await fetch(
       `https://api.github.com/repos/${repo}/issues` +
         `?state=open&per_page=${ISSUE_PAGE_SIZE}&page=${page}`,
-      { headers: { Accept: 'application/vnd.github+json' } },
+      { headers: githubReadHeaders() },
     )
-    if (!response.ok) throw new Error(`GitHub returned ${response.status}`)
+    if (!response.ok) {
+      // A REFUSAL ON A LATER PAGE IS A TRUNCATION, AND THIS FUNCTION ALREADY
+      // HAS A WORD FOR THAT.
+      //
+      // Throwing here took the whole round with it - no review, no choice, no
+      // dispatch - and 135 of 136 round failures measured on 2026-09-06 were
+      // exactly this, leaving the swarm with zero bees for half the day. But
+      // the contract below already covers a list that is not the whole truth:
+      // `complete` stays false and `rememberIssues` is told not to treat it as
+      // the full set. A first page that fails leaves nothing to decide against,
+      // so that one still throws.
+      if (page > 1) break
+      throw new Error(`GitHub returned ${response.status}`)
+    }
     const batch = (await response.json()) as Array<{
       number: number
       title?: string
@@ -657,7 +720,7 @@ async function bodiesFor(
   for (const number of numbers) {
     const response = await fetch(
       `https://api.github.com/repos/${repo}/issues/${number}`,
-      { headers: { Accept: 'application/vnd.github+json' } },
+      { headers: githubReadHeaders() },
     )
     if (!response.ok) continue
     const issue = (await response.json()) as { body?: string | null }
@@ -932,12 +995,38 @@ export async function runRound(
   // own policy, and only an ESCALATION reaches a person. Without this the hold
   // added to stop the six-times loop would have become a different starvation:
   // every issue she finished would be locked out of the pool for ever.
-  const reviewed = await reviewFinishedDispatches(pool)
+  // BOOKKEEPING MUST NOT BE ABLE TO IDLE THE SWARM.
+  //
+  // The same shape as the 403 above, one layer in. Review and reaping are
+  // housekeeping; dispatch is the thing the hive exists to do. An exception in
+  // either used to take the whole round with it, so a transient database error
+  // cost five minutes of every bee - and one round measured on 2026-09-06 died
+  // exactly that way, on `deadlock detected`.
+  //
+  // Neither is lost by continuing: the review re-reads every unjudged dispatch
+  // next round by construction, and the reaper re-finds a stalled one. What IS
+  // lost by throwing is the dispatch that would have happened, and that is the
+  // one thing a later round cannot give back - the idle minutes are spent.
+  //
+  // Logged at warn with the reason, never swallowed: `tri idle` reads these
+  // lines out of the service log and reports what stopped the rounds, so a
+  // review that fails EVERY round is loud rather than merely survivable.
+  const reviewed = await reviewFinishedDispatches(pool).catch((error) => {
+    logger.warn('Queen review failed; dispatching anyway', {
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return { acted: [], strays: [], tally: [] } as ReviewRound
+  })
   if (reviewed.acted.length > 0) {
     logger.info('Queen reviewed her own work', { verdicts: reviewed.acted })
   }
 
-  const reaped = await reapStalledDispatches(pool)
+  const reaped = await reapStalledDispatches(pool).catch((error) => {
+    logger.warn('Queen reap failed; dispatching anyway', {
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return [] as Awaited<ReturnType<typeof reapStalledDispatches>>
+  })
   if (reaped.length > 0) {
     logger.info('Queen tick reaped stalled dispatches', { issues: reaped })
   }
@@ -1811,7 +1900,11 @@ export function parseVerdictBlock(
   // Trying each and keeping the longest parse is stable under either
   // convention, so a worker running an older brief is not punished for it.
   const starts: number[] = []
-  for (let i = text.indexOf('## VERDICT'); i >= 0; i = text.indexOf('## VERDICT', i + 1)) {
+  for (
+    let i = text.indexOf('## VERDICT');
+    i >= 0;
+    i = text.indexOf('## VERDICT', i + 1)
+  ) {
     starts.push(i)
   }
   if (!starts.length) return []

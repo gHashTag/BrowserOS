@@ -14,10 +14,7 @@ import {
   runRound,
 } from '../../src/api/services/queen-tick'
 import { logger } from '../../src/lib/logger'
-import {
-  queendPathEnvVar,
-  resolveQueendPath,
-} from '../__helpers__/queend-path'
+import { queendPathEnvVar, resolveQueendPath } from '../__helpers__/queend-path'
 
 /**
  * The round itself, driven against the real policy binary.
@@ -98,12 +95,19 @@ const isDispatchInsert = (sql: string) =>
  * order is the thing under test in two of the cases below and a fake that
  * encodes it would agree with whatever the code does.
  */
-function roundPool(finished: FinishedRow[] = []) {
+function roundPool(finished: FinishedRow[] = [], throwOn?: string) {
   const queries: Array<{ sql: string; params: unknown[] }> = []
   const pool = {
     query: async (sql: string, params: unknown[] = []) => {
       queries.push({ sql: String(sql), params })
       const text = String(sql)
+      // One named statement can be made to fail, so a test can ask what the
+      // round does when a single piece of bookkeeping breaks. Recorded first,
+      // so the failing statement still shows up in `sql()` as having been
+      // attempted - a query that throws is a query the round issued.
+      if (throwOn && text.includes(throwOn)) {
+        throw new Error('deadlock detected')
+      }
       if (text.includes('FROM queen_registry')) {
         return { rowCount: 1, rows: [{ tasks: [] }] }
       }
@@ -237,6 +241,32 @@ describe('queen round, lease lost', () => {
       expect(sql().some(isDispatchInsert)).toBe(true)
     },
   )
+
+  /**
+   * BOOKKEEPING MUST NOT BE ABLE TO IDLE THE SWARM.
+   *
+   * The review used to throw straight out of the round, so a transient database
+   * error cost five minutes of every bee. One round measured on 2026-09-06 died
+   * exactly that way, on `deadlock detected`, and 135 others died a page
+   * earlier on a GitHub 403 - together leaving the swarm with ZERO bees running
+   * for half of a twelve-hour window.
+   *
+   * Nothing is lost by continuing: the review re-reads every unjudged dispatch
+   * next round by construction. What IS lost by throwing is the dispatch that
+   * would have happened, and no later round gives those minutes back.
+   *
+   * `FROM queen_dispatch d` is the review's SELECT and the only query in the
+   * round that uses that alias, so failing it targets the review and nothing
+   * else. Reverting the `.catch()` turns this red: the round stops before
+   * `dispatchBee` and the INSERT never appears.
+   */
+  it.if(present)('dispatches even when the review throws', async () => {
+    const { pool, sql } = roundPool([], 'FROM queen_dispatch d')
+    const result = await runRound(pool, 'me', 7, { held: true }, [ISSUE])
+
+    expect(result.choice?.chosen).toBe(ISSUE)
+    expect(sql().some(isDispatchInsert)).toBe(true)
+  })
 })
 
 /**
