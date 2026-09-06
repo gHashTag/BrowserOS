@@ -174,11 +174,26 @@ jobs:
           # error and still exits 0 would otherwise leave the tests skipping
           # exactly as before, under a step that looked like it had worked.
           test -x queen-core/.build/release/queend
-          # And that it RUNS here, not merely that it exists. A dynamically
-          # linked binary passes the test above and then fails every case with
-          # exit 127, which is how the first attempt at this step went.
-          queen-core/.build/release/queend --help >/dev/null 2>&1 \
-            || echo '{}' | queen-core/.build/release/queend >/dev/null
+          # And that it can START here, not merely that a file exists. A
+          # dynamically linked binary passes the test above and then fails every
+          # case with exit 127, which is how the first attempt at this step
+          # went.
+          #
+          # ONLY 127 IS THE FAILURE. The second attempt asserted a clean exit
+          # and broke the step itself: `queend` answers a JSON question on
+          # stdin, so `--help` and a bare `{}` both exit non-zero by design, and
+          # a gate that demanded zero was testing the question rather than the
+          # linkage. Any other code means the process ran, which is the whole
+          # claim being made.
+          set +e
+          printf '{}' | queen-core/.build/release/queend >/dev/null 2>&1
+          started=$?
+          set -e
+          if [ "$started" -eq 127 ]; then
+            echo "queend cannot load its runtime here (exit 127): the build is"
+            echo "linked against shared libraries this runner does not have."
+            exit 1
+          fi
 
       - name: Resolve BrowserOS cache key
         if: matrix.needs_browser == true
