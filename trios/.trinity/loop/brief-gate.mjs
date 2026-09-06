@@ -19,6 +19,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { execSync } from 'node:child_process'
 // ONE RULE, ONE IMPLEMENTATION: the gate asks the extractor that does the
 // checking rather than keeping a second opinion about what counts as checkable.
@@ -107,6 +108,41 @@ export function pathIsKnown(p, deps = {}) {
     return false
   })
   return inRef(p) || onDisk(p)
+}
+
+
+/**
+ * A failing brief is one of three different things, and a count hid that.
+ *
+ * I reported "19 open briefs will produce the next unauditable verdicts", then
+ * "14". Both conflated situations that want opposite responses. Measured
+ * 2026-09-06 over the 14: EIGHT already have a pushed branch and a verdict the
+ * audit could not check - history somebody forgot to close, not a warning - and
+ * only SIX have no landed work at all. Six is the number worth acting on, and
+ * it was buried under two others three rounds running.
+ *
+ * UNKNOWN IS ITS OWN ANSWER. A brief whose audit could not be run belongs to
+ * neither bucket; putting it in either would be the empty-versus-absent defect
+ * this directory keeps finding, in the tool written to report on it.
+ */
+export function classifyFailing(numbers, deps = {}) {
+  const here = path.dirname(fileURLToPath(import.meta.url))
+  const sh2 = deps.sh || ((c) => {
+    try { return execSync(c, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() } catch { return null }
+  })
+  const hasBranch = deps.hasBranch || ((n) => sh2(`git rev-parse --verify --quiet origin/queen-${n}`) !== null)
+  const verdictOf = deps.verdictOf || ((n) => sh2(`node ${path.join(here, 'verdict-audit.mjs')} ${n} 2>/dev/null | head -1`))
+  const ahead = []
+  const history = []
+  const unknown = []
+  for (const n of numbers) {
+    if (!hasBranch(n)) { ahead.push(n); continue }
+    const v = verdictOf(n)
+    if (v === null || v === '') unknown.push(n)
+    else if (/NO MECHANICAL CLAIM|EMPTY DIFF/.test(v)) history.push(n)
+    else ahead.push(n)
+  }
+  return { ahead, history, unknown }
 }
 
 export function gate(file) {
@@ -429,6 +465,7 @@ if (argv[0] === '--issues' || argv[0] === '--open') {
     process.exit(1)
   }
   const tally = new Map()
+  const failing = []
   let clean = 0
   let unread = 0
   for (const n of numbers) {
@@ -452,6 +489,7 @@ if (argv[0] === '--issues' || argv[0] === '--open') {
       }
       continue
     }
+    failing.push(n)
     console.log(`!! #${n}  ${r.problems.length} problem(s)`)
     for (const p of r.problems) {
       // Tallied by RULE, not by issue: the question is which rule the corpus
@@ -462,10 +500,27 @@ if (argv[0] === '--issues' || argv[0] === '--open') {
     }
   }
   console.log(`\n${numbers.length} brief(s): ${clean} pass this gate, ${numbers.length - clean - unread} fail, ${unread} unreadable`)
-  console.log('\nby rule, most common first:')
-  for (const [rule, n] of [...tally.entries()].sort((a, b) => b[1] - a[1])) {
-    console.log(`  ${String(n).padStart(3)}  ${rule}`)
+
+  // A FAILING BRIEF IS ONE OF THREE DIFFERENT THINGS, AND THE COUNT HID THAT.
+  //
+  // I reported "19 open briefs will produce the next unauditable verdicts" and
+  // then "14". Both conflated three situations that want opposite responses.
+  // Of the 14: five already have a pushed branch AND a verdict the audit could
+  // not check - that is history somebody forgot to close, not a future problem.
+  // Five more have no branch at all and no structure - those are the forward
+  // ones. The rest have structure and a gap.
+  //
+  // The forward number is the only one worth acting on, so it is the one
+  // printed last. Asking git and the audit costs a second each and turns a
+  // count into a decision.
+  if (failing.length) {
+    const r = classifyFailing(failing)
+    console.log('')
+    console.log(`  ${r.history.length} already produced a verdict nothing could check - history, not a warning: ${r.history.map((n) => `#${n}`).join(' ')}`)
+    if (r.unknown.length) console.log(`  ${r.unknown.length} could not be audited, so neither bucket claims them: ${r.unknown.map((n) => `#${n}`).join(' ')}`)
+    console.log(`  ${r.ahead.length} have no landed work yet - THESE are the next unauditable verdicts: ${r.ahead.map((n) => `#${n}`).join(' ')}`)
   }
+
   process.exit(0)
 }
 
