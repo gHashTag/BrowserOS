@@ -3109,6 +3109,41 @@ check('gaps longer than the tick mean rounds are starting nothing', async () => 
   if (I.verdictOnGaps([], 300).kind !== 'no-gaps') throw new Error('no gaps at all produced a verdict about gaps')
 })
 
+// A GATE THAT EXISTS AND RUNS NOWHERE.
+//
+// `make queen-core-sync` compares the eleven policy files that exist twice,
+// byte for byte, and appeared in no workflow. On 2026-09-06 one of the thirteen
+// had already drifted: the ring gained a string-aware literal view on 09-05 and
+// the Linux copy was last touched 08-29.
+check('a target with no recipe inherits what its prerequisites reach', async () => {
+  const U = await import('./unwired.mjs')
+  // The defect this file's own output caught before it shipped: `check:` and
+  // `verify:` have NO recipe - they are a list of other targets - so reading
+  // only the recipe called both portable while their prerequisites open a
+  // window and run swiftc.
+  const t = U.targetsOf(['heavy:', '\tswiftc thing.swift', '', 'check-all: heavy', ''].join('\n'))
+  const reached = U.reachedRecipes('check-all', t)
+  if (!reached.join('\n').includes('swiftc')) throw new Error('a prerequisite recipe was not reached')
+  if (U.classify('check-all', reached).kind !== 'mac-only') throw new Error('a target reaching swiftc was called portable')
+})
+
+check('a cycle in the Makefile does not hang the audit', async () => {
+  const U = await import('./unwired.mjs')
+  const t = U.targetsOf(['a-guard: b-guard', '\techo one', '', 'b-guard: a-guard', '\techo two', ''].join('\n'))
+  const reached = U.reachedRecipes('a-guard', t)
+  // Both recipes reached, each once, and the call returned at all.
+  if (!reached.join('\n').includes('echo two')) throw new Error('the cycle stopped before reaching the other side')
+})
+
+check('a wired target is not reported, and a plain name is not a gate', async () => {
+  const U = await import('./unwired.mjs')
+  const wired = U.wiredIn('    - run: make queen-core-sync\n    - run: make  other-thing\n')
+  if (!wired.has('queen-core-sync') || !wired.has('other-thing')) throw new Error('a workflow invocation was not seen')
+  // The branch that keeps the list short enough to read: most targets are not
+  // gates, and a report naming all fifty-seven would be ignored by week two.
+  if (U.classify('relaunch', ['\topen trios.app']).kind !== 'not-a-gate') throw new Error('a plain target was reported as a gate')
+})
+
 check('every declared pair can actually be run for its kind', async () => {
   const AG = await import('./agree.mjs')
   if (!AG.PAIRS.length) throw new Error('the registry is empty, so the gate compares nothing')

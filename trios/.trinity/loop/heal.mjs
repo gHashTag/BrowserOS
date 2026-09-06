@@ -201,6 +201,7 @@ const STEPS = [
   { name: 'silent-loop', file: 'silent-loop.mjs', reportsOnly: true, act: '', dryArgs: '', why: 'an attempt that charges no retry budget can be repeated for ever' },
   { name: 'rejudge', file: 'rejudge.mjs', reportsOnly: true, act: '', dryArgs: '', why: 'a recorded verdict the current code would no longer give' },
   { name: 'idle', file: 'idle.mjs', reportsOnly: true, act: '', dryArgs: '', why: 'how much of the day the swarm spent doing nothing, and what stopped it' },
+  { name: 'unwired', file: 'unwired.mjs', reportsOnly: true, act: '', dryArgs: '', why: 'a gate that exists and runs nowhere' },
   { name: 'agree', file: 'agree.mjs', reportsOnly: true, act: '', dryArgs: '', why: 'two implementations of one rule, asked the same question about real rows' },
   { name: 'brief-gate', file: 'brief-gate.mjs', reportsOnly: true, act: '--open', dryArgs: '--open', why: 'which open briefs will produce a verdict nothing can check' },
   { name: 'exposure', file: 'exposure.mjs', reportsOnly: true, act: '', dryArgs: '', why: 'what the live service serves to an origin it has never heard of' },
