@@ -3720,3 +3720,52 @@ run and reads as somebody else's problem. `detail.split('; ')[0]` keeps the
 phrase pinned **exactly** — a reword is still caught — while letting the list
 grow. Verify against every observed form, including a reworded first clause,
 which must still fail.
+
+## The failing thing had been saying why the whole time
+
+Three assertions failed 12 runs of 12. The message, in the log, every run:
+
+```
+CDP error: Hidden windows are not yet supported on this platform.
+Use X11 (XDG_SESSION_TYPE=x11), macOS, or Windows.
+```
+
+Not flake, not a code defect — the tests were asserting something the platform
+could not do. **Read the failure text before theorising about the failure.** Two
+of the three carried the answer verbatim and the third was downstream of it.
+
+### Skip on the capability, never on a platform list
+
+`process.platform === 'linux'` goes stale the day CI gains a display. Detecting
+the browser's own refusal means the tests **resume by themselves** when the
+capability appears, with no edit. A skip conditioned on what was observed is
+self-healing; one conditioned on a hardcoded list is a second copy of the truth.
+
+### Loud and counted, or it is a silent pass
+
+The skip prints its reason, and a companion assertion fails if the tests
+**neither ran nor reported the limit**. Without that, "skipped" and "quietly
+stopped existing" look identical — which is the defect this repository has
+already shipped once, in a gate that never found its compiler.
+
+## An experiment needs its abort condition written down first
+
+I said in the commit message, before running it: *if this introduces NEW
+failures it comes out.* It introduced two, so it came out — and the measurement
+was the deliverable.
+
+Giving CI an X server fixed all three hidden-window tests and broke two others:
+
+```
+AssertionError: Internal error in move_page:
+  CDP error: Cannot move a hidden tab. Use showTab first.
+```
+
+Both broken tests create their page with `new_page`, **not** `new_hidden_page`,
+yet under X11 the browser calls that tab hidden. **So those two had been passing
+vacuously in headless**, where nothing could be hidden at all — the X server did
+not break them, it revealed they were never testing what they claimed.
+
+That is a product question, not a fixture one. **Trading three known failures
+for two new ones plus an unexplained behaviour is not a repair**, and a closed
+PR carrying the measurement is worth more than a merged one carrying a guess.
