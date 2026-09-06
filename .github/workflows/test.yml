@@ -138,6 +138,78 @@ jobs:
       - name: Install dependencies
         run: bun ci
 
+      # THE ROUND TESTS HAD BEEN SKIPPING IN CI, EVERY RUN SINCE THEY WERE
+      # WRITTEN.
+      #
+      # `queen-round.test.ts` guards its behaviour cases with `it.if(present)`,
+      # where `present` means "the policy binary exists on this machine".
+      # Nothing in this workflow ever built it, so all seven skipped and the job
+      # reported green - the file that exists BECAUSE nothing in the repository
+      # called `runRound`, and that caught a critic deleting the lease guard,
+      # was proving nothing at all here.
+      #
+      # Built with the SAME compiler the Dockerfile uses, so the policy under
+      # test is the one Railway ships rather than a lookalike compiled by
+      # whatever toolchain a runner happens to carry.
+      #
+      # DYNAMICALLY LINKED, exactly as Railway builds it, with the runtime
+      # lifted out of the image beside it.
+      #
+      # The first attempt linked dynamically and failed every test with `queend
+      # exited 127: error while loading shared libraries` - a bare runner has no
+      # `libswiftCore.so`. The obvious repair, `--static-swift-stdlib`, worked
+      # and is WRONG here: the static toolchain links
+      # `/usr/lib/swift_static/linux/libFoundationEssentials.a`, a different
+      # Foundation from the dynamic one, and four daily-cap cases that pass on a
+      # dynamic build failed under it. A gate that changes the thing it measures
+      # is measuring itself.
+      #
+      # So the linkage matches production and the runtime travels with the
+      # binary. Same sources, same compiler, same Foundation.
+      - name: Build the Queen policy binary
+        if: matrix.suite == 'server-api'
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -u "$(id -u):$(id -g)" \
+            -e HOME=/tmp \
+            -v "$PWD/queen-core":/src \
+            -w /src \
+            swift:6.0-jammy \
+            swift build -c release 2>&1 | tail -30
+          # The runtime the binary needs, taken from the image that built it.
+          docker run --rm \
+            -u "$(id -u):$(id -g)" \
+            -v "$PWD/queen-core":/out \
+            swift:6.0-jammy \
+            sh -c 'mkdir -p /out/.build/swift-runtime && cp -a /usr/lib/swift/linux/*.so* /out/.build/swift-runtime/'
+          echo "LD_LIBRARY_PATH=$PWD/queen-core/.build/swift-runtime" >> "$GITHUB_ENV"
+          # Assert the artifact, not the exit code: a build that prints an
+          # error and still exits 0 would otherwise leave the tests skipping
+          # exactly as before, under a step that looked like it had worked.
+          test -x queen-core/.build/release/queend
+          # And that it can START here, not merely that a file exists. A
+          # dynamically linked binary passes the test above and then fails every
+          # case with exit 127, which is how the first attempt at this step
+          # went.
+          #
+          # ONLY 127 IS THE FAILURE. The second attempt asserted a clean exit
+          # and broke the step itself: `queend` answers a JSON question on
+          # stdin, so `--help` and a bare `{}` both exit non-zero by design, and
+          # a gate that demanded zero was testing the question rather than the
+          # linkage. Any other code means the process ran, which is the whole
+          # claim being made.
+          set +e
+          LD_LIBRARY_PATH="$PWD/queen-core/.build/swift-runtime" \
+            sh -c 'printf "{}" | queen-core/.build/release/queend' >/dev/null 2>&1
+          started=$?
+          set -e
+          if [ "$started" -eq 127 ]; then
+            echo "queend cannot load its runtime here (exit 127): the build is"
+            echo "linked against shared libraries this runner does not have."
+            exit 1
+          fi
+
       - name: Resolve BrowserOS cache key
         if: matrix.needs_browser == true
         id: browseros-cache-key
