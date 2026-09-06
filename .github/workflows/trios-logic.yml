@@ -10,12 +10,41 @@ on:
     paths:
       - 'trios/rings/**'
       - 'trios/tests/**'
+      # The Linux copy of the policy, so a change to EITHER side of the
+      # duplication wakes the gate below. Watching only the ring would let a
+      # hand-edit of the copy drift in unwatched, which is the same hole in the
+      # other direction.
+      - 'trios/agent-server/queen-core/**'
       - 'trios/agent-server/apps/server/src/agent/**'
       - 'trios/Makefile'
       - 'trios/tests/fixtures/**'
       - '.github/workflows/trios-logic.yml'
 
 jobs:
+  # ELEVEN POLICY FILES EXIST TWICE AND THE GATE FOR IT RAN NOWHERE.
+  #
+  # `make queen-core-sync` compares rings/SR-00 with the copy the Docker build
+  # compiles for Linux, byte for byte, and its own comment says why: "the copy
+  # is compiled by the Linux stage and the original by the app, and a policy
+  # that differs between them is two arbiters of the same rule."
+  #
+  # It appeared in no workflow. Measured 2026-09-06: QueenLocalisation.swift had
+  # already drifted - the ring gained a string-aware literal view on 2026-09-05
+  # (#1176, a `/*` inside a quoted branch glob opened a phantom comment and
+  # blanked 6,726 lines of evidence) and the copy that ships to Linux was last
+  # touched on 2026-08-29. The fix never crossed. Twelve of thirteen files were
+  # identical; one was not, and nothing was looking.
+  #
+  # Ubuntu and no Swift: this is `cmp`, and it costs seconds. The comparison
+  # does not need the compiler that consumes its result.
+  queen-core-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: The Linux copy of the policy matches the ring, byte for byte
+        working-directory: trios
+        run: make queen-core-sync
+
   server-units:
     runs-on: ubuntu-latest
     steps:

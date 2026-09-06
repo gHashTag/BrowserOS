@@ -30,6 +30,16 @@ import Foundation
 /// No rule answers → `nil`. A confidently wrong range is worse than no range:
 /// it sends the bee to read the wrong place with authority (#1175).
 ///
+/// ## The finishing check (#1176)
+///
+/// Whichever rule answers, the answer is checked before it leaves: the first
+/// line of the returned range must declare a function — and for the name rule,
+/// exactly the name it matched. The measurement that forced this: #1158, whose
+/// spec names `autoAcceptIfUnambiguous`, was answered with a range beginning
+/// in the middle of `handleWorkerFinished` — a function that spec never
+/// named — because a window capped around a hit deep inside a wide body
+/// starts nowhere in particular. Beginning nowhere in particular is silence.
+///
 /// This is pure static plumbing: source in, range out, no state, no side effects.
 public enum QueenLocalisation {
 
@@ -199,6 +209,15 @@ public enum QueenLocalisation {
     /// Newlines are preserved. Event names ("queen.review.verdicts") are
     /// evidence, not decoration (#1174) — this view exists so rule 2 can see
     /// them while every other rule keeps working on code only.
+    ///
+    /// String-aware, because the literal view once was not and the file
+    /// measured it (#1176, 2026-09-02): a branch glob quoted inside a string —
+    /// `"No empty queen/* branch …"`, line 6864 of ChatViewModel.swift —
+    /// opened a phantom block comment, and the literal view went blank from
+    /// there to the end of the file. 6 726 lines of evidence invisible:
+    /// corroboration saw no mentions past the glob, so #1158's two candidates
+    /// tied at zero and rule 4 answered with a mid-body window of the wrong
+    /// function. A comment opener inside a string is prose, not a comment.
     private static func maskComments(_ source: String) -> String {
         var output = [Character]()
         output.reserveCapacity(source.count)
@@ -206,12 +225,26 @@ public enum QueenLocalisation {
         let chars = Array(source)
         var i = 0
         var blockDepth = 0
+        var inString = false
 
         while i < chars.count {
             let c = chars[i]
             let next: Character? = i + 1 < chars.count ? chars[i + 1] : nil
 
-            if blockDepth > 0 {
+            if inString {
+                if c == "\\", let escaped = next {
+                    output.append(c)
+                    output.append(escaped)
+                    i += 2
+                } else if c == "\"" {
+                    inString = false
+                    output.append(c)
+                    i += 1
+                } else {
+                    output.append(c)
+                    i += 1
+                }
+            } else if blockDepth > 0 {
                 if c == "/", next == "*" {
                     blockDepth += 1
                     output.append(" "); output.append(" ")
@@ -233,6 +266,10 @@ public enum QueenLocalisation {
                 blockDepth = 1
                 output.append(" "); output.append(" ")
                 i += 2
+            } else if c == "\"" {
+                inString = true
+                output.append(c)
+                i += 1
             } else {
                 output.append(c)
                 i += 1
@@ -386,6 +423,41 @@ public enum QueenLocalisation {
         return start...end
     }
 
+    // MARK: - The finishing check
+
+    /// Caps a rule's answer to `maxRegionWidth` around `hitLine`, then applies
+    /// the #1176 self-check: the first line of the returned range must declare
+    /// a function — and the name rule, which passes `naming`, must land on
+    /// exactly the name it matched. Capping around a hit deep inside a wide
+    /// body slides the window off the declaration line, and a range that
+    /// begins mid-body begins "not at the named function" just as surely as
+    /// one that begins at the neighbour. Either failure is silence, not a
+    /// range.
+    ///
+    /// This is the one place an answer is either returned or silenced. Delete
+    /// the two guards and the замер goes red on the `queen.review.verdicts`
+    /// case — that flip is the proof the check carries weight (#1176,
+    /// criterion 4).
+    private static func finished(
+        _ extent: ClosedRange<Int>,
+        around hitLine: Int,
+        in codeLines: [String],
+        naming requiredName: String? = nil
+    ) -> ClosedRange<Int>? {
+        let capped = capToWidth(extent, around: hitLine)
+
+        // Self-check: the range must begin at a line that declares a function
+        // — the very name the rule matched, when it matched one.
+        guard let startName = declarationName(on: codeLines[capped.lowerBound]) else {
+            return nil
+        }
+        if let requiredName, startName != requiredName {
+            return nil
+        }
+
+        return (capped.lowerBound + 1)...(capped.upperBound + 1)
+    }
+
     // MARK: - Rule 1: declaration name
 
     /// Returns the 1-indexed range of the declaration whose name matches one
@@ -432,7 +504,9 @@ public enum QueenLocalisation {
             }
             guard !tie else { return nil }
         }
-        return finished(chosen, lines: lines)
+        return finished(
+            chosen.extent, around: chosen.idx, in: lines, naming: chosen.name
+        )
     }
 
     /// The 0-based extent of the declaration starting at `declLine`:
@@ -467,21 +541,6 @@ public enum QueenLocalisation {
         return idx...end
     }
 
-    /// Caps a name-match candidate and applies the #1176 self-check: the
-    /// first line of the returned range must still declare the matched name.
-    /// If capping or any other step shifted the start, the range points at
-    /// the wrong function — silence it rather than mislead.
-    private static func finished(
-        _ candidate: (idx: Int, name: String, extent: ClosedRange<Int>),
-        lines: [String]
-    ) -> ClosedRange<Int>? {
-        let capped = capToWidth(candidate.extent, around: candidate.idx)
-        guard declarationName(on: lines[capped.lowerBound]) == candidate.name else {
-            return nil
-        }
-        return (capped.lowerBound + 1)...(capped.upperBound + 1)
-    }
-
     // MARK: - Rule 2: dotted name in a string literal
 
     /// A dotted identifier (`queen.review.verdicts`) found verbatim inside a
@@ -509,8 +568,7 @@ public enum QueenLocalisation {
                 guard let enclosing = enclosingDeclaration(
                     hitLine: idx, depths: depths, lines: codeLines
                 ) else { continue }
-                let capped = capToWidth(enclosing, around: idx)
-                return (capped.lowerBound + 1)...(capped.upperBound + 1)
+                return finished(enclosing, around: idx, in: codeLines)
             }
         }
         return nil
@@ -580,8 +638,11 @@ public enum QueenLocalisation {
         }
         let targets = Set(clean.keys)
         guard targets.count == 1, let idx = targets.first else { return nil }
-        let capped = capToWidth(declarationExtent(declLine: idx, depths: depths), around: idx)
-        return (capped.lowerBound + 1)...(capped.upperBound + 1)
+        return finished(
+            declarationExtent(declLine: idx, depths: depths),
+            around: idx,
+            in: lines
+        )
     }
 
     // MARK: - Rule 4: identifier mentioned exactly once
@@ -618,8 +679,7 @@ public enum QueenLocalisation {
         guard extents.count == 1, let first = anchored.first else { return nil }
 
         let hit = anchored.map(\.line).min() ?? first.line
-        let capped = capToWidth(first.extent, around: hit)
-        return (capped.lowerBound + 1)...(capped.upperBound + 1)
+        return finished(first.extent, around: hit, in: codeLines)
     }
 
     // MARK: - Name extraction
@@ -643,7 +703,7 @@ public enum QueenLocalisation {
         return nil
     }
 
-    // MARK: - Замер (#1173)
+    // MARK: - Замер (#1173, #1176)
 
     /// One case of the #1173 measurement: the identifiers an issue body
     /// yields through `ChatViewModel.identifiers(from:)`, recorded from the
@@ -654,72 +714,98 @@ public enum QueenLocalisation {
         public let expected: Expected
 
         public enum Expected: Equatable {
-            /// The range must lie inside this function's declaration.
+            /// The range must begin at this function's declaration line and
+            /// stay inside its extent. Not "somewhere inside" — a range that
+            /// begins mid-body begins "not at the named function" (#1176).
             case declaration(String)
+            /// The issue's own acceptance, verbatim (#1176): begin at this
+            /// function's declaration, or say nothing at all. A range that
+            /// begins anywhere else — another function, mid-body, the wrong
+            /// end — is a FAIL.
+            case declarationOrSilence(String)
             /// No range at all — a wrong range is worse than none (#1175).
             case silence
         }
     }
 
-    /// The замер of #1173, repeated and recorded 2026-08-19 — bodies of the
-    /// four issues fetched live, identifiers extracted exactly as
-    /// `ChatViewModel.identifiers(from:)` does, `region` run against
-    /// `rings/SR-02/ChatViewModel.swift` (10 062 lines at recording; the
-    /// boundary file moves under concurrent work, so the functions are the
-    /// contract and the line numbers are the snapshot):
+    /// The замер of #1173, re-recorded 2026-09-02 for #1176 — bodies of the
+    /// issues unchanged (identifiers are what `ChatViewModel.identifiers(from:)`
+    /// extracts from them), `region` run against `rings/SR-02/ChatViewModel.swift`
+    /// as it stands (13 590 lines at recording; the boundary file moves under
+    /// concurrent work, so the functions are the contract and the line numbers
+    /// are the snapshot). Two things the re-recording found:
     ///
-    /// | case | chose, before | chose, after | the human named |
-    /// |---|---|---|---|
-    /// | #1156 | silence | 4968-5101 `handleWorkerFinished` ✓ | `handleWorkerFinished` |
-    /// | #1158 | 6263-6439 `acceptanceBlockReasonDistinguishingEmptyAnswers` ✗ | 6644-6862 `autoAcceptIfUnambiguous` ✓ | `autoAcceptIfUnambiguous` |
-    /// | #1165 | silence | silence ✗ | `requestReviewerVerdicts` |
-    /// | #1166 | silence | 7606-7905 `chooseNextOpenIssue` ✓ | ветка `startAfterChoosing` |
+    /// 1. The literal view was blind. A branch glob quoted inside a string —
+    ///    `"No empty queen/* branch …"`, line 6864 — opened a phantom block
+    ///    comment and blanked the view from there to the end of the file.
+    ///    6 726 lines of evidence invisible: corroboration saw no mentions
+    ///    past the glob, #1158's two candidates tied at zero, and rule 4
+    ///    answered with 6005-6304 — the middle of `handleWorkerFinished`, a
+    ///    function that spec never named. The confident wrong range #1176 is
+    ///    about, and its enabler. `maskComments` knows strings now.
+    /// 2. #1156's clue moved: the quoted log event `queen.review.characterCount`
+    ///    is no longer emitted inside `handleWorkerFinished` but inside
+    ///    `settleCharacterCountVerdicts` (upstream moved it, 2026-09-02). The
+    ///    recording follows the clue, not the old address.
     ///
-    /// **Before 0/4, after 3/4.** (The historic 1-in-4 of the issue title was
-    /// measured against delegation text the human had written by hand; with
-    /// today's bodies the old code scores 0/4 — #1158 confidently named the
-    /// guard's well-behaved neighbour, the neighbour trap of #1176.)
+    /// | case | answers, 2026-09-02 | expected |
+    /// |---|---|---|
+    /// | #1156 | 12555-12584 `settleCharacterCountVerdicts` | the same |
+    /// | #1158 | 8251-8460 `autoAcceptIfUnambiguous` | it, or silence |
+    /// | #1165 body | silence | silence |
+    /// | #1165 clue `queen.review.verdicts` | silence | it, or silence |
+    /// | #1166 | 9976-10275 `chooseNextOpenIssue` | the same |
+    /// | #1117 | 7432-7731 `requestReviewerVerdicts` | it, or silence |
     ///
-    /// The three hits, and why each rule fires:
+    /// Why each row answers what it answers:
     ///
-    /// - #1156 — rule 4: `characterCount` appears exactly once in the file,
-    ///   as the quoted log line `"queen.review.characterCount"` inside
-    ///   `handleWorkerFinished` (4922-…).
-    /// - #1158 — rule 1: both the guard and its neighbour are named, and the
-    ///   corroboration is measured, not assumed — the neighbour's body
-    ///   contains 0 mentions of the other identifiers,
-    ///   `autoAcceptIfUnambiguous`'s body contains 4 (`ProcessInfo` and
-    ///   `processInfo` on the quoted guard line, `awaitingReview` twice).
-    /// - #1166 — rule 3: `startAfterChoosing:` is a parameter of
-    ///   `chooseNextOpenIssue`'s signature and of no other; `ownedPaths:`
-    ///   labels four signatures and is discarded as a common label.
+    /// - #1156 — rule 4: `characterCount` appears exactly once in the file, as
+    ///   the quoted log line `"queen.review.characterCount"` (12576) inside
+    ///   `settleCharacterCountVerdicts`; the range begins at its declaration.
+    /// - #1158 — rule 1, corroboration: the neighbour
+    ///   `acceptanceBlockReasonDistinguishingEmptyAnswers` (7830-8006)
+    ///   carries 0 of the other identifiers; `autoAcceptIfUnambiguous`
+    ///   (8251-8460) carries 2 — `ProcessInfo` and `processInfo`, the guard
+    ///   the issue quotes. The subject wins outright. Were upstream to move
+    ///   the guard again, the tie is silence, which the case accepts.
+    /// - #1165 body — `ChatViewModel` alone: no rule answers, correctly.
+    /// - #1165 clue — rule 2 finds `queen.review.verdicts` at line 7754, 322
+    ///   lines into the 376-line `requestReviewerVerdicts`. The window capping
+    ///   slides the start to 7508 — mid-body, beginning nowhere in particular
+    ///   — and the #1176 finishing check silences it. This row is the witness
+    ///   for #1176's fourth criterion: delete the guards in `finished` and it
+    ///   goes red with `7508-7807 not starting at requestReviewerVerdicts`.
+    /// - #1166 — rule 3: `startAfterChoosing:` labels `chooseNextOpenIssue`'s
+    ///   signature and no other; the wide body caps to a window that still
+    ///   begins at the declaration.
+    /// - #1117 — rule 1, single candidate: one name, one declaration, the
+    ///   range begins at it (7432). No corroboration needed.
     ///
-    /// #1165 stays silent **by the caller's hand, not this file's**: its body
-    /// names one clue, `queen.review.verdicts` — the log line emitted inside
-    /// `requestReviewerVerdicts` — but the identifier filter in
-    /// `ChatViewModel.identifiers(from:)` (#1178) rejects tokens with dots, so
-    /// the clue never reaches `region`. Handed through directly, rule 2 lands
-    /// 5941-6240 inside `requestReviewerVerdicts` — the fourth case below
-    /// proves it. Letting dotted event names through that filter is work in
+    /// #1165's body still filters its clue out before it reaches `region` —
+    /// `ChatViewModel.identifiers(from:)` (#1178) rejects dotted tokens, so
+    /// only the handed-through case below exercises the clue. That filter is
     /// `rings/SR-02/ChatViewModel.swift`, outside this task's boundary.
     ///
-    /// #1117 is kept as a witness for the name rule: 5865-6164 inside
-    /// `requestReviewerVerdicts`.
-    ///
-    /// Replay any time — the check criterion 4 stands on:
+    /// Replay any time:
     ///
     ///     swiftc -O <driver>.swift rings/SR-00/QueenLocalisation.swift -o probe
     ///     probe <chatvm.swift> <bodies-dir>   # or call replayMeasurement(in:)
     ///
-    /// With the name preference (rule 1) removed, the replay goes red on
-    /// #1158 and #1117 — nothing else can find a function the issue names —
-    /// and the live замер falls to 2/4. Proven from both sides 2026-08-19.
+    /// What reddens what, measured 2026-09-02: removing the finishing check
+    /// (the two guards in `finished`) reddens the `queen.review.verdicts` row
+    /// — that is #1176's fourth criterion. Removing rule 1 entirely no longer
+    /// reddens #1158 or #1117: both fall to silence, which #1176 accepts —
+    /// the name rule is what still *points*; the finishing check is what
+    /// keeps every pointer honest.
     static func measurementCases() -> [MeasurementCase] {
         [
             MeasurementCase(
+                // The quoted log event moved upstream into this function
+                // (2026-09-02); the recording follows the clue, not the old
+                // handleWorkerFinished address of the 2026-08-19 table.
                 issue: "#1156",
                 identifiers: ["ChatViewModel", "awaitingReview", "characterCount"],
-                expected: .declaration("handleWorkerFinished")
+                expected: .declaration("settleCharacterCountVerdicts")
             ),
             MeasurementCase(
                 issue: "#1158",
@@ -728,7 +814,10 @@ public enum QueenLocalisation {
                     "acceptanceBlockReasonDistinguishingEmptyAnswers",
                     "autoAcceptIfUnambiguous", "awaitingReview", "processInfo",
                 ],
-                expected: .declaration("autoAcceptIfUnambiguous")
+                // #1176 criterion 1, verbatim: point at the named function,
+                // or say nothing. The neighbour's name is in the body too —
+                // only corroboration separates them, and a tie is silence.
+                expected: .declarationOrSilence("autoAcceptIfUnambiguous")
             ),
             MeasurementCase(
                 issue: "#1165 (body yields no code symbol; silence is correct)",
@@ -736,9 +825,15 @@ public enum QueenLocalisation {
                 expected: .silence
             ),
             MeasurementCase(
+                // #1176 criterion 4's witness. The event sits 322 lines into
+                // a 376-line function, so the capped window would begin
+                // mid-body; the finishing check silences it. Delete the
+                // guards in `finished` and this line goes red with a range
+                // that starts at 7508 — inside the function, beginning at
+                // nothing. Pointing, or silence — never that.
                 issue: "#1165 (its actual clue, `queen.review.verdicts`, handed through)",
                 identifiers: ["queen.review.verdicts"],
-                expected: .declaration("requestReviewerVerdicts")
+                expected: .declarationOrSilence("requestReviewerVerdicts")
             ),
             MeasurementCase(
                 issue: "#1166",
@@ -749,19 +844,26 @@ public enum QueenLocalisation {
                 expected: .declaration("chooseNextOpenIssue")
             ),
             MeasurementCase(
+                // #1176 criterion 2, verbatim: point at the named function,
+                // or say nothing.
                 issue: "#1117",
                 identifiers: ["ChatViewModel", "requestReviewerVerdicts"],
-                expected: .declaration("requestReviewerVerdicts")
+                expected: .declarationOrSilence("requestReviewerVerdicts")
             ),
         ]
     }
 
     /// Replays the замер against a source file (the boundary file the issues
     /// talk about — for these cases, `rings/SR-02/ChatViewModel.swift`) and
-    /// returns one verdict line per case: "ok …" or "FAIL …". This is the
-    /// check the fourth criterion of #1173 stands on — remove the name
-    /// preference (rule 1) and the #1158/#1117 lines go red, because nothing
-    /// else can find a function the issue names. Pure; no I/O.
+    /// returns one verdict line per case: "ok …" or "FAIL …".
+    ///
+    /// A returned range is ok only when it BEGINS at the named function's
+    /// declaration line and stays inside its extent (#1176 criterion 3) —
+    /// "somewhere inside" is not good enough, because a range that begins
+    /// mid-body begins "not at the named function" the same way a range that
+    /// begins at the neighbour does.
+    ///
+    /// Pure; no I/O.
     static func replayMeasurement(in source: String) -> [String] {
         let cleaned = source
             .replacingOccurrences(of: "\r\n", with: "\n")
@@ -772,13 +874,13 @@ public enum QueenLocalisation {
         return measurementCases().map { measure -> String in
             let range = region(in: source, mentioning: measure.identifiers)
             switch (range, measure.expected) {
-            case (nil, .silence):
+            case (nil, .silence), (nil, .declarationOrSilence):
                 return "ok    \(measure.issue): silence"
             case (nil, .declaration(let name)):
-                return "FAIL  \(measure.issue): silence, expected inside \(name)"
+                return "FAIL  \(measure.issue): silence, expected at \(name)"
             case (let r?, .silence):
                 return "FAIL  \(measure.issue): \(r.lowerBound)-\(r.upperBound), expected silence"
-            case (let r?, .declaration(let name)):
+            case (let r?, .declaration(let name)), (let r?, .declarationOrSilence(let name)):
                 guard let declIdx = codeLines.firstIndex(where: {
                     declarationName(on: $0) == name
                 }) else {
@@ -786,10 +888,10 @@ public enum QueenLocalisation {
                 }
                 let extent = declarationExtent(declLine: declIdx, depths: depths)
                 let expected = (extent.lowerBound + 1)...(extent.upperBound + 1)
-                if expected.contains(r.lowerBound), r.upperBound <= expected.upperBound {
-                    return "ok    \(measure.issue): \(r.lowerBound)-\(r.upperBound) inside \(name)"
+                if r.lowerBound == expected.lowerBound, r.upperBound <= expected.upperBound {
+                    return "ok    \(measure.issue): \(r.lowerBound)-\(r.upperBound) at \(name)"
                 }
-                return "FAIL  \(measure.issue): \(r.lowerBound)-\(r.upperBound) not inside \(name) (\(expected.lowerBound)-\(expected.upperBound))"
+                return "FAIL  \(measure.issue): \(r.lowerBound)-\(r.upperBound) not starting at \(name) (\(expected.lowerBound)-\(expected.upperBound))"
             }
         }
     }
