@@ -48,7 +48,7 @@ export function useChatActions(config: ChatActionsConfig) {
     })()
   }, [config.autoAttachActiveTab])
 
-  // Voice transcript → input
+  // Voice transcript -> input
   // biome-ignore lint/correctness/useExhaustiveDependencies: only trigger on transcript/transcribing change
   useEffect(() => {
     if (voice.transcript && !voice.isTranscribing) {
