@@ -13,7 +13,7 @@ interface LivenessDotProps {
   status: AgentLiveness
   /**
    * Optional human-friendly secondary line, e.g. "Idle for 4 min" or
-   * "Asleep — no activity for 22 min". When absent the tooltip just
+   * "Asleep - no activity for 22 min". When absent the tooltip just
    * reads the status label.
    */
   detail?: string
