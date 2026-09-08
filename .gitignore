@@ -83,3 +83,7 @@ OF
 *.d
 *.o
 *.swiftdeps
+
+# Swift object files from building queend. A rescue commit swept 24 of
+# these (2 MB) into the tree; nothing reads them and they rebuild on demand.
+*.o
