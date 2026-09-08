@@ -2,7 +2,7 @@
  * @license AGPL-3.0-or-later
  * Copyright 2026 TRIOS
  *
- * TRI Client — t27 CLI wrapper
+ * TRI Client - t27 CLI wrapper
  *
  * Wraps the `tri` CLI tool for MCP tool exposure.
  * Commands: test, verdict, status, experience, health, doctor
