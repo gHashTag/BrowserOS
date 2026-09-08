@@ -26,7 +26,7 @@ export const Laser: FC<LaserProps> = ({
   const [targetY, setTargetY] = useState<number | null>(null)
   const [fire, setFire] = useState(false)
 
-  // Measure target’s bottom position relative to viewport
+  // Measure target's bottom position relative to viewport
   useEffect(() => {
     const updatePosition = () => {
       const target = document.getElementById(targetId)
