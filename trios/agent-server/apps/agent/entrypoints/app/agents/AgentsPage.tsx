@@ -59,7 +59,7 @@ export const AgentsPage: FC = () => {
   } = useAgentAdapters()
 
   // The harness listing now carries the gateway lifecycle snapshot
-  // alongside the agents — one polling source for everything the
+  // alongside the agents - one polling source for everything the
   // agents page renders. The legacy `/claw/status` poll is dead from
   // this surface; the chat-panel layout still uses it for now.
   const {
@@ -166,8 +166,8 @@ export const AgentsPage: FC = () => {
   const agentListItems = useMemo(() => {
     // Dual-created OpenClaw agents (and the backfilled `main`/orphans
     // post Step 9) live in both `/claw/agents` and `/agents` under the
-    // same id. Prefer the harness entry — it carries adapter/model/
-    // reasoning/lastUsedAt/status that the chat path actually uses —
+    // same id. Prefer the harness entry - it carries adapter/model/
+    // reasoning/lastUsedAt/status that the chat path actually uses -
     // and drop the legacy duplicate so the rail doesn't show every
     // OpenClaw agent twice.
     const harnessIds = new Set(harnessAgents.map((agent) => agent.id))
@@ -364,7 +364,7 @@ export const AgentsPage: FC = () => {
             void handleDelete(agent)
           }}
           onPinToggle={(agent, next) => {
-            // Optimistic mutation; harness-only — gateway-original
+            // Optimistic mutation; harness-only - gateway-original
             // OpenClaw entries are gated server-side via the harness
             // backfill, so we only fire when the row maps to a
             // harness agent record.
