@@ -29,7 +29,7 @@ interface AgentSelectorProps {
   status?: string
   /**
    * `'pill'` renders the filled-pill variant used by the calm
-   * composer on `/home` — bordered, slightly elevated background,
+   * composer on `/home` - bordered, slightly elevated background,
    * mono agent name, used as the visual anchor on the left of the
    * footer chip row. Default `'ghost'` keeps the existing flat
    * shadcn ghost-button trigger used by the chat surface.
