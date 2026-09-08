@@ -84,7 +84,7 @@ export function useOutputsRailOpen(
       setOpen(stored === '1')
     } catch {
       // localStorage may be unavailable (private mode, locked-down
-      // contexts) — fall back to closed.
+      // contexts) - fall back to closed.
     }
   }, [agentId])
 
