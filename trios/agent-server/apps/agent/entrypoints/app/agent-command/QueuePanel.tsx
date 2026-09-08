@@ -29,7 +29,7 @@ interface QueuePanelProps {
 /**
  * Renders the agent's pending message queue using the shared AI
  * Elements `Queue` primitives. Caller is expected to gate render on
- * `queue.length > 0` — when empty, this returns null so the panel
+ * `queue.length > 0` - when empty, this returns null so the panel
  * disappears cleanly between turns.
  */
 export const QueuePanel: FC<QueuePanelProps> = ({ queue, onRemove }) => {
