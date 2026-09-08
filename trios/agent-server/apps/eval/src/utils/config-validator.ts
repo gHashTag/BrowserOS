@@ -75,7 +75,7 @@ export async function validateConfig(
     }
   }
 
-  // Server health check skipped — eval manages Chrome+Server lifecycle per worker
+  // Server health check skipped - eval manages Chrome+Server lifecycle per worker
 
   if (config.num_workers > 5) {
     warnings.push(
