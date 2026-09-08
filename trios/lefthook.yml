@@ -1,0 +1,40 @@
+# Language gate for agent-created GitHub tasks (gHashTag/trios#1291).
+#
+# The Queen product stays bilingual in Russian and English; that policy
+# governs the dashboard UI and the READING of historical issues. This file
+# is about the one opposite direction of travel: NEW task issues created
+# by agents enter the development queue in English only, and the rule is a
+# strict pre-commit gate rather than a suggestion. The validator it tests
+# lives in agent-server/apps/server/src/api/services/queen-issue-language.ts;
+# the canonical wrapper is agent-server/scripts/queen-issue-create.ts.
+#
+# Why the command is shaped this way:
+#
+#   - `files:` anchors the command to a TRACKED file instead of to the git
+#     index. Lefthook (v1 and v2 alike) skips a pre-commit command whose
+#     staged set is empty, so a gate without an anchor would silently not
+#     run on a clean checkout - exactly the moment "strict" must still be
+#     true. With this anchor the test runs whenever the test file exists,
+#     staged or not.
+#
+#   - `git ls-files --full-name "*queen-issue-language.test.ts"` emits the
+#     path relative to the git root, and `{files}` substitutes it verbatim
+#     into `bun test`. Running bun from the git root with the full
+#     repository-relative path keeps the command correct whether this
+#     repository is checked out standalone (agent-server/ at the root) or
+#     nested inside a larger worktree - no hardcoded `root:` that only one
+#     layout can satisfy.
+#
+#   - No `glob` and no `{staged_files}`: the gate must not depend on which
+#     files are being committed, because the English-only rule governs
+#     every issue any agent may create from this checkout.
+#
+# This file scopes only the agent-server half of the policy. The Swift-side
+# task-language checks live in the repository-root lefthook.yml and are
+# untouched by this change; the RU/EN dashboard localisation is outside
+# this policy entirely.
+pre-commit:
+  commands:
+    queen-issue-language:
+      files: git ls-files --full-name "*queen-issue-language.test.ts"
+      run: bun test {files}
