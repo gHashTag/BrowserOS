@@ -59,7 +59,7 @@ export async function detectMcpTransport(
     const isJsonResponse = contentType.includes('application/json')
     const isStreamResponse = contentType.includes('text/event-stream')
 
-    // Release the connection — avoid leaking open streams (especially SSE)
+    // Release the connection - avoid leaking open streams (especially SSE)
     await response.body?.cancel()
 
     logger.debug('MCP transport probe response', {
