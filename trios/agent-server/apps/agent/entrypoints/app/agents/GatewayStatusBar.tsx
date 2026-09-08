@@ -27,7 +27,7 @@ interface GatewayStatusBarProps {
  * header and the agent list when at least one OpenClaw agent is in
  * the merged list; collapses to nothing for Claude/Codex-only setups.
  *
- * Status is sourced from `GET /agents`'s `gateway` field — the agents
+ * Status is sourced from `GET /agents`'s `gateway` field - the agents
  * page no longer polls `/claw/status` directly. One endpoint, one
  * 5s interval, no duplicate state.
  */
