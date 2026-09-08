@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { defineTool } from '../framework'
 
-// Vision tool — uses Anthropic Claude to analyze GitButler screenshots
+// Vision tool - uses Anthropic Claude to analyze GitButler screenshots
 export const analyze_gitbutler_screenshot_vision = defineTool({
   name: 'analyze_gitbutler_screenshot_vision',
   description:
