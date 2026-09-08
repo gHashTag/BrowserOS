@@ -1,3 +1,4 @@
+import { isBrowserlessByConfiguration } from './browserless'
 import { devToolsMiddleware } from '@ai-sdk/devtools'
 import type {
   LanguageModelV3,
@@ -210,8 +211,30 @@ export class AiSdkAgent {
     const memoryTools = config.resolvedConfig.chatMode
       ? {}
       : buildMemoryToolSet()
+    // NO BROWSER WILL EVER EXIST HERE, SO DO NOT DESCRIBE ONE.
+    //
+    // A tool costs its schema in every request whether or not it is ever
+    // called. Measured on the swarm's first turn against a 16k model:
+    // toolCount=79 and an opening prompt of 15,747 tokens against an
+    // n_ctx_slot of 16,384 - 96.1% of the window spent before the model
+    // generated a single token, most of it on browser schemas that could only
+    // have failed. With n_keep=4 an overflow discards the system prompt first,
+    // so the turn ends without the "## VERDICT" block the review parses, and
+    // the dispatch sits in `wait` for six hours having done nothing.
+    //
+    // Gated on configuration, NOT on isCdpConnected(): a desktop browser that
+    // has not come up yet answers false to that and will answer true shortly,
+    // because main.ts retries every 10s. Only `cdpPort === null` means no
+    // browser is coming.
+    const browserless = isBrowserlessByConfiguration()
+    const usableBrowserTools = browserless ? {} : browserTools
+    if (browserless && Object.keys(browserTools).length > 0) {
+      logger.info('Headless by configuration, omitting browser tools', {
+        omitted: Object.keys(browserTools).length,
+      })
+    }
     const tools = {
-      ...browserTools,
+      ...usableBrowserTools,
       ...externalMcpTools,
       ...filesystemTools,
       ...memoryTools,

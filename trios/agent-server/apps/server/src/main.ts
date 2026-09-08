@@ -8,6 +8,7 @@
  * Manages server lifecycle: initialization, startup, and shutdown.
  */
 
+import { markBrowserlessByConfiguration } from './agent/browserless'
 import fs from 'node:fs'
 import path from 'node:path'
 import { EXIT_CODES } from '@browseros/shared/constants/exit-codes'
@@ -109,8 +110,13 @@ export class Application {
     // the same thing that happens when the browser goes away mid-session.
     let cdpConnected = false
     if (this.config.cdpPort === null) {
+      // Recorded, not just logged. Every agent session built from here on omits
+      // the browser tool schemas entirely rather than handing a model 66 tools
+      // whose every call would fail - which on a 16k model cost 96.1% of the
+      // context window before the first generated token.
+      markBrowserlessByConfiguration()
       logger.info(
-        'No CDP port configured; starting headless. Browser tools will fail per-request.',
+        'No CDP port configured; starting headless. Browser tools are omitted.',
       )
     } else
       try {

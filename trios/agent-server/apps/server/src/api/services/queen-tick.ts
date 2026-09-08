@@ -168,6 +168,32 @@ const ISSUE_PAGE_CAP = 5
  * `complete` is what stops that: a truncated list is still worth deciding
  * against, but it must never be treated as the whole truth.
  */
+/**
+ * Headers for a GitHub READ.
+ *
+ * Anonymous is 60 requests an hour per EGRESS IP, and on Railway that address
+ * is shared with every other deployment on the host - so the budget this
+ * server actually gets is an unknowable fraction of 60. Paginating the open
+ * issues every TRIOS_QUEEN_TICK_SECONDS exhausts it, `openIssues` throws
+ * `GitHub returned 403`, and the whole round dies before any bee is
+ * dispatched. Measured on the live swarm: four such rounds between 16:50 and
+ * 17:08 UTC on 2026-09-08, each one a tick that looked like it simply chose
+ * nothing.
+ *
+ * A token lifts the ceiling to 5,000/hr. Read-only suffices - nothing on this
+ * path writes - so it is deliberately a DIFFERENT variable from anything a bee
+ * commits with, and it is optional: unset, this returns exactly the headers
+ * this code sent before, and the anonymous limit applies as it always did.
+ */
+function githubReadHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {
+    Accept: 'application/vnd.github+json',
+  }
+  const token = process.env.TRIOS_GITHUB_API_TOKEN?.trim()
+  if (token) headers.Authorization = `Bearer ${token}`
+  return headers
+}
+
 export async function openIssues(repo: string): Promise<{
   issues: Array<{ number: number; body: string; title: string }>
   complete: boolean
@@ -178,7 +204,7 @@ export async function openIssues(repo: string): Promise<{
     const response = await fetch(
       `https://api.github.com/repos/${repo}/issues` +
         `?state=open&per_page=${ISSUE_PAGE_SIZE}&page=${page}`,
-      { headers: { Accept: 'application/vnd.github+json' } },
+      { headers: githubReadHeaders() },
     )
     if (!response.ok) throw new Error(`GitHub returned ${response.status}`)
     const batch = (await response.json()) as Array<{
@@ -657,7 +683,7 @@ async function bodiesFor(
   for (const number of numbers) {
     const response = await fetch(
       `https://api.github.com/repos/${repo}/issues/${number}`,
-      { headers: { Accept: 'application/vnd.github+json' } },
+      { headers: githubReadHeaders() },
     )
     if (!response.ok) continue
     const issue = (await response.json()) as { body?: string | null }
