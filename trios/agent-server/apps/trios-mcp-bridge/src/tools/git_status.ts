@@ -2,7 +2,7 @@
  * @license AGPL-3.0-or-later
  * Copyright 2026 TRIOS
  *
- * git_status tool — Get current Git repository status
+ * git_status tool - Get current Git repository status
  * Uses simple-git with proper type casts.
  */
 
