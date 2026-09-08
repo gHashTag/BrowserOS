@@ -11,7 +11,7 @@
  *   - Bounded text-snippet reader for inline previews.
  *   - Image bytes reader for the rail's thumbnails.
  *
- * No streaming code lives here — the download route streams via Hono
+ * No streaming code lives here - the download route streams via Hono
  * directly. This module only handles the small in-memory reads the
  * preview UX needs.
  */
@@ -287,7 +287,7 @@ async function readImagePreview(
   base: { mimeType: string; size: number; mtimeMs: number },
 ): Promise<ImagePreview | BinaryPreview> {
   if (base.size > IMAGE_PREVIEW_MAX_BYTES) {
-    // Too big to inline — let the user download.
+    // Too big to inline - let the user download.
     return { kind: 'binary', ...base }
   }
   const handle = await open(absolutePath, 'r')
@@ -316,13 +316,13 @@ function isTextMime(mime: string): boolean {
 
 function isImageMime(mime: string): boolean {
   return mime.startsWith('image/') && mime !== 'image/svg+xml'
-  // SVG is text — let it go through the text path so users can read
+  // SVG is text - let it go through the text path so users can read
   // markup, not view a base64 blob.
 }
 
 /**
  * Crude text-vs-binary heuristic for files whose extension and magic
- * bytes both fail to identify them. Counts NUL bytes — text files
+ * bytes both fail to identify them. Counts NUL bytes - text files
  * essentially never contain them; binaries usually do.
  */
 function looksLikeText(head: Uint8Array): boolean {
