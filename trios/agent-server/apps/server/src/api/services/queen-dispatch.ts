@@ -172,6 +172,16 @@ export interface WorkerProvider {
   laneCount?: number
   /** Set when every configured worker lane is in use. */
   exhausted?: number
+  /**
+   * The model's REAL context window, when it is not the 200k default.
+   *
+   * Dispatch never sent this, so every worker ran against a 200,000-token
+   * assumption and compaction did not fire until 180,000. Against a 16k model
+   * that is not a tuning detail: the turn dies mid-sentence with no verdict
+   * block, which is exactly the transcript this repository already measured -
+   * 222,468 characters ending "Add temporary debu".
+   */
+  contextWindow?: number
 }
 
 /**
@@ -274,6 +284,19 @@ export interface WorkerCapacityBreakdown {
 }
 
 export function workerCapacityBreakdown(): WorkerCapacityBreakdown {
+  // The local endpoint is one credential at one lane. Reporting the paid
+  // providers' numbers while dispatch actually runs on this one would make the
+  // capacity a dashboard shows and the ceiling dispatch allocates against two
+  // different stories about one configuration - the exact thing this function
+  // exists to prevent.
+  if (localWorkerBaseUrl()) {
+    const lanesPerCredential = workerLanesFor('ollama')
+    return {
+      connectedCredentials: 1,
+      lanesPerCredential,
+      effectiveCapacity: lanesPerCredential,
+    }
+  }
   for (const candidate of WORKER_PROVIDERS) {
     const keys = keysFor(candidate.envVar)
     if (keys.length > 0) {
@@ -308,6 +331,72 @@ export function configuredWorkerCapacity(): number {
 }
 
 /**
+ * A worker endpoint this deployment can reach WITHOUT a subscription, named by
+ * URL.
+ *
+ * It is consulted before every paid candidate because setting it is an explicit
+ * operator choice - "use this, not the key" - and unsetting it restores the
+ * previous behaviour with no code change and no deploy.
+ *
+ * The plumbing for this already existed and was one field short of usable:
+ * `baseUrl` travels to /chat in dispatchBee and provider-factory builds an
+ * openai-compatible client from it, but the zai branch of resolveWorkerProvider
+ * returned no baseUrl at all, so the factory fell through to the hardcoded
+ * EXTERNAL_URLS.ZAI_API. TRIOS_QUEEN_WORKER_MODEL could therefore rename the
+ * model and still send the turn to api.z.ai - a switch that read as
+ * configurable and was not. Verified by enumerating every process.env name the
+ * server reads: no worker base-URL variable existed.
+ */
+const DEFAULT_LOCAL_WORKER_MODEL = 'qwen3:1.7b'
+const DEFAULT_LOCAL_CONTEXT_WINDOW = 16_384
+
+function localWorkerBaseUrl(): string | undefined {
+  const raw = process.env.TRIOS_QUEEN_WORKER_BASE_URL
+  return raw && raw.trim() ? raw.trim().replace(/\/+$/, '') : undefined
+}
+
+function localWorkerContextWindow(): number {
+  const parsed = Number(process.env.TRIOS_QUEEN_WORKER_CONTEXT)
+  if (!Number.isInteger(parsed) || parsed < 2048) {
+    return DEFAULT_LOCAL_CONTEXT_WINDOW
+  }
+  return parsed
+}
+
+function localWorkerProvider(
+  override: string | undefined,
+  takenKeyIndices: number[],
+): WorkerProvider | null {
+  const baseUrl = localWorkerBaseUrl()
+  if (!baseUrl) return null
+  const model = override || DEFAULT_LOCAL_WORKER_MODEL
+  // ONE lane, and that is a measurement rather than caution: the ollama this
+  // points at was proven to serve a single inference slot (n_ctx_slot equals
+  // the full OLLAMA_CONTEXT_LENGTH, and slot id 0 was the only id across 156
+  // log lines). Two simultaneous requests did not run in parallel - one waited
+  // ~57s in queue. A second lane would queue behind the first while reporting
+  // a parallelism the server cannot deliver. workerLanesFor already gives any
+  // non-zai provider exactly one; this states why it must stay that way here.
+  const laneCount = workerLanesFor('ollama')
+  const busy = takenKeyIndices.filter((taken) => taken === 0).length
+  if (busy >= laneCount) {
+    return { provider: 'ollama', model, exhausted: laneCount }
+  }
+  return {
+    provider: 'ollama',
+    model,
+    baseUrl,
+    // Ollama ignores the value; the SDK requires one to be present.
+    apiKey: process.env.TRIOS_QUEEN_WORKER_API_KEY || 'local',
+    keyIndex: 0,
+    keyCount: 1,
+    laneIndex: busy,
+    laneCount,
+    contextWindow: localWorkerContextWindow(),
+  }
+}
+
+/**
  * A bounded number of concurrent lanes per distinct credential.
  *
  * Four bees sharing one credential share one rate limit, so the swarm's real
@@ -329,6 +418,8 @@ export function resolveWorkerProvider(
   takenKeyIndices: number[] = [],
 ): WorkerProvider | null {
   const override = process.env.TRIOS_QUEEN_WORKER_MODEL
+  const local = localWorkerProvider(override, takenKeyIndices)
+  if (local) return local
   for (const candidate of WORKER_PROVIDERS) {
     const keys = keysFor(candidate.envVar)
     if (keys.length > 0) {
@@ -438,23 +529,54 @@ function run(
     .join(' ')
   const argv = shellArgv(quoted)
   return new Promise((resolve) => {
-    const child = spawn(argv[0], argv.slice(1), { cwd })
+    // `detached` is what makes a process GROUP exist to kill. Without it the
+    // timeout below can only reach `su`, and `su` is never the process that
+    // hangs.
+    const child = spawn(argv[0], argv.slice(1), { cwd, detached: true })
     let out = ''
-    const done = setTimeout(() => child.kill('SIGKILL'), timeoutMs)
+    let settled = false
+    let killTimer: ReturnType<typeof setTimeout> | undefined
+    let hardTimer: ReturnType<typeof setTimeout> | undefined
+
+    const finish = (code: number, extra = '') => {
+      if (settled) return
+      settled = true
+      if (killTimer) clearTimeout(killTimer)
+      if (hardTimer) clearTimeout(hardTimer)
+      resolve({ code, out: (out + extra).trim() })
+    }
+
+    // SIGKILL on `su` alone leaves the git it spawned alive, and that grandchild
+    // holds the inherited stdio pipes this promise waits on - so 'close', which
+    // needs EOF on them, cannot fire and the round hangs FOR EVER holding its
+    // lease. Measured on the live swarm: seven consecutive rounds each chose
+    // issue #1540 and not one reached a "Queen dispatch" log line of either
+    // polarity, while each stuck round kept its heartbeat alive and every 300s
+    // tick added another. Killing the whole group is what this timeout always
+    // meant to do.
+    killTimer = setTimeout(() => {
+      try {
+        if (child.pid) process.kill(-child.pid, 'SIGKILL')
+      } catch {
+        child.kill('SIGKILL')
+      }
+    }, timeoutMs)
+
+    // Belt and braces. If anything still holds a pipe after the group kill, do
+    // not wait on it: a wrong answer is recoverable, a wedged round is not.
+    hardTimer = setTimeout(
+      () => finish(-1, '\n[run] timed out and never closed'),
+      timeoutMs + 5_000,
+    )
+
     child.stdout.on('data', (d) => {
       out += d
     })
     child.stderr.on('data', (d) => {
       out += d
     })
-    child.on('error', (e) => {
-      clearTimeout(done)
-      resolve({ code: -1, out: String(e) })
-    })
-    child.on('close', (code) => {
-      clearTimeout(done)
-      resolve({ code: code ?? -1, out: out.trim() })
-    })
+    child.on('error', (e) => finish(-1, String(e)))
+    child.on('close', (code) => finish(code ?? -1))
   })
 }
 
@@ -743,6 +865,21 @@ export async function farmNodeModules(
   }
 }
 
+/**
+ * Does this path exist at all?
+ *
+ * Deliberately not `git worktree list`: the case this guards is precisely the
+ * one where those two answers disagree.
+ */
+function pathExists(target: string): boolean {
+  try {
+    statSync(target)
+    return true
+  } catch {
+    return false
+  }
+}
+
 export async function prepareWorktree(
   issue: number,
   deps: {
@@ -810,6 +947,56 @@ export async function prepareWorktree(
           : `reused an existing worktree (${changed} uncommitted file(s) ` +
             'left by a previous attempt)') + reusedFarm,
     }
+  }
+
+  // A DIRECTORY CAN EXIST WHILE GIT DOES NOT LIST IT, and the reuse branch
+  // above cannot see that because it asks git rather than the disk.
+  //
+  // A container that dies between `git worktree add` and its metadata write
+  // leaves the checkout on the volume with nothing in .git/worktrees pointing
+  // at it. Every later round for that issue then dies on
+  //
+  //   fatal: '/workspace/BrowserOS/.worktrees/queen-1540' already exists
+  //
+  // which is exactly what wedged #1540: seven consecutive rounds chose it, each
+  // recorded `started: false`, and the swarm reported four idle lanes while
+  // having no way to use one. The dispatch row carried the sentence the whole
+  // time; nothing read it out loud.
+  //
+  // Prune first. When the admin entry is merely stale that IS the repair, and
+  // it costs one cheap git call - so the question the next lines ask, "is this
+  // path registered?", is asked of a registry that has just been made accurate.
+  await run('git', ['worktree', 'prune'], root, 60_000)
+  const registered = await run(
+    'git',
+    ['worktree', 'list', '--porcelain'],
+    root,
+    60_000,
+  )
+  if (!registered.out.includes(path) && pathExists(path)) {
+    // An orphan: present on disk, unknown to git.
+    //
+    // NOT DELETED. This container holds no push credential by design, so
+    // anything uncommitted in that tree is the ONLY copy of a predecessor's
+    // turn - the same reason the reuse branch above counts and does not clean.
+    // Moving it aside frees the path for a fresh cut and keeps the evidence
+    // under a name that says what it is.
+    const parked = `${path}.orphan-${Date.now()}`
+    const moved = await run('mv', [path, parked], root, 60_000)
+    if (moved.code !== 0) {
+      return {
+        ok: false,
+        path,
+        detail:
+          `an unregistered worktree occupies ${path} and could not be moved ` +
+          `aside: ${moved.out.slice(0, 200)}`,
+      }
+    }
+    logger.warn('Parked an unregistered worktree directory', {
+      issue,
+      path,
+      parked,
+    })
   }
 
   // BEFORE THE FETCH, because a fetch onto a full volume fails the same way and
@@ -922,6 +1109,13 @@ async function startTurn(
         model: chosen.model,
         ...(chosen.baseUrl && { baseUrl: chosen.baseUrl }),
         ...(chosen.apiKey && { apiKey: chosen.apiKey }),
+        // Without this the agent takes the 200k default and compaction waits
+        // until 180k, which against a 16k model means the turn is cut off long
+        // before it writes "## VERDICT" - and an unverdicted dispatch sits in
+        // `wait` for six hours holding its issue and its file boundaries.
+        ...(chosen.contextWindow && {
+          contextWindowSize: chosen.contextWindow,
+        }),
         // `userWorkingDir`, not `workingDirectory`. The schema names it the
         // first way and ignores unknown keys, so the wrong name was accepted
         // in silence and the bee would have run against the shared checkout
