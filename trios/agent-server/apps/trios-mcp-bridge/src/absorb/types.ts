@@ -2,7 +2,7 @@
  * @license AGPL-3.0-or-later
  * Copyright 2026 TRIOS
  *
- * TRIOS Absorb Smart — Types
+ * TRIOS Absorb Smart - Types
  * Smart file sorting into virtual branches.
  */
 
