@@ -22,7 +22,7 @@ interface AgentListProps {
     string,
     { status: AgentLiveness; lastUsedAt: number | null }
   >
-  /** Lookup table from harness id → enriched agent record. */
+  /** Lookup table from harness id -> enriched agent record. */
   harnessAgentLookup?: Map<string, HarnessAgent>
   /** Adapter catalog (carries per-adapter health). */
   adapters: HarnessAdapterDescriptor[]
