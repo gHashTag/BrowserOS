@@ -126,7 +126,7 @@ export class Browser {
     this.cdp = cdp
     this.consoleCollector = new ConsoleCollector(cdp)
     this.unsubscribeDetachedFromTarget = this.setupEventHandlers()
-    // Subscribe exactly once, here — never per operation and never per
+    // Subscribe exactly once, here - never per operation and never per
     // reconnect, or handlers accumulate (trios#1368, FR-002).
     this.unsubscribeReconnected = cdp.onReconnected(() =>
       this.handleReconnected(),
@@ -164,7 +164,7 @@ export class Browser {
   /**
    * A reconnect (trios#1368) established a NEW WebSocket connection. Chrome
    * issues fresh session ids per connection, so every id cached from the
-   * dead socket is permanently invalid — the socket that would have
+   * dead socket is permanently invalid - the socket that would have
    * delivered `Target.detachedFromTarget` is the one that died. Clearing
    * here makes the next resolveSession() re-attach and succeed instead of
    * failing with "Session with given id not found." for the life of the
@@ -176,7 +176,7 @@ export class Browser {
    * - `CdpBackend.sessionCache` (sessionId -> protocol bindings): cleared
    *   by the backend itself, before this notification fires.
    * - `ConsoleCollector.sessionToPage` / `pageToSession` (sessionId <->
-   *   pageId routing): keyed by the same dead ids, but left to self-heal —
+   *   pageId routing): keyed by the same dead ids, but left to self-heal -
    *   the next attachToPage() calls consoleCollector.attach(), which
    *   replaces both sides of the mapping, and the only in-reach clearing
    *   primitive, detach(), would also destroy the page's console history.
@@ -677,7 +677,7 @@ export class Browser {
         })
         if ((result.result?.value as string) === 'complete') return
       } catch {
-        // Context torn down during navigation — expected
+        // Context torn down during navigation - expected
       }
       await new Promise((r) => setTimeout(r, 150))
     }
@@ -784,7 +784,7 @@ export class Browser {
           })
         }
       } catch {
-        // Cross-origin or detached frames may fail — skip
+        // Cross-origin or detached frames may fail - skip
       }
     }
     return allNodes
