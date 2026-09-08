@@ -3,7 +3,7 @@
  * Source gate for the MCP connect-failure contract (gHashTag/trios#1375).
  *
  * A lost MCP server used to vanish inside `createMcpClients`: zero clients,
- * zero tools, no exception — indistinguishable from "no servers configured".
+ * zero tools, no exception - indistinguishable from "no servers configured".
  * This gate statically checks that the loss is retried and observable.
  *
  * Constraints honoured here:
