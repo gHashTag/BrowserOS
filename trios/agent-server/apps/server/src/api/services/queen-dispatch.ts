@@ -621,7 +621,24 @@ export async function committedFileCount(issue: number): Promise<number> {
 }
 
 export function workspaceRoot(): string {
-  return `${process.env.WORKSPACE_DIR || '/workspace'}/BrowserOS`
+  // The directory name is DERIVED from the repo URL, exactly as the entrypoint
+  // derives it — `REPO_NAME="$(basename "$TRIOS_REPO_URL" .git)"`. Hardcoding
+  // "BrowserOS" here made the two agree only by coincidence of that one URL:
+  // point TRIOS_REPO_URL at any other repository and the entrypoint clones to
+  // /workspace/<that name> while this function keeps looking in
+  // /workspace/BrowserOS, so every dispatch fails on a checkout that is present
+  // and simply not where the server looks.
+  //
+  // One input, one rule, two readers.
+  const dir = process.env.WORKSPACE_DIR || '/workspace'
+  const url = process.env.TRIOS_REPO_URL || ''
+  const name =
+    url
+      .replace(/\.git$/, '')
+      .replace(/\/+$/, '')
+      .split('/')
+      .pop() || 'BrowserOS'
+  return `${dir}/${name}`
 }
 
 /**
@@ -1895,7 +1912,18 @@ export async function dispatchBee(
   // standing at the root makes every project-relative boundary resolve one
   // level too high - the bee writes `<worktree>/docs/x.md` where the committer
   // looks for `trios/docs/x.md`, and its work reads as no work at all.
-  const workingDirectory = `${worktree.path}/trios`
+  // The PROJECT inside the checkout — which is not always a subdirectory.
+  //
+  // This was hardcoded to `/trios`, which is right for BrowserOS and wrong for
+  // every other repository: aimed at a repo whose code sits at its root, the
+  // bee would be handed a path that does not exist. TRIOS_REPO_SUBDIR names it,
+  // and defaults to `trios` so the existing deployment behaves exactly as
+  // before; set it empty for a repo whose project IS its root.
+  const subdir = (process.env.TRIOS_REPO_SUBDIR ?? 'trios').replace(
+    /^\/+|\/+$/g,
+    '',
+  )
+  const workingDirectory = subdir ? `${worktree.path}/${subdir}` : worktree.path
 
   const conversationId = randomUUID()
   const turn = await startTurn(
