@@ -152,6 +152,20 @@ COPY apps/server apps/server
 COPY packages/shared packages/shared
 COPY packages/cdp-protocol packages/cdp-protocol
 
+# The Queen's scheduler reads its cards and the compiler from here at start-up
+# (apps/server/src/inngest/spec-catalog.ts, DEFAULT_SPECS_ROOT = ../../../../specs
+# = /app/specs). The first GitHub deploy of #480 (Railway, 2026-09-13) came up
+# with GET /queen/scheduler -> 503 "ENOENT /app/specs/t27_compiler.wasm": the
+# route told the truth, the image simply did not carry the directory. The check
+# below fails the build if the wasm is not the bytes specs/PIN names, so a
+# drifted pin is caught here and not at the first request.
+COPY specs specs
+RUN test -f specs/t27_compiler.wasm \
+ && want="$(sed -n 's/.*sha256 \([0-9a-f]\{64\}\).*/\1/p' specs/PIN | head -n1)" \
+ && have="$(sha256sum specs/t27_compiler.wasm | cut -d' ' -f1)" \
+ && test -n "$want" && test "$want" = "$have" \
+ && echo "specs/t27_compiler.wasm sha256 $have matches specs/PIN"
+
 # Where bees check out and work.
 #
 # THIS COMMENT USED TO SAY "A volume mounts here in production so a redeploy

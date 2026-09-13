@@ -65,6 +65,30 @@ upstream. Recorded in the tests rather than papered over.
 Values are set by the operator in Railway's own UI; no token is stored in this
 repository or handed to an agent (policy: Railway only via the owner's login).
 
+### As deployed (Railway project 999, service trios-agent-server, 2026-09-13)
+
+- `INNGEST_BASE_URL` = `http://${{inngest/inngest.RAILWAY_PRIVATE_DOMAIN}}:${{inngest/inngest.INNGEST_PORT}}`,
+  `INNGEST_EVENT_KEY` = `${{inngest/inngest.INNGEST_EVENT_KEY}}`,
+  `INNGEST_SIGNING_KEY` = `${{inngest/inngest.INNGEST_SIGNING_KEY}}` - Railway
+  variable references to the self-hosted Inngest service (its display name is
+  `inngest/inngest`), so the keys are never copied by hand and rotate with it.
+- `INNGEST_SERVE_HOST` = `https://trios-agent-server-production.up.railway.app`,
+  written out in full: `api.t27.ai` is attached to the service but its DNS is
+  still pending, and `${{RAILWAY_PUBLIC_DOMAIN}}` may resolve to it first.
+- `TRIOS_GITHUB_API_TOKEN` was NOT among the service's variables at that date
+  (measured in the Variables tab; 28 variables before, 32 after). Until the
+  operator adds it, `dispatch` has no token: `/queen/scheduler` reports the
+  flag as unset and cron functions cannot `workflow_dispatch`.
+- Source: the service was moved from `railway up` snapshots to GitHub
+  `gHashTag/BrowserOS`, branch `fix/queen-worker-provider-and-prompt-size`,
+  root directory `trios/agent-server`. Railway shows "Auto deploy unavailable"
+  (no project member's GitHub account is linked to the repo for the Railway
+  GitHub App), so after a merge the deploy is triggered by hand in the
+  Deployments tab until that link is made.
+- First deploy of #480 from GitHub came up with `GET /queen/scheduler` -> 503
+  `ENOENT /app/specs/t27_compiler.wasm`: the Dockerfile did not copy `specs/`.
+  Fixed by `COPY specs specs` plus a build-time sha256 check against `specs/PIN`.
+
 ## The move (MOVE_STEPS = 3, CONTROL_AFTER_MOVE = inngest)
 
 1. Deploy this server with the env above; check `GET /queen/scheduler` and the
