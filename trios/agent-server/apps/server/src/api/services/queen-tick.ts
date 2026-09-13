@@ -46,6 +46,9 @@ import {
   reapDispatchesFromPreviousBoot,
   reapStalledDispatches,
   setDurableCloseListener,
+  type Witness,
+  witnessSpecs,
+  witnessVerdicts,
   workspaceRoot,
 } from './queen-dispatch'
 import {
@@ -1278,6 +1281,19 @@ export function briefFor(
     'unchecked criterion is not a pass, and saying so plainly costs you',
     'nothing.',
     '',
+    // The compiler, named, and the fact that the review runs it. Harvested
+    // 2026-09-10 (gHashTag/t27#3560): 34 branches whose bees had written
+    // "met", 9 of which parsed clean when `t27c` was actually run. The other 25
+    // bees were not lying so much as guessing, because nothing told them the
+    // compiler was on the machine or that anyone would run it after them.
+    'The T27 compiler is installed: `t27c` is on your PATH (/usr/local/bin/t27c).',
+    'For every `.t27` file you change, run `t27c parse <file>` and',
+    '`t27c typecheck <file>` yourself before you answer, and quote the result.',
+    'The review runs the same commands on your COMMIT - parse, parse-complete',
+    "and typecheck - and the compiler's answer stands above your verdict line.",
+    'A file with a parse error, a DISCARDED token run, or a `TODO: Implement`',
+    'stub marker is unmet whatever the line says.',
+    '',
     '## Out of scope',
     '',
     'Anything the issue does not ask for. Work that seems obviously needed and',
@@ -1290,6 +1306,16 @@ export function briefFor(
     'holds no push credential by design, and the work is carried out as a patch',
     'by the operator. A failed push reads as a failed task; a commit is the',
     'deliverable.',
+    '',
+    // The trailer, in the exact form the repository's traceability gate
+    // accepts. The 9 bee commits carried into gHashTag/t27#3560 all had to be
+    // rewritten by hand: they closed with "Resolves gHashTag/t27#N", which
+    // reads well and matches nothing - the L1 gate wants a bare `#N`.
+    `End your commit message with the line \`Closes #${issue}\` - exactly that`,
+    'form, on its own line, bare issue number. "Resolves owner/repo#N" does not',
+    "pass the repository's traceability gate and the commit is rewritten by hand.",
+    "Sealing (`t27c seal`) and the `docs/now/` entry are the operator's at",
+    'harvest time, not yours: they fall outside your boundary.',
     '',
     // The template, one numbered slot per criterion (#1421). Emitted only when
     // the task states criteria, so a task with none is unchanged: its bee
@@ -1447,6 +1473,10 @@ export function workerSystemPrompt(
   }
   lines.push(
     'Everything you write is English. When you stop, answer every acceptance criterion in turn: met, not met, or could not check.',
+    // Said twice on purpose - once here, once in the brief - because the
+    // system prompt survives a context that the brief may have scrolled out
+    // of. A bee that finishes without the trailer costs a hand rewrite.
+    `The T27 compiler t27c is installed on this machine; run \`t27c parse\` and \`t27c typecheck\` on every .t27 file you change, because the review runs them on your commit. Your final commit message ends with the line \`Closes #${issue}\`.`,
   )
   return lines.join(' ')
 }
@@ -1747,25 +1777,58 @@ export async function reviewFinishedDispatches(
     // is missing entirely is excluded: no verdicts at all is the torn-transcript
     // signature the wait state exists for, and the frozen-wait valve releases
     // it if the transcript never does arrive.
+    // The machine's answer, next to the bee's. Every `.t27` file the branch
+    // changed is read from the COMMIT and run through `t27c parse`,
+    // `parse-complete` and `typecheck`; each measurement becomes a verdict line
+    // the policy weighs exactly like the bee's own. Measured 2026-09-10
+    // (gHashTag/t27#3560): 34 branches this review had passed on the bee's
+    // word, 9 held up under the compiler - 20 did not parse at all. A review
+    // that reads "met" and does not run the compiler is not a review.
+    //
+    // Taken only once the bee has judged anything: a bee with no verdict block
+    // is the torn-transcript case, and a compiler's yes must not stand in for
+    // the answers the bee never wrote.
+    const witness: Witness | null =
+      verdicts.length > 0
+        ? await witnessSpecs(row.issue as number, files)
+        : null
+    const machine = witness ? witnessVerdicts(witness) : []
+    const machineFailed = machine.filter((v) => !v.met).map((v) => v.criterion)
+    const specCount = files.filter((f) => f.endsWith('.t27')).length
     const questioned =
       verdicts.length > 0
         ? [
             ...verdicts.map((v) => ({ criterion: v.criterion, met: v.met })),
             ...unjudged.map((criterion) => ({ criterion, met: false })),
+            ...machine,
           ]
         : verdicts.map((v) => ({ criterion: v.criterion, met: v.met }))
-    const answer = await askQueend({
-      kind: 'review',
-      verdicts: questioned,
-      totalCriteria,
-      committedFiles: files.length,
-      priorSendBacks,
-    }).catch(() => null)
-    const state = String(answer?.verdict ?? 'wait')
+    // No compiler on this image while the branch changed specs: nothing was
+    // measured, so nothing is accepted. This asks a PERSON rather than waiting,
+    // because a wait here would never resolve on its own - the frozen-wait
+    // valve would fail the dispatch after six hours and return the issue to
+    // the pool, losing a finished branch to a missing binary. `escalate` keeps
+    // the branch on the board with the reason written down.
+    const unwitnessed = witness?.kind === 'absent' && specCount > 0
+    const answer = unwitnessed
+      ? null
+      : await askQueend({
+          kind: 'review',
+          verdicts: questioned,
+          totalCriteria,
+          committedFiles: files.length,
+          priorSendBacks,
+        }).catch(() => null)
+    const state = unwitnessed ? 'escalate' : String(answer?.verdict ?? 'wait')
     // Judged versus unjudged, recorded per dispatch (#1420, FR-001): "2 of 5
     // judged" is a fact about the worker's reporting, not about the work, and
-    // the two belong in the record as separate numbers.
-    const failed = verdicts.filter((v) => !v.met).map((v) => v.criterion)
+    // the two belong in the record as separate numbers. The compiler's failed
+    // lines join the judged-and-failed list: they were checked, and found
+    // wanting, which is what that list means.
+    const failed = [
+      ...verdicts.filter((v) => !v.met).map((v) => v.criterion),
+      ...machineFailed,
+    ]
     logger.info('Queen reviewed her own work', {
       issue: row.issue,
       verdict: state,
@@ -1775,12 +1838,29 @@ export async function reviewFinishedDispatches(
       source: row.criteria_source ?? 'none',
       priorSendBacks,
       strays: strays.length,
+      specs: specCount,
+      t27c: witness?.kind === 'witnessed' ? witness.t27c : 'absent',
+      machineUnmet: machineFailed.length,
     })
+    if (unwitnessed) {
+      logger.warn(
+        'Queen could not witness the specs: t27c is not on this image',
+        {
+          issue: row.issue,
+          specs: specCount,
+          detail: witness?.kind === 'absent' ? witness.detail : '',
+        },
+      )
+    }
     // The send-back message the worker reads, with the two lists under distinct
     // headings (#1420, FR-002): what it tested and failed, and what it never
     // wrote a verdict line for at all.
-    const note =
-      state === 'sendBack'
+    const note = unwitnessed
+      ? `${specCount} .t27 file(s) changed but t27c is not available on this ` +
+        'image, so the review could not run t27c parse / parse-complete / ' +
+        'typecheck on the commit; a reviewer with t27c must, before merging. ' +
+        (witness?.kind === 'absent' ? witness.detail : '')
+      : state === 'sendBack'
         ? sendBackMessage(String(answer?.note ?? ''), failed, unjudged)
         : String(answer?.note ?? answer?.refusal ?? '')
     // Whether this attempt counts against the retry ceiling (#1420, FR-003).
@@ -1837,7 +1917,11 @@ export function parseVerdictBlock(
   // Trying each and keeping the longest parse is stable under either
   // convention, so a worker running an older brief is not punished for it.
   const starts: number[] = []
-  for (let i = text.indexOf('## VERDICT'); i >= 0; i = text.indexOf('## VERDICT', i + 1)) {
+  for (
+    let i = text.indexOf('## VERDICT');
+    i >= 0;
+    i = text.indexOf('## VERDICT', i + 1)
+  ) {
     starts.push(i)
   }
   if (!starts.length) return []

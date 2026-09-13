@@ -23,10 +23,9 @@
  * publication step still belongs to a machine that has the credential.
  */
 
-import { spawn } from 'node:child_process'
-import { execFileSync } from 'node:child_process'
-import { statSync } from 'node:fs'
+import { execFileSync, spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
+import { statSync } from 'node:fs'
 import type { Pool } from 'pg'
 import { logger } from '../../lib/logger'
 import { shellArgv } from '../../tools/filesystem/bash'
@@ -620,6 +619,235 @@ export async function committedFileCount(issue: number): Promise<number> {
   return (await committedFiles(issue)).length
 }
 
+/**
+ * What `t27c` says about ONE `.t27` file a bee committed.
+ *
+ * `present` is false for a file the branch deleted - there is no spec to read.
+ * `baseTypechecks` is null for a file the branch created - there is no earlier
+ * version to regress against.
+ */
+export interface SpecWitness {
+  file: string
+  present: boolean
+  /** `t27c parse` exited 0 - no hard parse error. */
+  parses: boolean
+  /** `t27c parse-complete` consumed the whole file: no TRUNCATE, no DISCARD. */
+  complete: boolean
+  discardedTokens: number
+  /** Occurrences of the literal `TODO: Implement` stub marker. */
+  stubMarkers: number
+  /** `t27c typecheck` exited 0 on the committed file. */
+  typechecks: boolean
+  /** The same, on the base ref's version of the file; null when it is new. */
+  baseTypechecks: boolean | null
+  /** The first error line the compiler printed, or ''. */
+  error: string
+}
+
+/**
+ * The machine's side of a review.
+ *
+ * `absent` means the compiler is not on this image (or cannot run): nothing
+ * was measured, and the caller must not read that as "nothing failed".
+ */
+export type Witness =
+  | { kind: 'absent'; detail: string }
+  | { kind: 'witnessed'; t27c: string; specs: SpecWitness[] }
+
+/** The compiler the review runs. `T27C_BIN` overrides for a test or a Mac. */
+function t27cBinary(): string {
+  return process.env.T27C_BIN || 't27c'
+}
+
+/**
+ * The witness script, one file at a time, run AS THE BEE in the repository
+ * root. Positional: $1 branch, $2 file, $3 base ref, $4 t27c binary.
+ *
+ * Everything is read from the COMMIT (`git show branch:file`), never from the
+ * worktree, because the worktree may hold edits the bee never committed and
+ * the commit is the deliverable. Each measurement prints one `W ` line; the
+ * TypeScript side parses those and nothing else, so compiler chatter cannot be
+ * mistaken for a result.
+ */
+const WITNESS_SCRIPT = String.raw`
+set -u
+branch="$1"; file="$2"; base="$3"; t27c="$4"
+tmp="$(mktemp -d)" || exit 97
+trap 'rm -rf "$tmp"' EXIT
+mkdir -p "$tmp/specs/one"
+spec="$tmp/specs/one/$(basename "$file")"
+if ! git show "$branch:$file" > "$spec" 2>/dev/null; then echo 'W absent'; exit 0; fi
+if "$t27c" parse "$spec" > "$tmp/parse.out" 2>&1; then
+  echo 'W parse ok'
+else
+  echo "W parse fail $(grep -m1 -i 'error' "$tmp/parse.out" | cut -c1-240)"
+fi
+"$t27c" parse-complete --specs-dir "$tmp/specs" 2>&1 | grep -E 'consume all|TRUNCATE|DISCARD|do not parse' | sed 's/^ */W pc /'
+echo "W todo $(grep -c 'TODO: Implement' "$spec" || true)"
+if "$t27c" typecheck "$spec" > /dev/null 2>&1; then echo 'W typecheck ok'; else echo 'W typecheck fail'; fi
+if git show "$base:$file" > "$tmp/base.t27" 2>/dev/null; then
+  if "$t27c" typecheck "$tmp/base.t27" > /dev/null 2>&1; then echo 'W base ok'; else echo 'W base fail'; fi
+else
+  echo 'W base new'
+fi
+`
+
+/**
+ * Turn the witness script's `W ` lines into one record. Exported for the
+ * tests: the shell is the part that needs a container, the reading is not.
+ */
+export function readWitnessLines(file: string, out: string): SpecWitness {
+  const w: SpecWitness = {
+    file,
+    present: true,
+    parses: false,
+    complete: false,
+    discardedTokens: 0,
+    stubMarkers: 0,
+    typechecks: false,
+    baseTypechecks: null,
+    error: '',
+  }
+  // The completeness report is four counters; the file is complete only when
+  // the one spec scanned landed in "parse and consume all". A report that
+  // never arrived (compiler crashed, output cut) leaves `complete` false: an
+  // unmeasured file is not a clean one.
+  let consumedAll = -1
+  for (const raw of out.split('\n')) {
+    const line = raw.trim()
+    if (!line.startsWith('W ')) continue
+    const body = line.slice(2)
+    if (body === 'absent') {
+      w.present = false
+      return w
+    }
+    if (body === 'parse ok') w.parses = true
+    else if (body.startsWith('parse fail')) {
+      w.parses = false
+      w.error = body.slice('parse fail'.length).trim()
+    } else if (body.startsWith('pc ')) {
+      const m = body.match(/^pc\s+(.*?)\s+(\d+)(?:\s+\((\d+) token)?/)
+      if (!m) continue
+      const [, label, count, tokens] = m
+      if (label.includes('consume all')) consumedAll = Number(count)
+      else if (label.includes('DISCARD'))
+        w.discardedTokens = Number(tokens ?? count)
+    } else if (body.startsWith('todo ')) {
+      w.stubMarkers = Number(body.slice(5).trim()) || 0
+    } else if (body === 'typecheck ok') w.typechecks = true
+    else if (body === 'typecheck fail') w.typechecks = false
+    else if (body === 'base ok') w.baseTypechecks = true
+    else if (body === 'base fail') w.baseTypechecks = false
+    else if (body === 'base new') w.baseTypechecks = null
+  }
+  w.complete = w.parses && consumedAll === 1 && w.discardedTokens === 0
+  return w
+}
+
+/**
+ * WHAT the compiler says about the `.t27` files a bee's branch changed.
+ *
+ * The review used to accept on the bee's own "met" lines. Harvested on
+ * 2026-09-10 (gHashTag/t27#3560): of 34 finished bee branches whose verdict
+ * blocks were read as met, 20 did not parse, 4 parsed with DISCARDED tokens
+ * and 1 regressed typecheck - 9 of 34 held up when `t27c` was run on the
+ * commit. The bee's word is the claim; this is the measurement, taken by the
+ * same three commands the operator ran by hand, on the same commit.
+ *
+ * Only `.t27` files are witnessed; a branch that changed none returns an
+ * empty `specs`. A missing compiler returns `absent`, which the review treats
+ * as "could not check" - never as a pass.
+ */
+export async function witnessSpecs(
+  issue: number,
+  files: string[],
+): Promise<Witness> {
+  const specs = files.filter((f) => f.endsWith('.t27'))
+  const bin = t27cBinary()
+  if (specs.length === 0) return { kind: 'witnessed', t27c: bin, specs: [] }
+  const root = workspaceRoot()
+  const version = await run(bin, ['--version'], root, 15_000)
+  if (version.code !== 0) {
+    return {
+      kind: 'absent',
+      detail: `${bin} --version exited ${version.code}: ${version.out.slice(0, 200)}`,
+    }
+  }
+  const base = process.env.TRIOS_REPO_REF || 'origin/dev'
+  const branch = `queen-${issue}`
+  const out: SpecWitness[] = []
+  for (const file of specs) {
+    const r = await run(
+      'sh',
+      ['-c', WITNESS_SCRIPT, 'witness', branch, file, base, bin],
+      root,
+      120_000,
+    )
+    const w = readWitnessLines(file, r.out)
+    if (r.code !== 0 && r.code !== 1) {
+      // The script itself failed (mktemp, kill on timeout): nothing measured.
+      w.present = true
+      w.parses = false
+      w.complete = false
+      w.error = w.error || `witness script exited ${r.code}`
+    }
+    out.push(w)
+  }
+  return {
+    kind: 'witnessed',
+    t27c: version.out.split('\n')[0].trim(),
+    specs: out,
+  }
+}
+
+/**
+ * The witness as verdict lines, in the shape the review policy already
+ * weighs. One line per measurement per file, met or unmet, so `queend`'s one
+ * rule decides send-back versus escalate and nothing is decided here.
+ *
+ * The typecheck line is a RATCHET, not a gate, matching the repository's own
+ * corpus check: a file that failed typecheck before the bee touched it may
+ * still fail; a file that passed, or did not exist, must pass.
+ */
+export function witnessVerdicts(
+  witness: Witness,
+): Array<{ criterion: string; met: boolean }> {
+  if (witness.kind !== 'witnessed') return []
+  const lines: Array<{ criterion: string; met: boolean }> = []
+  for (const s of witness.specs) {
+    if (!s.present) continue
+    const why = s.error
+      ? ` (${s.error})`
+      : s.discardedTokens > 0
+        ? ` (parse-complete DISCARDED ${s.discardedTokens} token(s))`
+        : s.parses && !s.complete
+          ? ' (parse-complete did not consume the whole file)'
+          : ''
+    lines.push({
+      criterion: `t27c: ${s.file} parses clean${s.complete ? '' : why}`,
+      met: s.complete,
+    })
+    lines.push({
+      criterion: `t27c: ${s.file} has no 'TODO: Implement' stub markers${
+        s.stubMarkers > 0 ? ` (${s.stubMarkers} found)` : ''
+      }`,
+      met: s.stubMarkers === 0,
+    })
+    const regressed = !s.typechecks && s.baseTypechecks !== false
+    lines.push({
+      criterion: `t27c: ${s.file} typecheck does not regress${
+        regressed
+          ? s.baseTypechecks === null
+            ? ' (new file fails typecheck)'
+            : ' (passed on the base ref, fails on this branch)'
+          : ''
+      }`,
+      met: !regressed,
+    })
+  }
+  return lines
+}
+
 export function workspaceRoot(): string {
   // The directory name is DERIVED from the repo URL, exactly as the entrypoint
   // derives it — `REPO_NAME="$(basename "$TRIOS_REPO_URL" .git)"`. Hardcoding
@@ -720,12 +948,14 @@ export function volumeUsedPercent(dir = workspaceRoot()): number | null {
  * is never worth it. Nor does it touch the newest few, which are likely to be
  * running right now.
  */
-export async function reapWorktrees(opts: {
-  high?: number
-  low?: number
-  keepNewest?: number
-  volumeUsed?: (dir: string) => number | null
-} = {}): Promise<{
+export async function reapWorktrees(
+  opts: {
+    high?: number
+    low?: number
+    keepNewest?: number
+    volumeUsed?: (dir: string) => number | null
+  } = {},
+): Promise<{
   before: number | null
   after: number | null
   removed: string[]
@@ -734,7 +964,8 @@ export async function reapWorktrees(opts: {
 }> {
   const high = opts.high ?? Number(process.env.QUEEN_VOLUME_HIGH ?? 80)
   const low = opts.low ?? Number(process.env.QUEEN_VOLUME_LOW ?? 55)
-  const keepNewest = opts.keepNewest ?? Number(process.env.QUEEN_VOLUME_KEEP ?? 6)
+  const keepNewest =
+    opts.keepNewest ?? Number(process.env.QUEEN_VOLUME_KEEP ?? 6)
   const root = workspaceRoot()
   const measure = opts.volumeUsed ?? volumeUsedPercent
   const before = measure(root)
@@ -795,7 +1026,6 @@ export async function reapWorktrees(opts: {
   result.after = measure(root)
   return result
 }
-
 
 /**
  * Link this worktree's node_modules into a shared store instead of installing.

@@ -54,6 +54,45 @@ RUN cp "$(swift build -c release --show-bin-path)/queend" /queen-core/queend \
  && /queen-core/queend </dev/null 2>/dev/null; \
     test -x /queen-core/queend
 
+# The T27 compiler, for the bees and for the review of the bees.
+#
+# MEASURED 2026-09-10 (gHashTag/t27#3560): 34 finished bee branches harvested
+# from this container, every one reviewed as "met" on the bee's own verdict
+# block. Run through `t27c` on a Mac: 20 did not parse, 4 parsed with DISCARDED
+# tokens, 1 regressed typecheck, 9 held. Neither the bee nor the reviewer had
+# the compiler; both were guessing, and the review had no way to say so.
+#
+# Built the way t27's own Dockerfile builds it: `bootstrap/` alone, standalone,
+# with the repository's root Cargo.lock (bootstrap/Cargo.lock is stale against
+# bootstrap/Cargo.toml and fails `--locked`). A sparse, blob-less clone of two
+# directories, not the 400 MB repository. The commit that was built is written
+# to /usr/local/share/t27c/REF and shipped, so a review can say WHICH compiler
+# it measured with.
+#
+# T27_REF is an ARG, not a pin: the bees work against t27 master and the
+# compiler that judges them should be the one master builds. The cost is that
+# a cached layer serves the sha it recorded, not today's - the REF file is the
+# truth, not the ARG. Bump the ARG to rebuild.
+#
+# Build time: 15 min on 2 vCPU (sandbox, cold cache, 2026-09-13). Nothing here
+# is parallel with the Swift stage by BuildKit's choice, not ours.
+FROM rust:1-bookworm AS t27c
+ARG T27_REF=master
+WORKDIR /src
+RUN git clone --depth 1 --filter=blob:none --sparse --branch "${T27_REF}" \
+        https://github.com/gHashTag/t27.git t27 \
+ && cd t27 \
+ && git sparse-checkout set bootstrap gen \
+ && git rev-parse HEAD > /src/REF \
+ && echo "t27c built from gHashTag/t27@$(cat /src/REF) (ref ${T27_REF})"
+# Standalone: the root Cargo.toml names workspace members the sparse checkout
+# does not have, so `bootstrap/` is copied out from under it and built alone.
+RUN cp -r t27/bootstrap /build && cp t27/Cargo.lock /build/Cargo.lock \
+ && rm -rf /build/target \
+ && cd /build && cargo build --release \
+ && strip /build/target/release/t27c \
+ && /build/target/release/t27c --version
+
 FROM oven/bun:1.3.6 AS runtime
 WORKDIR /app
 
@@ -147,6 +186,16 @@ COPY --from=queen-core /queen-core/PROOF /app/queen-core-linux.proof
 # Statically what it needs from Swift comes with it; the toolchain stays behind.
 COPY --from=queen-core /queen-core/queend /usr/local/bin/queend
 COPY --from=queen-core /usr/lib/swift/linux /usr/lib/swift/linux
+
+# The compiler, on PATH for the bee (su resets PATH to the login default, which
+# includes /usr/local/bin) and for the review, which runs it as the bee. Built
+# against bookworm's glibc 2.36; the binary links only libc, libm and libgcc_s
+# (ldd, 2026-09-13), so it loads on bookworm or anything newer that oven/bun
+# ships on. `--version` below is the proof that it loads, taken at build time
+# rather than at the first review.
+COPY --from=t27c /build/target/release/t27c /usr/local/bin/t27c
+COPY --from=t27c /src/REF /usr/local/share/t27c/REF
+RUN /usr/local/bin/t27c --version && echo "t27c from gHashTag/t27@$(cat /usr/local/share/t27c/REF)"
 
 # Bind wide, because the platform routes to this container from outside and a
 # server on loopback accepts nothing while looking perfectly healthy from
