@@ -1,0 +1,3 @@
+source: gHashTag/t27 feat/inngest-queen-scheduler @ 26294613 (specs/crons, specs/skills, specs/automation/inngest-queen-scheduler.t27), byte-identical
+wasm: gHashTag/trinity main apps/website/public/t27/t27_compiler.wasm sha256 4d9c0447b5ca288790ab03d3dffc2dda629ed47af9d6731a105fc923aea0aee4
+refresh: scripts/sync-t27-specs.sh (T27_ROOT, TRINITY_ROOT), then bun test tests/api/queen-inngest.test.ts

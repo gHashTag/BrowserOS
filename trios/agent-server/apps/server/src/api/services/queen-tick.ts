@@ -1294,6 +1294,29 @@ export function briefFor(
     'A file with a parse error, a DISCARDED token run, or a `TODO: Implement`',
     'stub marker is unmet whatever the line says.',
     '',
+    "## The Queen's scheduler",
+    '',
+    // The scheduler is a tool the Queen holds, not one the bee holds
+    // (gHashTag/t27 specs/tools/mcp/inngest-dev.t27, AGENTS = ["T"];
+    // specs/automation/inngest-queen-scheduler.t27). Every cron and skill card
+    // under specs/crons and specs/skills is an Inngest function of the app
+    // `t27-queen`, served by this server at /api/inngest. A bee meets the
+    // scheduler in two places: as the author of a `[skill] <ID>` issue, and as
+    // the thing it must not try to drive.
+    'Crons and skills are functions of the Inngest app `t27-queen`, one per',
+    'card under `specs/crons/` and `specs/skills/` (gHashTag/t27), and the',
+    'scheduler is a tool the Queen holds (`mcp/inngest-dev`), not one you hold.',
+    'If this issue is titled `[skill] <ID>` with the label `queen-skill`, the',
+    'scheduler opened it from the event `skill/<ID>.run`: the card',
+    '`specs/skills/<file>.t27` named in the body is the contract, and the skill',
+    'body it points at (SKILL.md) is what you follow. To change WHEN something',
+    'runs, change its card (SCHEDULE, TZ, ENABLED, RUNS) - never a workflow',
+    '`schedule:` or a setInterval; the app re-reads the cards on deploy. Do not',
+    'send `cron/<ID>.tick` or `skill/<ID>.run` events and do not call the',
+    'Inngest MCP yourself: it needs `Authorization: Bearer <INNGEST_SIGNING_KEY>`,',
+    'which this machine does not hold by design. If your task needs a run to',
+    'happen, say so in your verdict and the Queen fires it.',
+    '',
     '## Out of scope',
     '',
     'Anything the issue does not ask for. Work that seems obviously needed and',

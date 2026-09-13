@@ -17,6 +17,7 @@ import { websocket } from 'hono/bun'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import { HttpAgentError } from '../agent/errors'
 import { INLINED_ENV } from '../env'
+import { mountQueenScheduler } from '../inngest'
 import { KlavisClient } from '../lib/clients/klavis/klavis-client'
 import { initializeOAuth, shutdownOAuth } from '../lib/clients/oauth'
 import type { OAuthTokenManager } from '../lib/clients/oauth/token-manager'
@@ -342,6 +343,11 @@ export async function createHttpServer(config: HttpServerConfig) {
       }),
     )
 
+  // The Queen's scheduler: one Inngest function per cron/skill card under
+  // trios/agent-server/specs, read with the real t27 compiler at start-up.
+  // See src/inngest/index.ts and docs/queen-inngest.md.
+  const queenScheduler = await mountQueenScheduler()
+
   const app = new Hono<Env>()
     // These six sanitized projections are the only routes a cross-origin
     // browser may read, and they are registered BEFORE the global middleware
@@ -355,7 +361,15 @@ export async function createHttpServer(config: HttpServerConfig) {
     .use('/queen/public-hardware', publicReadCorsMiddleware())
     .use('/queen/public-research', publicReadCorsMiddleware())
     .use('/queen/public-agents', publicReadCorsMiddleware())
+    .use('/queen/scheduler', publicReadCorsMiddleware())
     .use('/*', trustedCorsMiddleware())
+    // The Inngest server registers and invokes functions here; each request
+    // is signed with INNGEST_SIGNING_KEY and verified by the SDK, so this sits
+    // outside the trusted-origin guard on purpose (the caller is a server).
+    .route('/api/inngest', queenScheduler.inngest)
+    // Read-only: functions, triggers, reasons, refused cards, WHICH env vars
+    // are set. Nothing here that is not already in the public t27 specs.
+    .route('/queen/scheduler', queenScheduler.scheduler)
     .route('/health', createHealthRoute({ browser, stateBackend: a2aService }))
     .route('/queen/status', createQueenPublicStatusRoute())
     .route('/queen/public-activity', createQueenPublicActivityRoute())
