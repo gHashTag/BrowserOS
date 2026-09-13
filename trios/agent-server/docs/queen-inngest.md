@@ -75,10 +75,29 @@ repository or handed to an agent (policy: Railway only via the owner's login).
 - `INNGEST_SERVE_HOST` = `https://trios-agent-server-production.up.railway.app`,
   written out in full: `api.t27.ai` is attached to the service but its DNS is
   still pending, and `${{RAILWAY_PUBLIC_DOMAIN}}` may resolve to it first.
-- `TRIOS_GITHUB_API_TOKEN` was NOT among the service's variables at that date
-  (measured in the Variables tab; 28 variables before, 32 after). Until the
-  operator adds it, `dispatch` has no token: `/queen/scheduler` reports the
-  flag as unset and cron functions cannot `workflow_dispatch`.
+- `TRIOS_GITHUB_API_TOKEN` was NOT among the service's variables when the
+  server first came up (measured in the Variables tab; 28 variables before,
+  32 after). The operator added it on 2026-09-13 ~06:27 UTC (33 variables);
+  `/queen/scheduler` then reported `env.TRIOS_GITHUB_API_TOKEN: true`.
+- The token is a fine-grained PAT. As first created it had no repository
+  access and no permissions, and the first dispatch (Inngest run
+  `01M2CQAPHWQMY5C71JE5JY6501`, 06:29:59 UTC) failed with
+  `403 Resource not accessible by personal access token`. Repaired in the
+  GitHub token editor (value unchanged, nothing re-pasted into Railway):
+  repositories `gHashTag/trinity`, `gHashTag/t27`, `gHashTag/999-multibots-telegraf`;
+  permissions Actions read+write, Issues read+write, Metadata read (implied).
+  The next tick (06:45:01 UTC) produced two `event: workflow_dispatch` runs in
+  trinity: `pages-health-check` (success) and `agent-queue-drain` (failure in
+  the workflow's own step "Check for queued issues and free slots" - the same
+  step fails on its `schedule` runs, so it is not a dispatch problem).
+- Measured on the same day: GitHub's own `schedule` for `agent-queue-drain`
+  (`*/5`) actually fired at 19:40, 21:39, 23:21, 01:10, 06:07 UTC - gaps of
+  two to five hours. The Queen's cron fired at 06:45:01 for a `*/5` slot.
+- Step 2 of the move cannot complete for the three workflows that lack
+  `workflow_dispatch:` (999 `ci.yml`, 999 `security.yml`, t27
+  `formal-mutation.yml`): GitHub answers 422 for them until the trigger is
+  added. Adding the trigger is additive and should land before step 3; the
+  `schedule:` lines stay until the dispatched cycle is confirmed.
 - Source: the service was moved from `railway up` snapshots to GitHub
   `gHashTag/BrowserOS`, branch `fix/queen-worker-provider-and-prompt-size`,
   root directory `trios/agent-server`. Railway shows "Auto deploy unavailable"
