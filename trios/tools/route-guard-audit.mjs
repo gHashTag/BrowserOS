@@ -54,7 +54,8 @@ export const SERVER_TS_URL = new URL(
   '../agent-server/apps/server/src/api/server.ts',
   import.meta.url,
 )
-export const SERVER_TS_LABEL = 'trios/agent-server/apps/server/src/api/server.ts'
+export const SERVER_TS_LABEL =
+  'trios/agent-server/apps/server/src/api/server.ts'
 
 /**
  * Floor on the parsed mount count (FR-001). A regex that silently matches
@@ -98,6 +99,11 @@ export const DEFAULT_ALLOWLIST = [
     path: '/queen/feed',
     reason:
       'shell only — feed data is served by /queen/feed/data, mounted through the guarded queenFeedDataRoutes wrapper',
+  },
+  {
+    path: '/api/inngest',
+    reason:
+      'signed webhook — Inngest calls this path from its own server with an x-inngest-signature over INNGEST_SIGNING_KEY; inngest/hono rejects an unsigned or missigned request with 4xx before any function runs (tests/api/queen-inngest.test.ts), and a browser Origin never appears on it, so the trusted-origin check would only turn the scheduler off (comment at the mount)',
   },
 ]
 
@@ -182,11 +188,14 @@ const ROUTE_CALL_RE = /\.route\(\s*'([^']*)'\s*,\s*/g
 // A top-level prefix guard: `.use('<prefix>/*', requireTrustedAppOrigin())`.
 // The '+' before '/*' keeps sub-app guards (`.use('/*', ...)`, empty prefix)
 // out of this set.
-const PREFIX_GUARD_RE = /\.use\(\s*'([^']+)\/\*'\s*,\s*requireTrustedAppOrigin\(\)\s*\)/g
+const PREFIX_GUARD_RE =
+  /\.use\(\s*'([^']+)\/\*'\s*,\s*requireTrustedAppOrigin\(\)\s*\)/g
 // A public-read CORS projection: `.use('<path>', publicReadCorsMiddleware())`.
-const PUBLIC_READ_RE = /\.use\(\s*'([^']*)'\s*,\s*publicReadCorsMiddleware\(\)\s*\)/g
+const PUBLIC_READ_RE =
+  /\.use\(\s*'([^']*)'\s*,\s*publicReadCorsMiddleware\(\)\s*\)/g
 // A sub-app wrapper guard: `.use('/*', requireTrustedAppOrigin())`.
-const WRAPPER_GUARD_RE = /\.use\(\s*'\/\*'\s*,\s*requireTrustedAppOrigin\(\)\s*\)/g
+const WRAPPER_GUARD_RE =
+  /\.use\(\s*'\/\*'\s*,\s*requireTrustedAppOrigin\(\)\s*\)/g
 // A named wrapper declaration: `const <name> = new Hono<...>(...)`.
 const WRAPPER_DECL_RE = /const\s+([A-Za-z_$][\w$]*)\s*=\s*new\s+Hono\b/g
 const IDENTIFIER_RE = /^[A-Za-z_$][\w$]*/
@@ -504,9 +513,7 @@ function runAudit(args) {
     return 1
   }
 
-  const allowlist = noAllowlist
-    ? []
-    : [...DEFAULT_ALLOWLIST, ...extraEntries]
+  const allowlist = noAllowlist ? [] : [...DEFAULT_ALLOWLIST, ...extraEntries]
   const report = auditServer(source, allowlist)
 
   console.log(`route-guard-audit: ${SERVER_TS_LABEL}`)
@@ -532,7 +539,9 @@ function runAudit(args) {
   console.log('mount classifications:')
   const allowlistByPath = new Map(allowlist.map((entry) => [entry.path, entry]))
   for (const mount of report.classifications) {
-    console.log(`  ${mount.path.padEnd(24)} ${classificationLabel(mount, allowlistByPath)}`)
+    console.log(
+      `  ${mount.path.padEnd(24)} ${classificationLabel(mount, allowlistByPath)}`,
+    )
   }
 
   console.log(`unguardedMounts: ${report.unguarded.length}`)

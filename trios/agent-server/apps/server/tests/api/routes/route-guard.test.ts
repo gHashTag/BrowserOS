@@ -25,9 +25,14 @@ import {
 const source = readServerSource()
 const report = auditServer(source, DEFAULT_ALLOWLIST)
 
-// Regression pin for the --no-allowlist run: exactly these six mounts carry
+// Regression pin for the --no-allowlist run: exactly these seven mounts carry
 // no guard today, each for a reason the comments beside the mount give.
+// RE-MEASURED 2026-09-13: /api/inngest joined. It is not a shell - it is the
+// Queen's scheduler endpoint - and it is unguarded on purpose: Inngest signs
+// every request with the signing key and inngest/hono refuses the rest, so the
+// signature is the guard, and a trusted-origin check would only refuse Inngest.
 const EXPECTED_UNGUARDED_WITHOUT_ALLOWLIST = [
+  '/api/inngest',
   '/health',
   '/queen/dashboard',
   '/queen/feed',
@@ -55,10 +60,15 @@ describe('route-guard audit over src/api/server.ts', () => {
     // exactly two ways: something was added on purpose, or a hole opened. The
     // pin cannot tell them apart, so whoever updates it has to look - which is
     // the only reason this one was found.
-    expect(report.totalMounts).toBe(40)
+    // RE-MEASURED 2026-09-13: 40 became 42 with the Queen's scheduler.
+    // `/api/inngest` is the signed Inngest endpoint (allowlisted, reason in
+    // tools/route-guard-audit.mjs); `/queen/scheduler` is the seventh
+    // public-read, an explicit `publicReadCorsMiddleware()` on a projection
+    // that names which env vars are set and never their values.
+    expect(report.totalMounts).toBe(42)
     expect(report.prefixGuardCount).toBe(18)
     expect(report.guardedSubAppCount).toBe(14)
-    expect(report.publicReadCount).toBe(6)
+    expect(report.publicReadCount).toBe(7)
   })
 
   it('reports zero unguarded mounts once the reasoned allowlist is applied', () => {
@@ -68,7 +78,7 @@ describe('route-guard audit over src/api/server.ts', () => {
     expect(report.entriesMissingReason).toEqual([])
   })
 
-  it('reports exactly the six reasoned exceptions when the allowlist is dropped', () => {
+  it('reports exactly the seven reasoned exceptions when the allowlist is dropped', () => {
     // The classifier reports mounts in file order; the assertion is on the
     // exact set, so both sides are sorted before comparing.
     expect([...unguardedMounts(source, [])].sort()).toEqual(
@@ -76,7 +86,7 @@ describe('route-guard audit over src/api/server.ts', () => {
     )
   })
 
-  it('splits the eighteen /queen mounts into 6 public-read, 7 wrapper-guarded and 5 allowlisted shells', () => {
+  it('splits the nineteen /queen mounts into 7 public-read, 7 wrapper-guarded and 5 allowlisted shells', () => {
     const queenMounts = classifyMounts(source).filter(
       (mount) => mount.path === '/queen' || mount.path.startsWith('/queen/'),
     )
@@ -87,7 +97,9 @@ describe('route-guard audit over src/api/server.ts', () => {
     // mount comment claimed it was behind the trusted-origin catch-all.
     // The five allowlisted shells are unchanged - a shell serves no data, which
     // is the only reason any of them is allowed to answer a stranger.
-    expect(queenMounts.length).toBe(18)
+    // RE-MEASURED 2026-09-13: eighteen became nineteen; the seventh
+    // public-read is /queen/scheduler (the Inngest projection, no secrets).
+    expect(queenMounts.length).toBe(19)
 
     const counts: Record<string, number> = {
       'public-read': 0,
@@ -101,7 +113,7 @@ describe('route-guard audit over src/api/server.ts', () => {
     // The four buckets must account for all sixteen mounts with the exact
     // expected split; anything unaccounted for breaks one of these numbers.
     expect(counts).toEqual({
-      'public-read': 6,
+      'public-read': 7,
       'prefix-guard': 0,
       wrapper: 7,
       unguarded: 5,
