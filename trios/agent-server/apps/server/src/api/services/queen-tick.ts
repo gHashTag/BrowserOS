@@ -42,13 +42,11 @@ import { createQueenPool } from '../../lib/db/queen-pool'
 import { logger } from '../../lib/logger'
 import { outstandingEscalations } from '../routes/queen-needs-you'
 import {
-  committedFiles,
   dispatchBee,
   reapDispatchesFromPreviousBoot,
   reapStalledDispatches,
   setDurableCloseListener,
   type Witness,
-  witnessSpecs,
   witnessVerdicts,
   workspaceRoot,
 } from './queen-dispatch'
@@ -67,6 +65,18 @@ import {
   reportHeadline,
   startedLine,
 } from './queen-report-lines'
+import {
+  chooseReviewerLane,
+  defaultReviewDeps,
+  hasStatedReason,
+  REVIEW_PATCH_MAX_CHARS,
+  REVIEWER_SYSTEM_PROMPT,
+  type ReviewDeps,
+  type ReviewerAnswer,
+  reviewerAnswers,
+  reviewerFingerprint,
+  reviewerMessage,
+} from './queen-reviewer'
 
 /**
  * The last non-secret allocator cursor already written durably. It survives a
@@ -273,7 +283,7 @@ function githubReadHeaders(): Record<string, string> {
  * `not measured` from `pass` is the whole point -- an unmeasured spec must
  * never be reported as a passing one.
  */
-function oracleOutcome(witness: Witness | null): string {
+export function oracleOutcome(witness: Witness | null): string {
   if (witness?.kind !== 'witnessed') return 'no witness'
   const measured = witness.specs.filter((s) => s.oracle !== null)
   if (measured.length === 0) {
@@ -281,7 +291,14 @@ function oracleOutcome(witness: Witness | null): string {
       ? 'pre-broken'
       : 'not measured'
   }
-  return measured.every((s) => s.oracle) ? 'pass' : 'fail'
+  const failing = measured.filter((s) => !s.oracle)
+  if (failing.length === 0) return 'pass'
+  // A failure the base already had is not this branch's failure, and
+  // `witnessVerdicts` already refuses to charge the bee for it. The log word
+  // said `fail` regardless, so the one line an operator reads contradicted
+  // the verdict it sat next to - the disagreement recorded 2026-09-16 between
+  // production `fail` and a local `pre-broken` on the same branches.
+  return failing.every((s) => s.oraclePreBroken) ? 'pre-broken' : 'fail'
 }
 
 export async function openIssues(repo: string): Promise<{
@@ -385,7 +402,24 @@ async function ensureQueenColumns(pool: Pool): Promise<void> {
       -- with the bee it is counting.
       ADD COLUMN IF NOT EXISTS send_backs integer NOT NULL DEFAULT 0,
       -- The committed paths that fell outside the boundary this bee was given.
-      ADD COLUMN IF NOT EXISTS strays jsonb NOT NULL DEFAULT '[]'::jsonb;
+      ADD COLUMN IF NOT EXISTS strays jsonb NOT NULL DEFAULT '[]'::jsonb,
+      -- Consecutive attempts that produced nothing judgeable: no commit, or
+      -- no criterion anyone could establish. send_backs is deliberately
+      -- not spent on those (#1420), and measured 2026-09-17 that made the
+      -- loop free - an empty attempt was released after six hours and
+      -- redispatched for ever. This is the counter that ends it: at
+      -- FREE_ATTEMPT_CEILING the issue escalates to a person. Like
+      -- send_backs, recordDispatch does not name it, so it survives the
+      -- redispatch it is counting.
+      ADD COLUMN IF NOT EXISTS free_attempts integer NOT NULL DEFAULT 0,
+      -- The adversarial reviewer's answer (#1127), cached by the commit it
+      -- judged. A wait row is re-read every round; a review of an unchanged
+      -- head is the same review, and buying it again costs a lane.
+      ADD COLUMN IF NOT EXISTS reviewer_fingerprint text,
+      ADD COLUMN IF NOT EXISTS reviewer_text text,
+      ADD COLUMN IF NOT EXISTS reviewer_model text,
+      ADD COLUMN IF NOT EXISTS reviewer_provider text,
+      ADD COLUMN IF NOT EXISTS reviewer_at timestamptz;
   `)
 }
 
@@ -599,6 +633,14 @@ export function stateOfDispatch(
   // The function already RETURNS 'failed' two lines below for a send-back that
   // outlived its floor. It could produce the state and not recognise it.
   if (verdict === 'failed' || verdict === 'cancelled') return 'failed'
+  // An EMPTY attempt committed nothing and said nothing, so there is no work
+  // to hold files for and no bee expected back to them. Released at once, with
+  // no floor: measured 2026-09-17, most of the live waits on the board were
+  // exactly this - turns killed by a deploy or ended in seconds by a 1302 -
+  // each holding its boundary for six hours before the wait valve let go,
+  // while 30 of 32 worker lanes sat idle. The loop this could become is closed
+  // by `free_attempts`, not by a timer.
+  if (verdict === 'empty') return 'failed'
 
   if (verdict === 'sendBack') {
     if (idleMs >= SEND_BACK_IDLE_FLOOR_MS && sendBacks < ceiling)
@@ -612,6 +654,34 @@ export function stateOfDispatch(
     if (idleMs >= WAIT_FROZEN_FLOOR_MS && sendBacks < ceiling) return 'failed'
   }
   return 'awaitingReview'
+}
+
+/**
+ * The same state, read straight off a `queen_dispatch` row.
+ *
+ * EXPORTED FOR THE BOARD. The kanban drew its columns with a rule of its own -
+ * every non-accept verdict in `review`, no valve, no clock - and measured
+ * 2026-09-17 it showed ~180 cards in review of which ~41 were live waits: the
+ * rest were send-backs and waits the Queen had already released, and empty
+ * attempts. Two readings of one row is the defect; one function is the fix,
+ * and the valve constants stay here, in one place.
+ */
+export function dispatchRowState(
+  row: {
+    finished_at?: unknown
+    review_state?: unknown
+    send_backs?: unknown
+  },
+  now: number = Date.now(),
+): ReturnType<typeof stateOfDispatch> {
+  const finished = row.finished_at != null
+  const at = finished ? Date.parse(String(row.finished_at)) : Number.NaN
+  return stateOfDispatch(finished, row.review_state, {
+    // An unreadable clock is not evidence of age: 0 keeps the hold, as the
+    // board's 48-hour rule already does for a timestamp that will not parse.
+    idleMs: Number.isFinite(at) ? Math.max(0, now - at) : 0,
+    sendBacks: Number(row.send_backs ?? 0) || 0,
+  })
 }
 
 /**
@@ -1239,6 +1309,15 @@ export async function runRound(
   fence: number,
   watch: LeaseWatch,
   candidateOverride?: number[],
+  /**
+   * Seams for the suite, defaulting to the real thing: the review's git, lanes
+   * and model, and the dispatch itself - so a test can read the brief a
+   * redispatched bee would be handed without starting one.
+   */
+  deps: {
+    review?: Partial<ReviewDeps>
+    dispatch?: typeof dispatchBee
+  } = {},
 ): Promise<{
   ran: boolean
   reason?: string
@@ -1333,7 +1412,7 @@ export async function runRound(
   // own policy, and only an ESCALATION reaches a person. Without this the hold
   // added to stop the six-times loop would have become a different starvation:
   // every issue she finished would be locked out of the pool for ever.
-  const reviewed = await reviewFinishedDispatches(pool)
+  const reviewed = await reviewFinishedDispatches(pool, deps.review)
   if (reviewed.acted.length > 0) {
     logger.info('Queen reviewed her own work', { verdicts: reviewed.acted })
   }
@@ -1513,7 +1592,13 @@ export async function runRound(
     const spec = specVerdicts[String(issue)]
     const criteria = spec?.criteria ?? []
     const criteriaSource = spec?.criteriaSource ?? 'none'
-    const dispatch = await dispatchBee(
+    // Read BEFORE the dispatch, because the dispatch erases it: the upsert in
+    // `recordDispatch` resets review_state and review_note for a bee that
+    // starts. A send-back note was therefore written for a worker and read by
+    // nobody - the retried bee got the same brief as the first one and was
+    // judged against the same findings it was never shown.
+    const previous = await previousReview(pool, issue)
+    const dispatch = await (deps.dispatch ?? dispatchBee)(
       pool,
       issue,
       briefFor(
@@ -1523,6 +1608,7 @@ export async function runRound(
         candidateBodies[String(issue)] ?? '',
         criteria,
         criteriaSource,
+        previous,
       ),
       paths,
       takenKeys,
@@ -1603,6 +1689,59 @@ export async function runRound(
  * a patch the Mac replays - proven end to end - and the bee's job ends at a
  * commit on its own branch.
  */
+/** What the last review of an issue said, as its dispatch row still holds it. */
+export interface PreviousReview {
+  state: string
+  note: string
+}
+
+/**
+ * The previous verdict on an issue, when it is one a bee should be shown.
+ *
+ * `sendBack` and `empty` only. An accept is not redispatched, an escalation is
+ * a person's, and a wait said nothing yet. Never throws: a brief without the
+ * last findings is the brief every bee got until now, and not worth a round.
+ */
+async function previousReview(
+  pool: Pool,
+  issue: number,
+): Promise<PreviousReview | undefined> {
+  const found = await pool
+    .query(
+      'SELECT review_state, review_note FROM queen_dispatch WHERE issue = $1',
+      [issue],
+    )
+    .catch(() => null)
+  const row = found?.rows?.[0]
+  const state = String(row?.review_state ?? '')
+  if (state !== 'sendBack' && state !== 'empty') return undefined
+  return { state, note: String(row?.review_note ?? '') }
+}
+
+/** The bound on the last-review section, so a long note cannot crowd the task. */
+export const PREVIOUS_REVIEW_MAX_CHARS = 1500
+
+function previousReviewSection(previous?: PreviousReview): string[] {
+  if (!previous) return []
+  const note = previous.note.trim()
+  const bounded =
+    note.length > PREVIOUS_REVIEW_MAX_CHARS
+      ? `${note.slice(0, PREVIOUS_REVIEW_MAX_CHARS)}\n[truncated ${note.length - PREVIOUS_REVIEW_MAX_CHARS} chars]`
+      : note
+  const lead =
+    previous.state === 'empty'
+      ? 'The previous attempt on this issue committed nothing, so there was nothing to judge. Commit your work - an uncommitted edit is not a deliverable.'
+      : 'The previous attempt on this issue was reviewed and sent back. What the review found is below; answer it rather than repeating the attempt.'
+  return [
+    '## What the last review found',
+    '',
+    lead,
+    '',
+    bounded || '(the review left no note)',
+    '',
+  ]
+}
+
 export function briefFor(
   issue: number,
   repo: string,
@@ -1610,6 +1749,7 @@ export function briefFor(
   issueBody: string,
   criteria: string[] = [],
   criteriaSource = 'none',
+  previous?: PreviousReview,
 ): string {
   // The boundary, in the words the Mac uses.
   //
@@ -1657,6 +1797,7 @@ export function briefFor(
     '',
     description,
     '',
+    ...previousReviewSection(previous),
     '## Boundary',
     '',
     boundary,
@@ -2101,14 +2242,76 @@ interface ReviewRound {
 }
 
 /**
+ * How many consecutive attempts may produce nothing judgeable before the issue
+ * becomes a person's.
+ *
+ * Nothing judgeable is an EMPTY attempt (no commit, no verdict) or one whose
+ * only unmet lines are could-not-check or unjudged. Neither spends `send_backs`
+ * (#1420: a ceiling spent on silence retires issues nobody worked), and
+ * measured 2026-09-17 that made them free: 188 of 541 dispatches in 24h never
+ * finished, the attempts they left were released after six hours and
+ * redispatched, and nothing ever counted how often. Three is the retry
+ * policy's own order of magnitude (`maximumSendBacks` 2, plus the first try):
+ * enough for a deploy restart or a rate limit to pass, not enough to loop.
+ */
+export const FREE_ATTEMPT_CEILING = 3
+
+/** The note a send-back carries when an adversarial reviewer judged it. */
+function reviewedSendBackMessage(
+  policyNote: string,
+  reviewer: { model: string; provider: string },
+  refuted: Array<{ criterion: string; reason: string }>,
+  unestablished: Array<{ criterion: string; reason: string }>,
+  admitted: string[],
+  machineFailed: string[],
+): string {
+  const lines = policyNote.split('\n')
+  const opener = lines[0] ?? ''
+  const closer = lines[lines.length - 1] ?? ''
+  const list = (items: string[]): string[] =>
+    items.length === 0
+      ? ['  (none)']
+      : items.map((item, i) => `  ${i + 1}. ${item}`)
+  const withReason = (items: Array<{ criterion: string; reason: string }>) =>
+    items.map((i) => (i.reason ? `${i.criterion} - ${i.reason}` : i.criterion))
+  return [
+    opener,
+    '',
+    `An adversarial reviewer (${reviewer.provider}/${reviewer.model}) read your commit and refuted:`,
+    ...list(withReason(refuted)),
+    '',
+    'It could not establish these from the commit (counted unmet; make them visible in the change):',
+    ...list(withReason(unestablished)),
+    '',
+    'You reported these unmet yourself:',
+    ...list(admitted),
+    '',
+    'The machine measured these failures:',
+    ...list(machineFailed),
+    '',
+    closer,
+  ].join('\n')
+}
+
+/** A bee's `- 3. criterion` line, without the slot number. */
+const withoutSlot = (criterion: string): string =>
+  criterion.replace(/^\d{1,3}\.\s+/, '')
+
+/**
  * EXPORTED FOR THE SUITE, as `runRound` is: the review is the half of the
  * round the unjudged accounting lives in, and a test that cannot call it can
  * only assert around it. The pool is the same recording fake the round's own
  * suite drives, so what the assertions read is exactly what a round writes.
+ *
+ * `deps` carries git, the reviewer lanes and the model, each defaulting to the
+ * real one - so a suite can drive the adversarial review with a fake model and
+ * a fake branch and still get the real policy's answer.
  */
 export async function reviewFinishedDispatches(
   pool: Pool,
+  overrides: Partial<ReviewDeps> = {},
 ): Promise<ReviewRound> {
+  const deps: ReviewDeps = { ...defaultReviewDeps(), ...overrides }
   // TWO THINGS ABOUT THIS QUERY, BOTH MEASURED ON 2026-09-03.
   //
   // The say rows are joined with NOTHING between them, not a newline. The
@@ -2150,6 +2353,9 @@ export async function reviewFinishedDispatches(
   const done = await pool.query(
     `SELECT d.issue, d.conversation_id, d.review_state,
             d.criteria, d.criteria_source, d.send_backs, d.owned_paths,
+            d.free_attempts, d.key_index, d.provider, d.model,
+            d.reviewer_fingerprint, d.reviewer_text, d.reviewer_model,
+            d.reviewer_provider,
             (SELECT string_agg(t.text, '' ORDER BY t.seq)
                FROM queen_transcript t
               WHERE t.conversation_id = d.conversation_id AND t.kind = 'say')
@@ -2168,9 +2374,17 @@ export async function reviewFinishedDispatches(
   const acted: string[] = []
   const strayed: Array<{ issue: number; paths: string[] }> = []
   const tally: ReviewTally[] = []
+  // The reviewer's lane budget for this sweep, and the keys running bees hold,
+  // read once and only if a review is actually bought.
+  let reviewsLeft = deps.reviewsPerRound()
+  let takenKeys: number[] | null = null
+  const repo = process.env.TRIOS_GITHUB_REPO || 'gHashTag/trios'
+
   for (const row of done.rows) {
+    const issue = row.issue as number
     const said = String(row.said ?? '')
-    const verdicts = parseVerdictBlock(said)
+    const beeLines = parseVerdictBlockDetailed(said)
+    const verdicts = beeLines.map(({ criterion, met }) => ({ criterion, met }))
     // The contract this bee was given, read from ITS dispatch row rather than
     // from the issue as it stands now - an issue edited mid-flight would
     // otherwise judge a worker against a criterion it was never told.
@@ -2194,15 +2408,24 @@ export async function reviewFinishedDispatches(
     // own, which the brief asks for.
     const totalCriteria = Math.max(promised.length, verdicts.length)
     // ONE git diff, asked once and used twice. The count is what the review
-    // policy weighs; the names are what the boundary rule compares. Calling
-    // `committedFileCount` and then `committedFiles` would run the same diff
-    // against the same branch twice and could, between the two, disagree.
-    const files = await committedFiles(row.issue as number)
+    // policy weighs; the names are what the boundary rule compares.
+    //
+    // And a failed diff is kept apart from an empty one. Both used to arrive
+    // as `[]`; now only the empty one may be released below, because a diff
+    // that could not be read may be hiding a finished commit.
+    const diff = await deps.committedFilesResult(issue)
+    const files = diff.ok ? diff.files : []
+    if (!diff.ok) {
+      logger.warn('Queen could not read the diff of finished work', {
+        issue,
+        error: diff.error,
+      })
+    }
     const strays = await boundaryStrays(files, row.owned_paths ?? [])
     if (strays.length > 0) {
-      strayed.push({ issue: row.issue as number, paths: strays })
+      strayed.push({ issue, paths: strays })
       logger.warn('Queen found work outside the boundary she gave', {
-        issue: row.issue,
+        issue,
         strays: strays.slice(0, 20),
       })
     }
@@ -2215,22 +2438,71 @@ export async function reviewFinishedDispatches(
     // is not - `priorSendBacks` decodes as Int and a string would make queend
     // refuse the whole question.
     const priorSendBacks = Number(row.send_backs ?? 0) || 0
-    // The criteria the bee judged as it wrote them, plus - once it has judged
-    // ANY - the ones it never wrote a line for, added as unmet so the POLICY
-    // decides on the complete picture rather than the review substituting a
-    // decision of its own. The omission is the correct default (an unanswered
-    // criterion is not a satisfied one), and sending the list through queend
-    // keeps sendBack-versus-escalate one rule in one place. A bee whose block
-    // is missing entirely is excluded: no verdicts at all is the torn-transcript
-    // signature the wait state exists for, and the frozen-wait valve releases
-    // it if the transcript never does arrive.
-    // The machine's answer, next to the bee's. Every `.t27` file the branch
-    // changed is read from the COMMIT and run through `t27c parse`,
-    // `parse-complete` and `typecheck`; each measurement becomes a verdict line
-    // the policy weighs exactly like the bee's own. Measured 2026-09-10
-    // (gHashTag/t27#3560): 34 branches this review had passed on the bee's
-    // word, 9 held up under the compiler - 20 did not parse at all. A review
-    // that reads "met" and does not run the compiler is not a review.
+    const priorFreeAttempts = Number(row.free_attempts ?? 0) || 0
+
+    // AN EMPTY ATTEMPT IS RELEASED AT ONCE.
+    //
+    // The diff ran, the branch holds no commit, and the bee wrote no verdict:
+    // there is nothing for anyone to judge, today or in six hours. Measured
+    // 2026-09-17, most live waits on the board were this - turns cut by deploy
+    // restarts, z.ai 1302 ending a turn in seconds, edits never committed - and
+    // each held its files for the full wait floor while lanes sat idle. So it
+    // is written `empty`, which `stateOfDispatch` releases with no floor, and
+    // counted in `free_attempts` so the release cannot become a loop.
+    if (diff.ok && files.length === 0 && verdicts.length === 0) {
+      const dirty = await deps.worktreeDirtCount(issue)
+      const freeAttempts = priorFreeAttempts + 1
+      const deadLetter = freeAttempts >= FREE_ATTEMPT_CEILING
+      const state = deadLetter ? 'escalate' : 'empty'
+      const emptyNote =
+        `Nothing was committed on queen-${issue} and no verdict was written, ` +
+        'so there was nothing to judge.' +
+        (dirty && dirty > 0
+          ? ` ${dirty} uncommitted file(s) remain in the worktree; the next ` +
+            'attempt reuses it, so they are not lost - commit them.'
+          : '')
+      const note = deadLetter
+        ? `${freeAttempts} consecutive attempts produced nothing judgeable ` +
+          '(no commit, or no criterion anyone could establish), so this is ' +
+          'handed to a person instead of being retried again. Last attempt: ' +
+          emptyNote
+        : emptyNote
+      logger.info('Queen reviewed her own work', {
+        issue,
+        verdict: state,
+        criteria: totalCriteria,
+        judged: 0,
+        unjudged: unjudged.length,
+        source: row.criteria_source ?? 'none',
+        priorSendBacks,
+        strays: 0,
+        specs: 0,
+        t27c: 'absent',
+        machineUnmet: 0,
+        oracle: oracleOutcome(null),
+        oracleDetail: '',
+        reviewerModel: null,
+        reviewerProvider: null,
+        reviewerSameVendor: null,
+        reviewerCached: false,
+        files: 0,
+        diffOk: true,
+        dirty,
+        freeAttempts,
+      })
+      await recordVerdict(pool, issue, state, note, [], false, true)
+      acted.push(`#${issue}:${state}`)
+      tally.push({ issue, judged: 0, unjudged: unjudged.length })
+      continue
+    }
+
+    // The machine's answer, next to the bee's. Every `.t27` file the branch changed is read
+    // from the COMMIT and run through `t27c parse`, `parse-complete` and
+    // `typecheck`; each measurement becomes a verdict line the policy weighs
+    // exactly like the bee's own. Measured 2026-09-10 (gHashTag/t27#3560): 34
+    // branches this review had passed on the bee's word, 9 held up under the
+    // compiler - 20 did not parse at all. A review that reads "met" and does
+    // not run the compiler is not a review.
     //
     // Taken only once the bee has judged anything: a bee with no verdict block
     // is the torn-transcript case, and a compiler's yes must not stand in for
@@ -2258,15 +2530,195 @@ export async function reviewFinishedDispatches(
     // written for.
     const witness: Witness | null =
       verdicts.length > 0 || files.some((f) => f.endsWith('.t27'))
-        ? await witnessSpecs(row.issue as number, files)
+        ? await deps.witness(issue, files)
         : null
     const machineAll = witness ? witnessVerdicts(witness) : []
     const machine =
       verdicts.length > 0 ? machineAll : machineAll.filter((v) => !v.met)
     const machineFailed = machine.filter((v) => !v.met).map((v) => v.criterion)
     const specCount = files.filter((f) => f.endsWith('.t27')).length
-    const questioned =
-      verdicts.length > 0
+    // No compiler on this image while the branch changed specs: nothing was
+    // measured, so nothing is accepted. This asks a PERSON rather than waiting,
+    // because a wait here would never resolve on its own - the frozen-wait
+    // valve would fail the dispatch after six hours and return the issue to
+    // the pool, losing a finished branch to a missing binary. `escalate` keeps
+    // the branch on the board with the reason written down.
+    const unwitnessed = witness?.kind === 'absent' && specCount > 0
+
+    // THE ADVERSARY (#1127). Until here the only per-criterion judgement was
+    // the bee grading itself. A second reading, by a model told to refute,
+    // shown the work and never the worker's own account of it.
+    //
+    // The criteria it is asked about are the dispatch row's; a task that was
+    // given none is judged on the criteria its bee STATED - the text of its
+    // lines, never their verdicts - because those are the contract the brief
+    // asked it to write down.
+    const reviewCriteria =
+      promised.length > 0
+        ? promised
+        : beeLines.map((line) => withoutSlot(line.criterion))
+    let reviewer: {
+      answers: Map<number, ReviewerAnswer>
+      model: string
+      provider: string
+      sameVendor: boolean | null
+      cached: boolean
+    } | null = null
+    let reviewerSkipped = ''
+    if (
+      diff.ok &&
+      files.length > 0 &&
+      reviewCriteria.length > 0 &&
+      !unwitnessed
+    ) {
+      const [branchHead, baseHead] = await Promise.all([
+        deps.branchHeadSha(issue),
+        deps.baseHeadSha(),
+      ])
+      const fingerprint =
+        branchHead && baseHead
+          ? reviewerFingerprint(branchHead, baseHead, reviewCriteria)
+          : null
+      if (!fingerprint) {
+        reviewerSkipped = 'the branch or base head could not be read'
+      } else if (
+        row.reviewer_fingerprint === fingerprint &&
+        typeof row.reviewer_text === 'string' &&
+        row.reviewer_text.length > 0
+      ) {
+        reviewer = {
+          answers: reviewerAnswers(row.reviewer_text, reviewCriteria.length),
+          model: String(row.reviewer_model ?? ''),
+          provider: String(row.reviewer_provider ?? ''),
+          sameVendor: sameVendorOf(row, {
+            provider: row.reviewer_provider,
+            model: row.reviewer_model,
+          }),
+          cached: true,
+        }
+      } else if (reviewsLeft <= 0) {
+        reviewerSkipped = 'the review budget for this round is spent'
+      } else {
+        // THE SAME LANE ARITHMETIC AS DISPATCH. A review is a request on a
+        // credential; the keys running bees hold are counted exactly as
+        // `runRound` counts them before it hands out a key.
+        takenKeys ??= await runningKeys(pool)
+        const choice = chooseReviewerLane(deps.laneCandidates(takenKeys), {
+          provider: row.provider as string | null,
+          model: row.model as string | null,
+          keyIndex: row.key_index as number | null,
+        })
+        if (!choice) {
+          reviewerSkipped = 'no reviewer lane is free'
+        } else {
+          reviewsLeft -= 1
+          const patch = await deps.branchPatch(issue, REVIEW_PATCH_MAX_CHARS)
+          const message = reviewerMessage({
+            repo,
+            issue,
+            criteria: reviewCriteria,
+            files,
+            patch,
+            machine: machineAll,
+          })
+          const answer = await deps.llm(
+            choice.lane,
+            REVIEWER_SYSTEM_PROMPT,
+            message,
+          )
+          const answers = answer.ok
+            ? reviewerAnswers(answer.text, reviewCriteria.length)
+            : new Map<number, ReviewerAnswer>()
+          if (!answer.ok) {
+            // No verdict this round and nothing spent: a 1302 or a timeout is
+            // the provider saying "not now", and it must not read as a finding
+            // about the work.
+            reviewerSkipped = `the reviewer call failed: ${answer.error}`
+            logger.warn('Queen reviewer call failed; nothing was spent', {
+              issue,
+              reviewerModel: choice.lane.model,
+              reviewerProvider: choice.lane.provider,
+              transient: answer.transient,
+              error: answer.error,
+            })
+          } else if (answers.size === 0) {
+            reviewerSkipped =
+              'the reviewer answered with no usable verdict block'
+          } else {
+            reviewer = {
+              answers,
+              model: choice.lane.model,
+              provider: choice.lane.provider,
+              sameVendor: choice.sameVendor,
+              cached: false,
+            }
+            await pool
+              .query(
+                `UPDATE queen_dispatch
+                    SET reviewer_fingerprint = $2, reviewer_text = $3,
+                        reviewer_model = $4, reviewer_provider = $5,
+                        reviewer_at = now()
+                  WHERE issue = $1`,
+                [
+                  issue,
+                  fingerprint,
+                  answer.text.slice(0, 20_000),
+                  choice.lane.model,
+                  choice.lane.provider,
+                ],
+              )
+              .catch((error) => {
+                // The verdict still stands for this round; only the cache is
+                // lost, and the next round pays for one more review.
+                logger.warn('Queen could not cache the reviewer answer', {
+                  issue,
+                  error: error instanceof Error ? error.message : String(error),
+                })
+              })
+          }
+        }
+      }
+    }
+
+    // What the bee ADMITTED. Its `met` lines are claims and are ignored once
+    // an adversary has read the work; its `unmet` lines are admissions and are
+    // kept whoever else judges - a reviewer cannot un-fail what the worker says
+    // it did not do. Its `could-not-check` lines are the reviewer's to settle.
+    const admitted = beeLines
+      .filter((line) => line.verdict === 'unmet')
+      .map((line) => line.criterion)
+    const refuted: Array<{ criterion: string; reason: string }> = []
+    const unestablished: Array<{ criterion: string; reason: string }> = []
+    if (reviewer) {
+      reviewCriteria.forEach((criterion, i) => {
+        const answer = reviewer?.answers.get(i + 1)
+        if (answer?.verdict === 'met') return
+        if (answer?.verdict === 'unmet' && hasStatedReason(answer)) {
+          refuted.push({ criterion, reason: answer.reason })
+        } else {
+          unestablished.push({
+            criterion,
+            reason: answer ? answer.reason : 'the reviewer did not answer it',
+          })
+        }
+      })
+    }
+
+    const questioned = reviewer
+      ? // THE COMBINATION RULE. The reviewer decides met; a criterion it did
+        // not answer is unmet (silence is not a pass, from either side); the
+        // bee's admissions stand; and EVERY machine line goes in, met and
+        // unmet, because the reviewer was shown them and the policy should
+        // weigh what the reviewer weighed.
+        [
+          ...reviewCriteria.map((criterion, i) => ({
+            criterion,
+            met: reviewer?.answers.get(i + 1)?.verdict === 'met',
+          })),
+          ...admitted.map((criterion) => ({ criterion, met: false })),
+          ...machineAll,
+        ]
+      : verdicts.length > 0
         ? [
             ...verdicts.map((v) => ({ criterion: v.criterion, met: v.met })),
             ...unjudged.map((criterion) => ({ criterion, met: false })),
@@ -2296,13 +2748,6 @@ export async function reviewFinishedDispatches(
               ...machine,
               ...promised.map((criterion) => ({ criterion, met: false })),
             ]
-    // No compiler on this image while the branch changed specs: nothing was
-    // measured, so nothing is accepted. This asks a PERSON rather than waiting,
-    // because a wait here would never resolve on its own - the frozen-wait
-    // valve would fail the dispatch after six hours and return the issue to
-    // the pool, losing a finished branch to a missing binary. `escalate` keeps
-    // the branch on the board with the reason written down.
-    const unwitnessed = witness?.kind === 'absent' && specCount > 0
     const answer = unwitnessed
       ? null
       : await askQueend({
@@ -2312,7 +2757,29 @@ export async function reviewFinishedDispatches(
           committedFiles: files.length,
           priorSendBacks,
         }).catch(() => null)
-    const state = unwitnessed ? 'escalate' : String(answer?.verdict ?? 'wait')
+    let state = unwitnessed ? 'escalate' : String(answer?.verdict ?? 'wait')
+
+    // NEVER ON THE BEE'S WORD ALONE. A commit exists, so an adversary could
+    // read it - and has not yet (no lane, a provider refusal, the round's
+    // budget). An accept here would be the self-grading #1127 exists to end,
+    // so it waits for the reviewer instead. A send-back grounded in something
+    // other than the bee's say-so - the compiler's refusal, or the bee's own
+    // admission - still goes back as it always did; one grounded only in
+    // silence waits too, because the reviewer may yet establish those
+    // criteria.
+    let heldForReviewer = false
+    if (!reviewer && diff.ok && files.length > 0) {
+      if (
+        state === 'accept' ||
+        (state === 'sendBack' &&
+          machineFailed.length === 0 &&
+          admitted.length === 0)
+      ) {
+        state = 'wait'
+        heldForReviewer = true
+      }
+    }
+
     // Judged versus unjudged, recorded per dispatch (#1420, FR-001): "2 of 5
     // judged" is a fact about the worker's reporting, not about the work, and
     // the two belong in the record as separate numbers. The compiler's failed
@@ -2322,8 +2789,33 @@ export async function reviewFinishedDispatches(
       ...verdicts.filter((v) => !v.met).map((v) => v.criterion),
       ...machineFailed,
     ]
+
+    // Whether this attempt counts against the retry ceiling (#1420, FR-003).
+    //
+    // `send_backs` measures how many times work has been judged and FOUND
+    // WANTING, so only a finding spends it: a machine failure, an unmet the bee
+    // admitted, or an unmet the reviewer refuted with a stated reason. An
+    // attempt whose only unmet lines are could-not-check or unjudged was not
+    // found wanting - nobody could tell - and counting that was how three of
+    // the six dispatches measured on 2026-09-04 reached maximumRealAttempts
+    // and escalated without the work ever being assessed, the oldest after 91
+    // hours. The attempt still comes back (the criteria are still unmet); it
+    // spends `free_attempts` instead, which has a ceiling of its own.
+    const countsAgainstTheIssue =
+      machineFailed.length > 0 || admitted.length > 0 || refuted.length > 0
+    const freeAttempt = state === 'sendBack' && !countsAgainstTheIssue
+    const freeAttempts = freeAttempt
+      ? priorFreeAttempts + 1
+      : (state === 'sendBack' && countsAgainstTheIssue) || state === 'accept'
+        ? 0
+        : priorFreeAttempts
+    const deadLetter = freeAttempt && freeAttempts >= FREE_ATTEMPT_CEILING
+    if (deadLetter) state = 'escalate'
+
+    const dirty =
+      diff.ok && files.length === 0 ? await deps.worktreeDirtCount(issue) : null
     logger.info('Queen reviewed her own work', {
-      issue: row.issue,
+      issue,
       verdict: state,
       criteria: totalCriteria,
       judged: verdicts.length,
@@ -2346,12 +2838,24 @@ export async function reviewFinishedDispatches(
               witness.specs.find((sp) => sp.oracleError)?.oracleError ?? ''
             ).slice(0, 180)
           : '',
+      // WHO JUDGED (#1127). A verdict is only as independent as the model
+      // behind it, so the log names it, says whether it shared the bee's
+      // vendor, and whether this round bought it or reused it.
+      reviewerModel: reviewer?.model ?? null,
+      reviewerProvider: reviewer?.provider ?? null,
+      reviewerSameVendor: reviewer?.sameVendor ?? null,
+      reviewerCached: reviewer?.cached ?? false,
+      reviewerSkipped: reviewer ? '' : reviewerSkipped,
+      files: files.length,
+      diffOk: diff.ok,
+      dirty,
+      freeAttempts,
     })
     if (unwitnessed) {
       logger.warn(
         'Queen could not witness the specs: t27c is not on this image',
         {
-          issue: row.issue,
+          issue,
           specs: specCount,
           detail: witness?.kind === 'absent' ? witness.detail : '',
         },
@@ -2360,46 +2864,44 @@ export async function reviewFinishedDispatches(
     // The send-back message the worker reads, with the two lists under distinct
     // headings (#1420, FR-002): what it tested and failed, and what it never
     // wrote a verdict line for at all.
-    const note = unwitnessed
+    const policyNote = String(answer?.note ?? answer?.refusal ?? '')
+    const judgedNote = unwitnessed
       ? `${specCount} .t27 file(s) changed but t27c is not available on this ` +
         'image, so the review could not run t27c parse / parse-complete / ' +
         'typecheck on the commit; a reviewer with t27c must, before merging. ' +
         (witness?.kind === 'absent' ? witness.detail : '')
-      : state === 'sendBack'
-        ? sendBackMessage(String(answer?.note ?? ''), failed, unjudged)
-        : String(answer?.note ?? answer?.refusal ?? '')
-    // Whether this attempt counts against the retry ceiling (#1420, FR-003).
-    //
-    // An attempt whose unmet criteria are ALL unjudged attempted no criterion
-    // it was given: the bee went quiet, not wrong, and `send_backs` measures
-    // how many times work has been judged and found wanting. Counting silence
-    // was how three of the six dispatches measured on 2026-09-04 reached
-    // maximumRealAttempts and escalated to a person without the work ever
-    // being assessed - the oldest after 91 hours. The attempt still comes back
-    // (the criteria are still unmet); it just does not spend the budget.
-    const countsAgainstTheIssue = !(failed.length === 0 && unjudged.length > 0)
-    await pool.query(
-      // The increment is part of the same statement that records the verdict,
-      // because a count kept by a second write is a count that a crash between
-      // the two makes wrong in the direction that matters: an issue whose
-      // send-backs are undercounted is an issue that never escalates.
-      `UPDATE queen_dispatch
-          SET review_state = $2, review_note = $3, reviewed_at = now(),
-              strays = $4::jsonb,
-              send_backs = CASE WHEN $2::text = 'sendBack' AND $5::boolean
-                                THEN send_backs + 1 ELSE send_backs END
-        WHERE issue = $1`,
-      [
-        row.issue,
-        state,
-        note.slice(0, 900),
-        JSON.stringify(strays),
-        countsAgainstTheIssue,
-      ],
+      : state === 'sendBack' || deadLetter
+        ? reviewer
+          ? reviewedSendBackMessage(
+              String(answer?.note ?? ''),
+              reviewer,
+              refuted,
+              unestablished,
+              admitted,
+              machineFailed,
+            )
+          : sendBackMessage(String(answer?.note ?? ''), failed, unjudged)
+        : heldForReviewer
+          ? `Waiting for the adversarial reviewer before judging a commit on the worker's word (${reviewerSkipped || 'no reviewer verdict yet'}).`
+          : policyNote
+    const note = deadLetter
+      ? `${freeAttempts} consecutive attempts produced nothing judgeable ` +
+        '(no commit, or no criterion anyone could establish), so this is ' +
+        'handed to a person instead of being retried again. Last review: ' +
+        judgedNote
+      : judgedNote
+    await recordVerdict(
+      pool,
+      issue,
+      state,
+      note,
+      strays,
+      countsAgainstTheIssue,
+      freeAttempt,
     )
-    acted.push(`#${row.issue}:${state}`)
+    acted.push(`#${issue}:${state}`)
     tally.push({
-      issue: row.issue as number,
+      issue,
       judged: verdicts.length,
       unjudged: unjudged.length,
     })
@@ -2407,10 +2909,108 @@ export async function reviewFinishedDispatches(
   return { acted, strays: strayed, tally }
 }
 
+/**
+ * The verdict, the note and both counters, in ONE statement.
+ *
+ * The increments are part of the same statement that records the verdict,
+ * because a count kept by a second write is a count that a crash between the
+ * two makes wrong in the direction that matters: an issue whose send-backs are
+ * undercounted is an issue that never escalates.
+ *
+ * `free_attempts` goes up on an attempt that produced nothing judgeable, and
+ * back to 0 on one that spent `send_backs` or was accepted - it counts
+ * CONSECUTIVE silence, and a finding breaks the run.
+ *
+ * The note is bounded at 1500, which is also what the next bee's brief shows
+ * of it (`PREVIOUS_REVIEW_MAX_CHARS`): a reviewer's reasons with citations do
+ * not fit the 900 a bare list of criteria used to.
+ */
+async function recordVerdict(
+  pool: Pool,
+  issue: number,
+  state: string,
+  note: string,
+  strays: string[],
+  countsAgainstTheIssue: boolean,
+  freeAttempt: boolean,
+): Promise<void> {
+  await pool.query(
+    `UPDATE queen_dispatch
+        SET review_state = $2, review_note = $3, reviewed_at = now(),
+            strays = $4::jsonb,
+            send_backs = CASE WHEN $2::text = 'sendBack' AND $5::boolean
+                              THEN send_backs + 1 ELSE send_backs END,
+            free_attempts = CASE
+              WHEN $6::boolean THEN free_attempts + 1
+              WHEN ($2::text = 'sendBack' AND $5::boolean)
+                   OR $2::text = 'accept' THEN 0
+              ELSE free_attempts END
+      WHERE issue = $1`,
+    [
+      issue,
+      state,
+      note.slice(0, PREVIOUS_REVIEW_MAX_CHARS),
+      JSON.stringify(strays),
+      countsAgainstTheIssue,
+      freeAttempt,
+    ],
+  )
+}
+
+/**
+ * The key indices running bees hold, counted as `runRound` counts them: a bee
+ * that is still running is spending its key; a finished one is not.
+ */
+async function runningKeys(pool: Pool): Promise<number[]> {
+  const running = await pool
+    .query(
+      `SELECT key_index FROM queen_dispatch
+        WHERE started = true AND finished_at IS NULL
+          AND coalesce(outcome, '') NOT LIKE 'reaped%'`,
+    )
+    .catch(() => null)
+  return (running?.rows ?? [])
+    .map((r) => r.key_index)
+    .filter((i): i is number => typeof i === 'number')
+}
+
+/** Whether a cached reviewer shared the bee's vendor, from the row alone. */
+function sameVendorOf(
+  row: Record<string, unknown>,
+  reviewer: { provider: unknown; model: unknown },
+): boolean | null {
+  if (!row.provider && !row.model) return null
+  return row.provider === reviewer.provider && row.model === reviewer.model
+}
+
+/** One VERDICT line with its three-state answer kept. */
+export interface VerdictLine {
+  criterion: string
+  met: boolean
+  verdict: 'met' | 'unmet' | 'could-not-check'
+}
+
 /** The bee's own VERDICT block, or nothing. */
 export function parseVerdictBlock(
   text: string,
 ): Array<{ criterion: string; met: boolean }> {
+  return parseVerdictBlockDetailed(text).map(({ criterion, met }) => ({
+    criterion,
+    met,
+  }))
+}
+
+/**
+ * The same block with `unmet` and `could-not-check` told apart.
+ *
+ * Both are UNMET to the policy and stay so - `met` is computed exactly as
+ * before. The difference matters to the retry budget and nowhere else: "I
+ * checked and it fails" is an admission worth a send-back, "I could not tell"
+ * is not (the adversarial review settles it instead). The same parser serves
+ * the bee and the reviewer, so a line one of them counts is a line the other
+ * would have counted.
+ */
+export function parseVerdictBlockDetailed(text: string): VerdictLine[] {
   // EVERY occurrence is tried, and the most complete one wins.
   //
   // This took `lastIndexOf`, which was right while the block was required to be
@@ -2430,7 +3030,7 @@ export function parseVerdictBlock(
     starts.push(i)
   }
   if (!starts.length) return []
-  let best: Array<{ criterion: string; met: boolean }> = []
+  let best: VerdictLine[] = []
   for (const start of starts) {
     const found = parseVerdictFrom(text, start)
     if (found.length > best.length) best = found
@@ -2439,11 +3039,8 @@ export function parseVerdictBlock(
 }
 
 /** One VERDICT block, read from a known offset. */
-function parseVerdictFrom(
-  text: string,
-  at: number,
-): Array<{ criterion: string; met: boolean }> {
-  const out: Array<{ criterion: string; met: boolean }> = []
+function parseVerdictFrom(text: string, at: number): VerdictLine[] {
+  const out: VerdictLine[] = []
   // A WRAPPED CRITERION IS STILL ONE CRITERION.
   //
   // Read line by line, a bullet that runs onto a second line did not match, and
@@ -2488,6 +3085,7 @@ function parseVerdictFrom(
       // one, and this is the line that decides whether the swarm can close its
       // own work honestly.
       met: m[2].toLowerCase() === 'met',
+      verdict: m[2].toLowerCase() as VerdictLine['verdict'],
     })
   }
   return out

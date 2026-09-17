@@ -642,10 +642,13 @@ describe('a cloud dispatch can reach a verdict', () => {
   })
 
   it('shows a sendBack and an escalate as her words, still in review', () => {
+    // Half an hour, not one: the board now draws with the Queen's own
+    // `stateOfDispatch`, and a send-back an hour old has reached its idle
+    // floor and been released - which is `dropped`, covered below.
     for (const verdict of ['sendBack', 'escalate', 'wait']) {
       const card = only(
         dispatch({
-          finished_at: ago(1),
+          finished_at: ago(0.5),
           outcome: 'finished',
           review_state: verdict,
         }),
