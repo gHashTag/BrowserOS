@@ -35,6 +35,7 @@
 
 import { createHash, randomUUID } from 'node:crypto'
 import type { LLMProvider } from '@browseros/shared/schemas/llm'
+import { type CriteriaMeasurement, measureCriteria } from './queen-criteria-run'
 import {
   baseRef,
   branchHeadSha,
@@ -362,6 +363,11 @@ export interface ReviewerMessageInput {
   patch: string | null
   /** The machine witness lines, when a witness was taken. */
   machine: Array<{ criterion: string; met: boolean }>
+  /**
+   * The issue's own criterion commands as the Queen ran them on the commit
+   * (`measurementLines`), each tagged `[Mn]` with its criterion number.
+   */
+  measurements?: string[]
   base?: string
 }
 
@@ -381,6 +387,7 @@ export interface ReviewerMessageInput {
 export function reviewerMessage(input: ReviewerMessageInput): string {
   const truncated =
     input.patch !== null && /\n\[truncated \d+\+? chars\]$/.test(input.patch)
+  const measurements = input.measurements ?? []
   const lines = [
     `[${REVIEWER_PROMPT_MARKER}] Review of ${input.repo}#${input.issue}, ` +
       `branch queen-${input.issue} against ${input.base ?? baseRef()}.`,
@@ -398,15 +405,28 @@ export function reviewerMessage(input: ReviewerMessageInput): string {
     '',
     '## Machine measurements',
     '',
-    ...(input.machine.length === 0
+    ...(input.machine.length === 0 && measurements.length === 0
       ? ['(none were taken for this change)']
       : fenced(
           'MEASUREMENTS',
-          input.machine
-            .map((m) => `- ${m.met ? 'passed' : 'FAILED'}: ${m.criterion}`)
-            .join('\n'),
+          [
+            ...input.machine.map(
+              (m) => `- ${m.met ? 'passed' : 'FAILED'}: ${m.criterion}`,
+            ),
+            ...measurements,
+          ].join('\n'),
         )),
     '',
+    // Said outside the fence, because inside it everything is data: the tag
+    // is how a met for a criterion the Queen measured cites that measurement.
+    ...(measurements.length === 0
+      ? []
+      : [
+          "A line tagged [Mn] is criterion n's own command, run by the Queen on",
+          'this commit in a clean checkout. A passing [Mn] is evidence for',
+          'criterion n: cite it as Mn. A FAILED one is a fact, not an opinion.',
+          '',
+        ]),
     '## Patch',
     '',
     ...(input.patch === null
@@ -556,6 +576,23 @@ export function citesEvidence(
   })
 }
 
+/**
+ * Whether a met cites the passing measurement of ITS OWN criterion. Citing
+ * `M2` for criterion 1 establishes nothing about criterion 1.
+ */
+export function citesMeasurement(
+  reason: string,
+  number: number,
+  measuredPassed: number[],
+): boolean {
+  if (!measuredPassed.includes(number)) return false
+  const tags = [
+    ...reason.matchAll(/(?:^|[^A-Za-z0-9])M(\d{1,3})(?![0-9])/g),
+    ...reason.matchAll(/measurement\s+(?:M|#)?(\d{1,3})(?![0-9])/gi),
+  ].map((m) => Number(m[1]))
+  return tags.includes(number)
+}
+
 /** A reviewer's answer as the sweep counts it. */
 export interface JudgedReview {
   answers: Map<number, ReviewerAnswer>
@@ -579,6 +616,13 @@ export function judgeReviewerText(
   criteriaCount: number,
   visiblePaths: string[],
   machine: Array<{ criterion: string; met: boolean }>,
+  /**
+   * Criterion numbers whose own commands all passed on this commit. A met
+   * for one of them may cite its measurement (`M3`, `[M3]`, "measurement 3")
+   * instead of a patch line: for a criterion that IS a command, the command's
+   * output is the best evidence there is, and the reviewer cannot run it.
+   */
+  measuredPassed: number[] = [],
 ): JudgedReview {
   const raw = reviewerAnswers(text, criteriaCount)
   const answers = new Map<number, ReviewerAnswer>()
@@ -592,7 +636,8 @@ export function judgeReviewerText(
     }
     const answer: ReviewerAnswer =
       found.verdict === 'met' &&
-      !citesEvidence(found.reason, visiblePaths, machine)
+      !citesEvidence(found.reason, visiblePaths, machine) &&
+      !citesMeasurement(found.reason, number, measuredPassed)
         ? {
             number,
             verdict: 'could-not-check',
@@ -683,6 +728,12 @@ export interface ReviewDeps {
   branchPatch: (issue: number, maxChars: number) => Promise<string | null>
   worktreeDirtCount: (issue: number) => Promise<number | null>
   witness: (issue: number, files: string[]) => Promise<Witness>
+  /** The dispatch row's criterion commands, run on the commit `headSha`. */
+  measureCriteria: (
+    issue: number,
+    headSha: string,
+    criteria: string[],
+  ) => Promise<CriteriaMeasurement>
   laneCandidates: (takenKeyIndices: number[]) => WorkerProvider[]
   llm: (
     lane: WorkerProvider,
@@ -700,6 +751,8 @@ export function defaultReviewDeps(): ReviewDeps {
     branchPatch,
     worktreeDirtCount,
     witness: witnessSpecs,
+    measureCriteria: (issue, headSha, criteria) =>
+      measureCriteria(issue, headSha, criteria),
     laneCandidates: reviewLaneCandidates,
     llm: (lane, system, message) => defaultReviewerLlm(lane, system, message),
     reviewsPerRound: () => reviewsPerRound(),

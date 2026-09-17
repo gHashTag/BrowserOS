@@ -42,6 +42,14 @@ import { createQueenPool } from '../../lib/db/queen-pool'
 import { logger } from '../../lib/logger'
 import { outstandingEscalations } from '../routes/queen-needs-you'
 import {
+  type CriterionRun,
+  criteriaCounts,
+  criteriaWitness,
+  isCriterionRuns,
+  measurementLines,
+  parseCriterionChecks,
+} from './queen-criteria-run'
+import {
   DISPATCH_OUTCOME_LABELS,
   dispatchBee,
   reapDispatchesFromPreviousBoot,
@@ -415,9 +423,10 @@ async function ensureQueenColumns(pool: Pool): Promise<void> {
       -- not spent on those (#1420), and measured 2026-09-17 that made the
       -- loop free - an empty attempt was released after six hours and
       -- redispatched for ever. This is the counter that ends it: at
-      -- FREE_ATTEMPT_CEILING the issue escalates to a person. Like
-      -- send_backs, recordDispatch does not name it, so it survives the
-      -- redispatch it is counting.
+      -- FREE_ATTEMPT_CEILING the issue escalates to a person. It survives
+      -- the redispatch it is counting: recordDispatch names it only to reset
+      -- it when an issue that escalated or failed is dispatched again (a
+      -- person's retry), and otherwise keeps the stored value.
       ADD COLUMN IF NOT EXISTS free_attempts integer NOT NULL DEFAULT 0,
       -- The adversarial reviewer's answer (#1127), cached by the commit it
       -- judged. A wait row is re-read every round; a review of an unchanged
@@ -444,7 +453,14 @@ async function ensureQueenColumns(pool: Pool): Promise<void> {
       -- judged is no new work, and is handled as an empty attempt.
       ADD COLUMN IF NOT EXISTS judged_head text,
       ADD COLUMN IF NOT EXISTS judged_conversation text,
-      ADD COLUMN IF NOT EXISTS judged_note text;
+      ADD COLUMN IF NOT EXISTS judged_note text,
+      -- The issue's own criterion commands, run by the Queen on the commit,
+      -- keyed like the reviewer cache (branch head, merge base, criteria). A
+      -- wait row is re-read every 60 s, and a measurement is a temporary
+      -- worktree and up to 20 commands; an unchanged head is the same
+      -- measurement, so it is read from here instead of run again.
+      ADD COLUMN IF NOT EXISTS criteria_fingerprint text,
+      ADD COLUMN IF NOT EXISTS criteria_runs jsonb;
   `)
 }
 
@@ -2398,6 +2414,7 @@ export async function reviewFinishedDispatches(
             d.reviewer_fingerprint, d.reviewer_text, d.reviewer_model,
             d.reviewer_provider, d.reviewer_misses, d.outcome,
             d.judged_head, d.judged_conversation, d.judged_note,
+            d.criteria_fingerprint, d.criteria_runs,
             (SELECT string_agg(t.text, '' ORDER BY t.seq)
                FROM queen_transcript t
               WHERE t.conversation_id = d.conversation_id AND t.kind = 'say')
@@ -2603,6 +2620,11 @@ export async function reviewFinishedDispatches(
         freeAttempts,
         providerEnded,
         unchangedSinceJudged,
+        criteriaChecks: 0,
+        criteriaPassed: 0,
+        criteriaFailed: 0,
+        criteriaUnrunnable: 0,
+        criteriaCached: false,
       })
       await recordVerdict(pool, issue, {
         state,
@@ -2656,10 +2678,7 @@ export async function reviewFinishedDispatches(
       verdicts.length > 0 || files.some((f) => f.endsWith('.t27'))
         ? await deps.witness(issue, files)
         : null
-    const machineAll = witness ? witnessVerdicts(witness) : []
-    const machine =
-      verdicts.length > 0 ? machineAll : machineAll.filter((v) => !v.met)
-    const machineFailed = machine.filter((v) => !v.met).map((v) => v.criterion)
+    const witnessLines = witness ? witnessVerdicts(witness) : []
     const specCount = files.filter((f) => f.endsWith('.t27')).length
     // No compiler on this image while the branch changed specs: nothing was
     // measured, so nothing is accepted. This asks a PERSON rather than waiting,
@@ -2668,6 +2687,96 @@ export async function reviewFinishedDispatches(
     // the pool, losing a finished branch to a missing binary. `escalate` keeps
     // the branch on the board with the reason written down.
     const unwitnessed = witness?.kind === 'absent' && specCount > 0
+
+    // The merge base is half of both cache keys below; read once, when needed.
+    let mergeBaseRead = false
+    let mergeBase: string | null = null
+    const readMergeBase = async (): Promise<string | null> => {
+      if (!mergeBaseRead) {
+        mergeBase = await deps.mergeBaseSha(issue)
+        mergeBaseRead = true
+      }
+      return mergeBase
+    }
+
+    // THE CRITERIA, RUN. In the t27 swarm nearly every criterion is a command
+    // and the output it must print, and a reviewer with no tools can only
+    // answer could-not-check for those - which escalated correct work to a
+    // person (`beyondThePatch`). So the Queen runs them herself, on the
+    // COMMIT, in a clean temporary checkout (queen-criteria-run.ts).
+    //
+    // Only the dispatch row's criteria are run, never criteria a bee stated
+    // for itself: a defendant that writes the command also writes what it
+    // prints. Cached by the reviewer's own key, so a wait row re-read every
+    // round measures nothing twice.
+    let criteriaRuns: CriterionRun[] = []
+    let criteriaCached = false
+    if (
+      files.length > 0 &&
+      branchHead !== null &&
+      !unwitnessed &&
+      promised.some((c) => parseCriterionChecks(c).length > 0)
+    ) {
+      const base = await readMergeBase()
+      const fingerprint = base
+        ? reviewerFingerprint(branchHead, base, promised)
+        : null
+      if (!fingerprint) {
+        logger.warn('Queen could not key a criteria measurement; none ran', {
+          issue,
+        })
+      } else if (
+        row.criteria_fingerprint === fingerprint &&
+        isCriterionRuns(row.criteria_runs)
+      ) {
+        criteriaRuns = row.criteria_runs
+        criteriaCached = true
+      } else {
+        const measured = await deps.measureCriteria(issue, branchHead, promised)
+        if (!measured.ok) {
+          // Nothing measured is nothing decided, and nothing is cached: the
+          // next round tries again.
+          logger.warn('Queen could not measure the criteria on the commit', {
+            issue,
+            error: measured.error,
+          })
+        } else {
+          criteriaRuns = measured.criteria
+          await pool
+            .query(
+              `UPDATE queen_dispatch
+                  SET criteria_fingerprint = $2, criteria_runs = $3::jsonb
+                WHERE issue = $1`,
+              [issue, fingerprint, JSON.stringify(criteriaRuns)],
+            )
+            .catch((error) => {
+              logger.warn('Queen could not cache the criteria measurement', {
+                issue,
+                error: error instanceof Error ? error.message : String(error),
+              })
+            })
+        }
+      }
+    }
+    const criteriaLines = criteriaWitness(criteriaRuns)
+    // Criteria whose every command passed on the commit. The machine
+    // established them; a reviewer's could-not-check does not undo that, and
+    // only a refutation with a reason does.
+    const measuredPassed = criteriaLines
+      .filter((line) => line.met)
+      .map((line) => line.number)
+    const counts = criteriaCounts(criteriaRuns)
+
+    // Every machine line, the compiler's and the criteria's. They obey the
+    // compiler's rule: without a bee verdict only a failure is weighed - the
+    // machine may refuse work the bee did not defend, never pass it.
+    const machineAll = [
+      ...witnessLines,
+      ...criteriaLines.map(({ criterion, met }) => ({ criterion, met })),
+    ]
+    const machine =
+      verdicts.length > 0 ? machineAll : machineAll.filter((v) => !v.met)
+    const machineFailed = machine.filter((v) => !v.met).map((v) => v.criterion)
 
     // THE ADVERSARY (#1127). Until here the only per-criterion judgement was
     // the bee grading itself. A second reading, by a model told to refute,
@@ -2705,10 +2814,10 @@ export async function reviewFinishedDispatches(
       keyIndex: row.key_index as number | null,
     }
     if (files.length > 0 && reviewCriteria.length > 0 && !unwitnessed) {
-      const mergeBase = await deps.mergeBaseSha(issue)
+      const reviewBase = await readMergeBase()
       const fingerprint =
-        branchHead && mergeBase
-          ? reviewerFingerprint(branchHead, mergeBase, reviewCriteria)
+        branchHead && reviewBase
+          ? reviewerFingerprint(branchHead, reviewBase, reviewCriteria)
           : null
       if (!fingerprint) {
         reviewerSkipped = 'the branch head or its merge base could not be read'
@@ -2765,7 +2874,8 @@ export async function reviewFinishedDispatches(
               criteria: reviewCriteria,
               files,
               patch,
-              machine: machineAll,
+              machine: witnessLines,
+              measurements: measurementLines(criteriaRuns),
             })
             // FALL BACK ON A REFUSAL THAT WILL NOT PASS. The choice is
             // deterministic, so a lane that can never answer was chosen again
@@ -2806,6 +2916,7 @@ export async function reviewFinishedDispatches(
                 reviewCriteria.length,
                 visible,
                 machineAll,
+                measuredPassed,
               )
               if (judged.unanswered.length > 0) {
                 // Silence is not a pass, and it is not a finding either: a
@@ -2871,12 +2982,21 @@ export async function reviewFinishedDispatches(
       .map((line) => line.criterion)
     const refuted: Array<{ criterion: string; reason: string }> = []
     const unestablished: Array<{ criterion: string; reason: string }> = []
+    // Criterion numbers the reviewer did not establish and the machine did.
+    const establishedByMeasurement: number[] = []
     if (reviewer) {
       reviewCriteria.forEach((criterion, i) => {
         const answer = reviewer?.answers.get(i + 1)
         if (answer?.verdict === 'met') return
         if (answer?.verdict === 'unmet' && hasStatedReason(answer)) {
+          // A refutation with a reason wins over a passing measurement: the
+          // command is what the issue's author could write down, and a
+          // reviewer can still find why it does not cover the criterion.
           refuted.push({ criterion, reason: answer.reason })
+        } else if (promised.length > 0 && measuredPassed.includes(i + 1)) {
+          // Not "beyond the patch": the Queen ran it. Counted met, so a
+          // could-not-check here neither escalates nor sends the bee back.
+          establishedByMeasurement.push(i + 1)
         } else {
           unestablished.push({
             criterion,
@@ -2895,7 +3015,9 @@ export async function reviewFinishedDispatches(
         [
           ...reviewCriteria.map((criterion, i) => ({
             criterion,
-            met: reviewer?.answers.get(i + 1)?.verdict === 'met',
+            met:
+              reviewer?.answers.get(i + 1)?.verdict === 'met' ||
+              establishedByMeasurement.includes(i + 1),
           })),
           ...admitted.map((criterion) => ({ criterion, met: false })),
           ...machineAll,
@@ -3080,6 +3202,13 @@ export async function reviewFinishedDispatches(
       freeAttempts,
       providerEnded,
       unchangedSinceJudged,
+      // The criteria the Queen ran herself: checks that ran (passed plus
+      // failed), and whether this round ran them or read the cache.
+      criteriaChecks: counts.checks,
+      criteriaPassed: counts.passed,
+      criteriaFailed: counts.failed,
+      criteriaUnrunnable: counts.unrunnable,
+      criteriaCached,
     })
     if (unwitnessed) {
       logger.warn(
