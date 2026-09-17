@@ -651,6 +651,7 @@ QUEEN_CORE_FILES=(
 QUEEN_CORE_DIR="$PROJECT_DIR/.trinity/build/QueenCore"
 mkdir -p "$QUEEN_CORE_DIR"
 if ! swiftc -parse-as-library -emit-module -emit-library -static \
+    -target arm64-apple-macosx14.0 \
     -module-name QueenCore \
     -emit-module-path "$QUEEN_CORE_DIR/QueenCore.swiftmodule" \
     -o "$QUEEN_CORE_DIR/libQueenCore.a" \
@@ -1220,8 +1221,33 @@ EOF
         # not passing them was the same omission, one file over, as the
         # sources list that was written down twice.
         SWIFT_TEST_XFLAGS=()
-        for module_flag in "${SWIFTC_MODULE_FLAGS[@]}"; do
-            SWIFT_TEST_XFLAGS+=(-Xswiftc "$module_flag")
+        # SWIFTC_MODULE_FLAGS mixes three kinds of entry: paired flags with
+        # values (-I <dir>, -F <dir>), and bare static libraries
+        # (libQueenCore.a) that the app compile accepts positionally. Feeding
+        # a library through -Xswiftc drops it into the test frontend as a
+        # positional SOURCE, and swift test dies with "unexpected input
+        # file" - measured: every --test build failed at this step since the
+        # module split added the .a. A library is a linker input here.
+        i=0
+        while [ "$i" -lt "${#SWIFTC_MODULE_FLAGS[@]}" ]; do
+            module_flag="${SWIFTC_MODULE_FLAGS[$i]}"
+            case "$module_flag" in
+                -I|-F)
+                    SWIFT_TEST_XFLAGS+=(
+                        -Xswiftc "$module_flag"
+                        -Xswiftc "${SWIFTC_MODULE_FLAGS[$((i + 1))]}"
+                    )
+                    i=$((i + 2))
+                    ;;
+                /*.a|/*.dylib)
+                    SWIFT_TEST_XFLAGS+=(-Xlinker "$module_flag")
+                    i=$((i + 1))
+                    ;;
+                *)
+                    SWIFT_TEST_XFLAGS+=(-Xswiftc "$module_flag")
+                    i=$((i + 1))
+                    ;;
+            esac
         done
         swift test --package-path "$PROJECT_DIR/.." \
             "${SWIFT_TEST_XFLAGS[@]}" 2>&1 | tee -a "$LOG_FILE"

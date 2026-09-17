@@ -110,6 +110,16 @@ enum QueenReviewVerdictRequest {
     /// carries the independence. The decision is here, the routing is
     /// there — a call site that ignores the returned provider quietly
     /// turns criterion 2 back into role separation for everyone.
+    ///
+    /// Standing fact while #1127 is open: the supervision path has not
+    /// adopted this yet. `sendOneShotReviewerRequest` still sends the
+    /// reviewer on the app's current configuration, which is normally the
+    /// worker's own, and the journal line therefore reports role
+    /// separation. The adoption is a one-site change in ChatViewModel —
+    /// read the worker's provider off the task record, call this function
+    /// with the usable providers, and build the reviewer's request on the
+    /// provider it returns — and it is outside this file's boundary. Said
+    /// here so nobody mistakes the decision's existence for its use.
     static func reviewerProvider(
         workerProvider: ModelProvider?,
         usableProviders: [ModelProvider]
@@ -161,7 +171,17 @@ enum QueenReviewVerdictRequest {
     /// so a `met` with nothing behind it is not an answer the format
     /// accepts. The parser stays tolerant — it reads the verdict keyword —
     /// but the request now demands the evidence on the line, which is what
-    /// the journal keeps for a later reader.
+    /// the journal keeps for a later reader. A reviewer that did not attempt
+    /// a refutation for a criterion is told to answer unmet or "could not
+    /// check", never met — `met` is reserved for the refutation that failed.
+    ///
+    /// The demand is written to survive anything appended after these
+    /// instructions: a later answer-format section that shows a bare `met`
+    /// as an example illustrates punctuation, not permission, and the
+    /// refutation sentence stays required on the same line. And `brief`
+    /// self-verifies both the marker and the demands before returning, so a
+    /// brief swapped for a worker's prompt trips two journal guards, not one
+    /// (#1127 criteria 1 & 4).
     ///
     /// The brief opens with `adversaryPromptMarker` so the caller can verify
     /// (`isAdversarialBrief`) that the prompt was not swapped for a worker's
@@ -182,8 +202,9 @@ enum QueenReviewVerdictRequest {
         var lines: [String] = [
             "[\(adversaryPromptMarker)]",
             "",
-            "You are an adversarial reviewer, not a helper. Your task is to find",
-            "why each criterion is NOT met — not to confirm that it is.",
+            "You are the opponent. Not a helper, not a neutral reviewer — an",
+            "adversarial reviewer. Your task: find why each criterion is",
+            "NOT met — not confirm that it is.",
             "",
             "For each criterion, try to break it. Look for gaps, missing cases,",
             "partial implementations, edges the code does not handle, and anything",
@@ -204,7 +225,17 @@ enum QueenReviewVerdictRequest {
             "When you mark a criterion met, the same line must name the refutation",
             "you attempted — what you tried to break it with, and why it did not",
             "break. A met that cannot show the refutation behind it is a nod, not a",
-            "verdict, and must not be written.",
+            "verdict, and must not be written. If you did not attempt a refutation",
+            "for a criterion, you may not mark it met: mark it unmet, or say you",
+            "could not check it.",
+            "",
+            "This demand travels with the answer, not with this section. Any part",
+            "of this request that appears after these instructions — an",
+            "answer-format section, an example line — shows at most the shape of",
+            "an answer line. If such an example writes a bare \"met\" with nothing",
+            "behind it, the example illustrates the punctuation, not permission:",
+            "the refutation sentence is still required on the same line, and a",
+            "bare \"met\" remains a format violation.",
             "",
             "Below are the acceptance criteria, the diff of what the worker changed,",
             "and the full contents of the files that were touched. For each criterion",
@@ -284,13 +315,43 @@ enum QueenReviewVerdictRequest {
             )
         }
 
+        // The marker proves the brief carries the adversary's token; the
+        // needles below prove it carries the adversary's substance. A prompt
+        // with the marker but without the met-needs-refutation instruction
+        // is a worker's prompt with a sticker on it: the reviewer would be
+        // told to build, not to refute, and every met it returned would be
+        // a nod. Both guards fire on the same failure — a brief swapped for
+        // a worker's — so removing either one leaves the other audible
+        // (#1127 criteria 1 & 4).
+        let adversarialDemandNeedles = [
+            "Only mark a criterion as \"met\"",
+            "actively tried to refute",
+            "apply to this request",
+            "remains a format violation"
+        ]
+        if !adversarialDemandNeedles.allSatisfy(result.contains) {
+            TriosLogBus.shared.warn(
+                .queen,
+                "queen.assertion.adversarial_demand_missing",
+                "Reviewer brief carries the adversary marker but not the "
+                    + "adversarial demands — a met without a refutation "
+                    + "behind it would be accepted, which is the worker's "
+                    + "framing, not the opponent's (#1127)"
+            )
+        }
+
         return result
     }
 
     /// Parses a reviewer's response into per-criterion verdicts.
     ///
     /// Only criteria that appear in the response with a recognisable verdict
-    /// (`.met` or `.unmet`) are returned. Absent criteria stay out of the
+    /// (`.met` or `.unmet`) are returned. On the criterion-label path — the
+    /// strict format the brief itself demands — a `met` with no words behind
+    /// the keyword is treated as absent: `met` is stamped only when the
+    /// refutation the brief demands is visible on the line (#1127
+    /// criterion 1). The numbered path is not gated; see the note at the
+    /// Strategy 2 call site for why. Absent criteria stay out of the
     /// dictionary and read as `unchecked` when the acceptance policy builds
     /// its table — the contract is that an answer the parser could not
     /// understand, or one that explicitly says "could not check", must not
@@ -361,9 +422,26 @@ enum QueenReviewVerdictRequest {
             )
             if !needle.isEmpty,
                let line = lines.first(where: {
-                   $0.localizedCaseInsensitiveContains(needle)
-               }) {
-                return verdictKeyword(in: line, stripping: echo)
+                    $0.localizedCaseInsensitiveContains(needle)
+                }) {
+                // The criterion-label path is the strict format the brief
+                // itself demands, so the brief's own rule is enforced here:
+                // a `met` on a criterion-labeled line must show the
+                // refutation behind it (#1127 criterion 1). A bare
+                // "criterion: met" — the shape a format example shows, but
+                // with no refutation attempted — reads as absent, which
+                // reads as unchecked: not a pass, and not a silent stamp.
+                // The numbered format (Strategy 1) is deliberately NOT
+                // gated: it is pinned lenient by #1117's captured fixture
+                // ("1. make check passes — met" must parse), and resolving
+                // that conflict is the issue owner's call, not a unilateral
+                // tightening here. Unmet is never gated — the criterion
+                // conditions only `met`.
+                return verdictKeyword(
+                    in: line,
+                    stripping: echo,
+                    metRequiresRefutationEvidence: true
+                )
             }
         }
         return nil
@@ -405,9 +483,17 @@ enum QueenReviewVerdictRequest {
     /// by a substring match on "met". Word boundaries guard against "metrics"
     /// and "parameter" — false friends that would turn a line about something
     /// else into a pass.
+    ///
+    /// `metRequiresRefutationEvidence` enforces #1127 criterion 1 at the one
+    /// valve this file owns: when set, a `.met` is returned only if words
+    /// follow the verdict keyword on the line — the refutation the brief
+    /// demands behind every met. A bare "criterion: met" stays absent, which
+    /// reads as unchecked: not a pass. `.unmet` is never gated — the
+    /// criterion conditions only `met`.
     private static func verdictKeyword(
         in line: String,
-        stripping echo: String = ""
+        stripping echo: String = "",
+        metRequiresRefutationEvidence: Bool = false
     ) -> QueenCriterionVerdict? {
         // Remove the echoed criterion text so keywords from the criterion's
         // own wording do not decide its verdict. A reviewer who writes
@@ -419,7 +505,13 @@ enum QueenReviewVerdictRequest {
         let lower = searchLine.lowercased()
 
         // Checkbox markers used elsewhere in the project.
-        if lower.contains("[x]") { return .met }
+        if lower.contains("[x]") {
+            if metRequiresRefutationEvidence,
+               !refutationEvidenceFollows(lower, keyword: "[x]") {
+                return nil
+            }
+            return .met
+        }
         if lower.contains("[ ]") { return .unmet }
         // "[?]" is treated the same as "could not check": the criterion stays
         // absent rather than being recorded as .unchecked.
@@ -428,9 +520,36 @@ enum QueenReviewVerdictRequest {
             return .unmet
         }
         if matchesWord(lower, "met") {
+            if metRequiresRefutationEvidence,
+               !refutationEvidenceFollows(lower, keyword: "met") {
+                return nil
+            }
             return .met
         }
         return nil
+    }
+
+    /// Whether words follow the verdict keyword on the line — the visible
+    /// trace of a refutation attempt (#1127 criterion 1).
+    ///
+    /// "met" with nothing behind it is a nod; the brief demands the
+    /// refutation sentence on the same line, and this is where that demand
+    /// is checked. Any run of four or more letters after the keyword counts:
+    /// the reviewer's own words, not a fixed vocabulary — the shape is
+    /// "verdict, then what I tried and why it held", and the check only asks
+    /// that the second half exists at all.
+    private static func refutationEvidenceFollows(
+        _ text: String,
+        keyword: String
+    ) -> Bool {
+        guard let range = text.range(of: keyword, options: .caseInsensitive)
+        else { return false }
+        let tail = String(text[range.upperBound...])
+        let words = tail
+            .split(whereSeparator: { !$0.isLetter })
+            .map { $0.lowercased() }
+            .filter { $0.count >= 4 && $0 != keyword.lowercased() }
+        return !words.isEmpty
     }
 
     /// Word-boundary match so "met" does not fire inside "metrics".

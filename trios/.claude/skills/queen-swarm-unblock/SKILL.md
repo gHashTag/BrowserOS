@@ -326,6 +326,104 @@ self-graded.
 This check only became possible on 2026-09-04, when 100 bee branches were pushed
 for the first time. Before that the diff existed nowhere a checker could read it.
 
+## Cause 6 - the backlog is not a work queue, and the skip count says otherwise
+
+Measured 2026-09-12, over **all 588 open issues**, read one body at a time:
+
+| Class | Count | Share | What it is |
+|---|---|---|---|
+| `HAS_BOUNDARY` | 38 | 6% | the Queen would accept it - and **all 38 are already taken** |
+| `BOUNDARY_NO_PATHS` | 2 | 0% | a boundary heading whose section names no path |
+| `BRIEF_NO_BOUNDARY` | 23 | 4% | a real brief, one heading short |
+| `REPORT` | 373 | 63% | an analysis - has `##` headings, no scope, no boundary |
+| `NO_HEADINGS` | 152 | 26% | free prose |
+
+```bash
+tri backlog                       # the table above, plus the repairable numbers
+tri backlog --propose <dir>       # one proposed boundary per repairable issue
+```
+
+### The delegable pool is empty, and the word "delegable" was doing the lying
+
+That table said `HAS_BOUNDARY | 40 | delegable today` until the claim was
+checked against the live tick instead of asserted. Two corrections, both
+measured:
+
+**First, the classifier was asking a different question than the Queen.** It
+tested for the *heading*; `queen-tick.ts:boundaryPathsOf` tests for the *paths
+inside the section*, and `delegatable` is `boundary.length > 0`. Two issues had
+a heading and no path - #2059 (`## Boundary correction`, a correction to a
+published property count, not a scope declaration) and #2036 (`## Boundary`
+exactly, prose naming which workflows are out of scope, no path). The server
+counts both under `missingBoundary`: **a skip reason that names the heading and
+measures the paths.** `backlog.mjs` now ports `boundaryPathsOf` line for line
+and gives the heading-without-a-path case its own class.
+
+**Second, and the part that changes what you should do:** cross the remaining 38
+against `/queen/status`'s own `skipSummary`, and the sets are *equal*.
+
+```
+HAS_BOUNDARY 38 | claimed + completed + dispatched 38
+delegable and not already taken : NONE
+taken but not HAS_BOUNDARY      : NONE
+```
+
+13 claimed by a fence, 24 completed but still open, 1 (#3576) dispatched at
+16:17:45 while this was being measured. Not "40 delegable"; **zero**. The swarm
+is not rate-limited, mis-parsing, or misconfigured - it has eaten everything it
+can read, which is why `refusal: "nothing to choose"` was the literal truth all
+along and every reading of it as a parser bug was wrong.
+
+The only route from this backlog to new food is the 23 repairable briefs, and
+those need an owner's decision, not a tool's.
+
+**This cause looks exactly like Cause 4 and is not Cause 4.** `/queen/status`
+reports `refusal: "nothing to choose"` beside a `skipSummary` counting 446
+candidates refused for `missingBoundary`. Read together, those two numbers
+invite one conclusion - *the backlog is full but unreadable, so repair the
+boundary sections* - and that conclusion is wrong in the expensive direction.
+It prices a formatting fix for work that needs a decision.
+
+Only **23** of the 448 are one heading short. The other 89% of the backlog is
+writing **about** the system rather than instructions to **change** it. A report
+has no boundary to repair, because nobody has yet decided what work it implies.
+Inventing one is a design act wearing a formatting fix's clothes, and it is how
+a swarm ends up delegating someone's analysis back to itself.
+
+> I had this wrong first. `anomaly.mjs` carried the advice "repair the boundary
+> sections on the existing ones" until `backlog.mjs` measured the composition
+> and refuted it. The skip count is a property of the *parser*, not of the
+> backlog; it tells you how many bodies failed a regex, never how many contain
+> work. Do not infer composition from a rejection count - read the bodies.
+>
+> Then I had it wrong a second time, in the same shape. `backlog.mjs` itself
+> reported 40 issues "delegable today" while every one of them was already
+> claimed, finished or running. A classification is not an availability. Do not
+> infer a work queue from a format check either - cross it against the tick.
+
+Three things follow for anyone about to act:
+
+- The 23 are worth repairing and are listed by number. `tri backlog --propose`
+  writes a review-ready `## Boundary` block for each, built from the paths the
+  issue's own text mentions. **It never writes to GitHub.** The paths are what
+  the text *mentions*, which is not the same as what the brief should *own*, and
+  that judgement is not a tool's to make.
+- The 527 are a question for the owner, not a task for the swarm. Writing more
+  issues into this backlog is writing the 528th report.
+- **Nothing in the backlog is available now.** Before proposing any repair to
+  the swarm's plumbing, run the set comparison above. If it prints `NONE`, the
+  plumbing is not the blocker and no amount of it will produce a bee.
+
+Corollary, and the reason the numbers above were hard to get: `tri idle`
+reported 11 dispatch rounds FAILED, every one of them `GitHub returned 403`.
+Both GitHub calls in `queen-tick.ts` (`openIssues`, `bodiesFor`) send only
+`Accept: application/vnd.github+json` and **no Authorization header**. The
+comment beside them names the anonymous ceiling of 60 requests an hour and works
+around it by batching bodies into the list call - but never adds a token. One
+header is the difference between 60 an hour and 5000. `gh` on this machine is
+authenticated, which is why `tri backlog` can read all 590 in a single
+paginated call while the server cannot read any.
+
 ## Operating these repairs from outside the container
 
 Four of the five repairs above now have a command, and all of them talk to the

@@ -58,15 +58,58 @@ public enum QueenLocalisation {
 
     // MARK: - Public
 
+    /// #1176 — the self-check every answer must survive. A range may only
+    /// begin at a line that opens a declaration and carries its name: a
+    /// named function, never a mid-body line (#1158's rules answered
+    /// 6005-6304, which begins at a comment, while the names pointed
+    /// elsewhere). The declared name need not be among the identifiers —
+    /// #1166's identifiers describe the body and the answer correctly begins
+    /// at the function holding it — but a range that begins anywhere but a
+    /// named declaration is a guess, and the answer to a guess is silence.
+    /// The code view is used, so a declaration-shaped span in a comment or a
+    /// string literal cannot underwrite a start it does not occupy.
+    private static func answeredBeginsAtNamedDeclaration(
+        _ range: ClosedRange<Int>,
+        in source: String
+    ) -> Bool {
+        let cleaned = source
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+        let codeLines = maskCommentsAndStrings(cleaned)
+            .components(separatedBy: "\n")
+        guard (1...codeLines.count).contains(range.lowerBound) else { return false }
+        return declarationName(on: codeLines[range.lowerBound - 1]) != nil
+    }
+
     /// Returns the range (1-indexed) of the declaration the identifiers point
     /// at, decided by the rules in the type documentation, or `nil` when no
-    /// rule answers.
+    /// rule answers — including a rule whose answer does not begin at a
+    /// named declaration. The narrowing never once agreed with the names it
+    /// was handed (#1176), so every answer verifies itself before it may
+    /// speak, and stays silent when the verification fails: a range that
+    /// begins mid-body is a guess, and #1175 already priced a confidently
+    /// wrong one.
     ///
     /// - Parameters:
     ///   - source: Swift source text.
     ///   - identifiers: Whole words to search for (case-sensitive).
     /// - Returns: A 1-indexed `ClosedRange`, or `nil` when nothing qualifies.
     public static func region(
+        in source: String,
+        mentioning identifiers: [String]
+    ) -> ClosedRange<Int>? {
+        guard let answered = regionAnsweredByRules(
+            in: source,
+            mentioning: identifiers
+        ) else { return nil }
+
+        guard answeredBeginsAtNamedDeclaration(answered, in: source) else { return nil }
+        return answered
+    }
+
+    /// The rules of the type documentation, ungated: what `region` answers
+    /// before the #1176 self-check has its say.
+    private static func regionAnsweredByRules(
         in source: String,
         mentioning identifiers: [String]
     ) -> ClosedRange<Int>? {

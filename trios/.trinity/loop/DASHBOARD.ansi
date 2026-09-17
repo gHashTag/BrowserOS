@@ -1,35 +1,29 @@
-╭─ [1mTRIOS CONTINUOUS LOOP[0m[2m   cron */15   job 23d6fe89[0m ───────────────────────╮
-│ [2miteration[0m  [1m#96[0m    [2mstarted[0m 2026-09-06T09:16:25Z                           │
-│ [2msubject[0m    when the system declares the thing you are inferring, read th…[0m│
+╭─ [31mTRIOS CONTINUOUS LOOP   driver GONE[0m ────────────────────────────────────╮
+│ [2mrendered[0m   2026-09-17T06:36:21Z   [2mlast begin[0m -   [31mSTALE > 3x 15m[0m          │
+│ [2mdriver[0m     [31mGONE[0m   [2mclaude-cron 0  crontab 1  launchd 4[0m[2m  nothing fires an …[0m│
+│ [2miteration[0m  [1m#0[0m    [2mstarted[0m -Z                                              │
+│ [2msubject[0m    -                                                             │
 ├──────────────────────────────────────────────────────────────────────────┤
-│ [1mSWARM[0m[2m   value, and how it moved since the last iteration[0m                 │
-│   [2mbees running (of 4)[0m                [1m4[0m          [32m+3  [0m                     │
-│   [2mdispatches finished[0m                [1m387[0m        [31m-3  [0m                     │
-│   [2mcandidates skipped[0m                 [1m198[0m        [2m   =[0m                     │
-│   [2m  fenced by parked paths[0m           [1m-[0m          [2m    [0m                     │
-│   [2m  claimed by parked dispatch[0m       [1m0[0m          [2m   =[0m                     │
-│   [2m  done but never closed[0m            [1m-[0m          [2m    [0m                     │
-│   [2mhours 12: no bee working, percent[0m  [1m45[0m         [31m+1  [0m                     │
-│   [2msend-backs looping with no ceiling[0m [1m79[0m         [2m   =[0m                     │
-│   [2mrows where one rule answers two ways[0m [1m347[0m        [2m   =[0m                   │
+│ [1mSWARM[0m[2m   value | change / the span it covers | a row says if it is older[0m  │
+│   [2mbees running (of 4)[0m                [1m10[0m         [2m   =[0m[2m / 1m[0m                │
+│   [2mdispatches finished[0m                [1m709[0m        [2m   =[0m[2m / 1m[0m                │
+│   [2mcandidates skipped[0m                 [1m901[0m        [32m  -1[0m[2m / 1m[0m                │
+│   [2m[31m  missingBoundary 60.8%[0m[0m            [1m548[0m        [2m   =[0m[2m / 1m[0m                │
+│      [2mno boundary in the brief[0m                                            │
+│   [2m  completed 15.6%[0m                  [1m141[0m        [31m  +1[0m[2m / 1m[0m                │
+│      [2mdone but never closed[0m                                               │
+│   [2m  claimed 11.0%[0m                    [1m99[0m         [2m   =[0m[2m / 1m[0m                │
+│      [2mclaimed by parked dispatch[0m                                          │
+│   [2m  incompleteSpec 6.3%[0m              [1m57[0m         [32m  -1[0m[2m / 1m[0m                │
+│   [2m  notFirst 4.0%[0m                    [1m36[0m         [2m   =[0m[2m / 1m[0m                │
+│   [2m  fileConflict 2.2%[0m                [1m20[0m         [32m  -1[0m[2m / 1m[0m                │
+│      [2mfenced by parked paths[0m                                              │
+│   [2mROUND FAILURES, last 12h[0m           [1m0[0m          [2m   =[0m[2m / 1m[0m                │
+│   [2mhours 12: no bee working, percent[0m  [1m30[0m         [2m   =[0m[2m / 1m[0m                │
+│   [2msend-backs looping with no ceiling[0m [1m5[0m          [2m   =[0m[2m / 1m[0m                │
+│      [2mof 90 examined[0m[2m   [0m[31mmeasured 6h 12m ago - STALE[0m                        │
+│   [2mrows where one rule answers two w…[0m[0m [1m215[0m        [2m   =[0m[2m / 1m[0m                │
+│      [2mfrom 1 pairs compared[0m[2m   [0m[31mmeasured 6h 12m ago - STALE[0m                 │
 ├──────────────────────────────────────────────────────────────────────────┤
 │ [1mWORK THIS ITERATION[0m                                                      │
-│   [32m●[0m make check declares 24 gates; CI ran 8             [2mread the decl[0m     │
-│   [32m●[0m 3 more wired after measuring; 8 gates in 10s       [2mPR #478[0m           │
-│   [32m●[0m t27-rings deliberately NOT wired, reason written   [2mwould skip[0m        │
-│   [32m●[0m tri unwired reads the declaration, not names       [2m271 pass[0m          │
-│   [31m●[0m merge + deploy - seven PRs                         [2moperator's act[0m    │
-├──────────────────────────────────────────────────────────────────────────┤
-│ [1m[31mANOMALIES[0m[0m[2m   found by this iteration, against its own work[0m                │
-│   [31m![0m my word list called 11 of 13 declared gates 'not-a-gate' - they name…[0m│
-│   [31m![0m t27-rings runs a Verilog simulation and my audit dismissed it by name│
-│   [31m![0m 4 gates reported 'No rule to make target'; the worktree had LOST the…[0m│
-│   [31m![0m I nearly reported four broken gates from an impossible result        │
-│   [31m![0m the best gate in the suite is the one I refused to wire: it skips wh…[0m│
-│   [31m![0m wiring a skipping gate manufactures the exact green I spent three ro…[0m│
-├──────────────────────────────────────────────────────────────────────────┤
-│ [1mTHREE WAYS TO CONTINUE[0m                                                   │
-│   [36m1.[0m deploy - seven PRs, the swarm still idle 46%                        │
-│   [36m2.[0m vendor or fetch t27c in CI so t27-rings can run for real            │
-│   [36m3.[0m the 8 remaining declared gates need a Mac: decide if a macOS job is…[0m│
 ╰──────────────────────────────────────────────────────────────────────────╯

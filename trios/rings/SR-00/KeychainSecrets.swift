@@ -868,6 +868,36 @@ enum KeychainSecrets {
             semaphore.signal()
         }
 
+        // A/B instrument for the recurring slow listings (2026-08-23 round).
+        // The primary above runs at .utility and has measured query_time of
+        // 9.5s-33.8s inside this process, while the byte-identical query from
+        // any fresh process answers in 16ms. This twin runs the same
+        // attributes-only query at .userInitiated, outside every lock, purely
+        // to measure. Prediction, written before the build: if the wait is
+        // in-process congestion, the twin answers in milliseconds while the
+        // primary is slow; if securityd serializes this client's calls behind
+        // orphans, both are slow. One extra metadata query per listing is the
+        // entire cost, and it never holds the read slot.
+        DispatchQueue.global(qos: .userInitiated).async {
+            let twinDispatched = Date()
+            let twinStart = Date()
+            var twinOut: CFTypeRef?
+            let twinStatus = SecItemCopyMatching(query as CFDictionary, &twinOut)
+            let twinQuery = Date().timeIntervalSince(twinStart)
+            TriosLogBus.shared.info(
+                .security, "keychain.listing.twin",
+                "userInitiated twin of the \(service) listing answered in "
+                    + String(format: "%.3f", twinQuery)
+                    + "s (status \(twinStatus))",
+                ["service": service,
+                 "query_time": String(format: "%.3f", twinQuery),
+                 "status": String(twinStatus),
+                 "slot_wait": String(
+                    format: "%.3f",
+                    twinStart.timeIntervalSince(twinDispatched))]
+            )
+        }
+
         if semaphore.wait(timeout: .now() + deadline) == .success {
             guard status == errSecSuccess else {
                 lastEnumerationOutcome = "SecItemCopyMatching returned \(status)"

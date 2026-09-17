@@ -1,35 +1,29 @@
-╭─ TRIOS CONTINUOUS LOOP   cron */15   job 23d6fe89 ───────────────────────╮
-│ iteration  #96    started 2026-09-06T09:16:25Z                           │
-│ subject    when the system declares the thing you are inferring, read th…│
+╭─ TRIOS CONTINUOUS LOOP   driver GONE ────────────────────────────────────╮
+│ rendered   2026-09-17T06:36:21Z   last begin -   STALE > 3x 15m          │
+│ driver     GONE   claude-cron 0  crontab 1  launchd 4  nothing fires an …│
+│ iteration  #0    started -Z                                              │
+│ subject    -                                                             │
 ├──────────────────────────────────────────────────────────────────────────┤
-│ SWARM   value, and how it moved since the last iteration                 │
-│   bees running (of 4)                4          +3                       │
-│   dispatches finished                387        -3                       │
-│   candidates skipped                 198           =                     │
-│     fenced by parked paths           -                                   │
-│     claimed by parked dispatch       0             =                     │
-│     done but never closed            -                                   │
-│   hours 12: no bee working, percent  45         +1                       │
-│   send-backs looping with no ceiling 79            =                     │
-│   rows where one rule answers two ways 347           =                   │
+│ SWARM   value | change / the span it covers | a row says if it is older  │
+│   bees running (of 4)                10            = / 1m                │
+│   dispatches finished                709           = / 1m                │
+│   candidates skipped                 901          -1 / 1m                │
+│     missingBoundary 60.8%            548           = / 1m                │
+│      no boundary in the brief                                            │
+│     completed 15.6%                  141          +1 / 1m                │
+│      done but never closed                                               │
+│     claimed 11.0%                    99            = / 1m                │
+│      claimed by parked dispatch                                          │
+│     incompleteSpec 6.3%              57           -1 / 1m                │
+│     notFirst 4.0%                    36            = / 1m                │
+│     fileConflict 2.2%                20           -1 / 1m                │
+│      fenced by parked paths                                              │
+│   ROUND FAILURES, last 12h           0             = / 1m                │
+│   hours 12: no bee working, percent  30            = / 1m                │
+│   send-backs looping with no ceiling 5             = / 1m                │
+│      of 90 examined   measured 6h 12m ago - STALE                        │
+│   rows where one rule answers two w… 215           = / 1m                │
+│      from 1 pairs compared   measured 6h 12m ago - STALE                 │
 ├──────────────────────────────────────────────────────────────────────────┤
 │ WORK THIS ITERATION                                                      │
-│   ● make check declares 24 gates; CI ran 8             read the decl     │
-│   ● 3 more wired after measuring; 8 gates in 10s       PR #478           │
-│   ● t27-rings deliberately NOT wired, reason written   would skip        │
-│   ● tri unwired reads the declaration, not names       271 pass          │
-│   ● merge + deploy - seven PRs                         operator's act    │
-├──────────────────────────────────────────────────────────────────────────┤
-│ ANOMALIES   found by this iteration, against its own work                │
-│   ! my word list called 11 of 13 declared gates 'not-a-gate' - they name…│
-│   ! t27-rings runs a Verilog simulation and my audit dismissed it by name│
-│   ! 4 gates reported 'No rule to make target'; the worktree had LOST the…│
-│   ! I nearly reported four broken gates from an impossible result        │
-│   ! the best gate in the suite is the one I refused to wire: it skips wh…│
-│   ! wiring a skipping gate manufactures the exact green I spent three ro…│
-├──────────────────────────────────────────────────────────────────────────┤
-│ THREE WAYS TO CONTINUE                                                   │
-│   1. deploy - seven PRs, the swarm still idle 46%                        │
-│   2. vendor or fetch t27c in CI so t27-rings can run for real            │
-│   3. the 8 remaining declared gates need a Mac: decide if a macOS job is…│
 ╰──────────────────────────────────────────────────────────────────────────╯

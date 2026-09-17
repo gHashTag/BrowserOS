@@ -152,6 +152,7 @@ QUEEN_CORE_FILES=(
 )
 mkdir -p "$QUEEN_CORE_DIR"
 if ! swiftc -parse-as-library -emit-module -emit-library -static \
+    -target arm64-apple-macosx14.0 \
     -module-name QueenCore \
     -emit-module-path "$QUEEN_CORE_DIR/QueenCore.swiftmodule" \
     -o "$QUEEN_CORE_DIR/libQueenCore.a" \

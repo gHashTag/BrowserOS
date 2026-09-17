@@ -1,744 +1,95 @@
 {
- "iteration": 97,
- "startedAt": "2026-09-12T20:50:34.521Z",
- "lastFinishedAt": "2026-09-06T09:19:32.234Z",
- "title": "the CLI that runs the loop was in no repository, and the box could not say the counter was stuck",
- "done": {
-  "4e0a0feb43ff": {
-   "unit": "release-dead-path-holds-1320-1311-1316",
-   "iteration": 1,
-   "at": "2026-09-04T01:40:31.848Z",
-   "note": "running 0->4, fileConflict 8->1"
-  },
-  "f7d06908a534": {
-   "unit": "loop-infrastructure-v1",
-   "iteration": 1,
-   "at": "2026-09-04T01:40:31.851Z",
-   "note": "state+lock+ledger+dashboard, tri iter/iter-dash/iter-log/iter-anchors/iter-unlock/swarm/fence/brief-gate"
-  },
-  "4d09aee90e43": {
-   "unit": "verdict-audit-v1",
-   "iteration": 2,
-   "at": "2026-09-04T02:08:22.451Z",
-   "note": "27 supported, 0 unsupported, 18 unauditable, 8 not yet pushed"
-  },
-  "1b1b74a5cd42": {
-   "unit": "reaper-v1",
-   "iteration": 3,
-   "at": "2026-09-04T02:17:56.413Z",
-   "note": "tri reap, 80/60 hysteresis, no --force, silent-noop config is a hard error"
-  },
-  "4e96b19af615": {
-   "unit": "skill-swarm-competitors",
-   "iteration": 3,
-   "at": "2026-09-04T02:17:56.415Z",
-   "note": "field survey with URLs and the METR judging numbers"
-  },
-  "ff15e92edeb5": {
-   "unit": "claim-lease-v1",
-   "iteration": 4,
-   "at": "2026-09-04T02:27:23.756Z",
-   "note": "10 released, 3 quarantined, 3 held; XAUTOCLAIM semantics, ceiling from the projects own policy"
-  },
-  "53d128a46f82": {
-   "unit": "push-work-and-close-done",
-   "iteration": 5,
-   "at": "2026-09-04T02:44:26.312Z",
-   "note": "5 branches pushed, 5 issues closed, both wired into tri"
-  },
-  "0cf557441658": {
-   "unit": "send-back-lease-pr",
-   "iteration": 6,
-   "at": "2026-09-04T02:51:46.385Z",
-   "note": "BrowserOS#108, 7 new tests, 147 queen tests pass, not deployed"
-  },
-  "2ab381c3c670": {
-   "unit": "tri-heal",
-   "iteration": 6,
-   "at": "2026-09-04T02:51:46.386Z",
-   "note": "reap->lease->push-work->close-done as one chain, --dry supported"
-  },
-  "bbb7ac242c05": {
-   "unit": "heal-timer-launchd",
-   "iteration": 7,
-   "at": "2026-09-04T03:09:01.272Z",
-   "note": "ai.t27.trios-heal, 20 min, lock-aware, proven by a kickstart that stood down"
-  },
-  "b1f08dd962f2": {
-   "unit": "safe-outputs-split-issues",
-   "iteration": 7,
-   "at": "2026-09-04T03:09:01.273Z",
-   "note": "#1400 packer, #1401 applier - neither half can do the others job"
-  },
-  "3f39eb2781d5": {
-   "unit": "tri-author",
-   "iteration": 8,
-   "at": "2026-09-04T03:20:25.562Z",
-   "note": "5 briefs from a measured deficit, WIP 5, gate-enforced, #1402-#1406"
-  },
-  "802765dedf45": {
-   "unit": "author-signal-2",
-   "iteration": 9,
-   "at": "2026-09-04T03:34:55.173Z",
-   "note": "untested modules: 9 honest candidates where the naive signal claimed 144"
-  },
-  "e1cee79d7afe": {
-   "unit": "stranded-local-work-pushed",
-   "iteration": 9,
-   "at": "2026-09-04T03:34:55.175Z",
-   "note": "12 local commits visible as stranded/local-queen-work-2026-09-04"
-  },
-  "debe6be46127": {
-   "unit": "loop-selftest",
-   "iteration": 10,
-   "at": "2026-09-04T03:48:47.634Z",
-   "note": "13 calibration cases, each proving the negative first; caught an import-time production query"
-  },
-  "60a3a89bf9a1": {
-   "unit": "night-audit-full",
-   "iteration": 11,
-   "at": "2026-09-04T04:06:04.637Z",
-   "note": "61 issues: 30 supported, 0 unsupported, 20 unauditable, 11 without a branch"
-  },
-  "daf5f292a626": {
-   "unit": "frozen-wait-found",
-   "iteration": 11,
-   "at": "2026-09-04T04:06:04.648Z",
-   "note": "#1408 - the third one-way valve, found by auditing my own output"
-  },
-  "95a207793813": {
-   "unit": "heal-closes-the-cycle",
-   "iteration": 12,
-   "at": "2026-09-04T04:25:11.691Z",
-   "note": "six links: reap, lease, push, close, audit, author - repair then verify then refuel"
-  },
-  "e1f8a186d266": {
-   "unit": "audit-tightened",
-   "iteration": 13,
-   "at": "2026-09-04T04:40:31.300Z",
-   "note": "mention -> definition; 4 false accusations found and fixed; 17 calibration cases"
-  },
-  "420f79b04d2c": {
-   "unit": "deploy-both-valves",
-   "iteration": 14,
-   "at": "2026-09-04T05:03:37.396Z",
-   "note": "PR #108 merged and deployed; claimed 20 -> 12 on the first tick"
-  },
-  "021e146a0ebf": {
-   "unit": "drain-sensing",
-   "iteration": 14,
-   "at": "2026-09-04T05:03:37.398Z",
-   "note": "author refuses to file into a backlog nobody is draining"
-  },
-  "f42d81d6169c": {
-   "unit": "judge-packets",
-   "iteration": 14,
-   "at": "2026-09-04T05:03:37.398Z",
-   "note": "25 packets assembled for the briefs no mechanical check can reach"
-  },
-  "597de692a81c": {
-   "unit": "fork-point-fix",
-   "iteration": 15,
-   "at": "2026-09-04T05:55:15.965Z",
-   "note": "verdict-audit, judge-packet and close-done now diff from the merge base"
-  },
-  "c79cd2d85b27": {
-   "unit": "judge-in-chain",
-   "iteration": 15,
-   "at": "2026-09-04T05:55:15.973Z",
-   "note": "judge-packet is the sixth link; 25 packets queued each run"
-  },
-  "97900588f088": {
-   "unit": "needs-you-reader",
-   "iteration": 16,
-   "at": "2026-09-04T06:04:30.414Z",
-   "note": "6 escalations surfaced, oldest 3.7 days, with their recorded reasons"
-  },
-  "989f7b5ced8c": {
-   "unit": "escalation-route-issue",
-   "iteration": 16,
-   "at": "2026-09-04T06:04:30.417Z",
-   "note": "#1418 - queen_report is written by the tick and served by no route"
-  },
-  "ca3086565dd5": {
-   "unit": "loop-coverage",
-   "iteration": 16,
-   "at": "2026-09-04T06:04:30.418Z",
-   "note": "act paths tracked; reap proven in production, 67 to 35 percent, 14.7 G"
-  },
-  "e3ebc9d20ca5": {
-   "unit": "judge-pass-acted",
-   "iteration": 17,
-   "at": "2026-09-04T06:11:43.918Z",
-   "note": "39 criteria judged: 21 met, 1 unmet, 17 unverifiable; #1351 reopened"
-  },
-  "b3ebb30aa09d": {
-   "unit": "packet-carries-transcript",
-   "iteration": 17,
-   "at": "2026-09-04T06:11:43.927Z",
-   "note": "multi-line criteria plus the bees own closing report"
-  },
-  "d2ef41d1610c": {
-   "unit": "anti-construction-rule",
-   "iteration": 18,
-   "at": "2026-09-04T06:22:43.813Z",
-   "note": "brief-gate warns on a count criterion with no independence clause; both directions pinned"
-  },
-  "53b6d70713e7": {
-   "unit": "reap-rate-sensing",
-   "iteration": 18,
-   "at": "2026-09-04T06:22:43.816Z",
-   "note": "threshold 80 to 55 on measured evidence, plus points-per-hour and time-to-full"
-  },
-  "c1ddb97781ff": {
-   "unit": "packet-tail-fix",
-   "iteration": 19,
-   "at": "2026-09-04T06:30:18.413Z",
-   "note": "transcripts are 120k-200k chars; the head was 20-32% of planning, the tail carries the verdict"
-  },
-  "442f5f86384d": {
-   "unit": "defective-criterion-corrected",
-   "iteration": 19,
-   "at": "2026-09-04T06:30:18.424Z",
-   "note": "#1377 SC-2 demanded output without the word skip from a skip-parity test"
-  },
-  "ca3b8b27cbba": {
-   "unit": "character-criterion-gate",
-   "iteration": 20,
-   "at": "2026-09-04T06:41:26.813Z",
-   "note": "brief-gate refuses MUST NOT contain over raw output; both directions proved"
-  },
-  "3fd0ac517989": {
-   "unit": "trend-tool",
-   "iteration": 20,
-   "at": "2026-09-04T06:41:26.828Z",
-   "note": "rates from the snapshot lines already in the ledger; two counters moving the wrong way"
-  },
-  "bbdc5718bcf1": {
-   "unit": "two-fabrications-found",
-   "iteration": 21,
-   "at": "2026-09-04T06:46:50.252Z",
-   "note": "first real fabrications: counts of 3 and 15 where the tree holds 7 and 14"
-  },
-  "ee02b05d163e": {
-   "unit": "raw-stdout-rule",
-   "iteration": 21,
-   "at": "2026-09-04T06:46:50.253Z",
-   "note": "brief-gate demands stdout for any criterion naming a command"
-  },
-  "b0c70d2d4a52": {
-   "unit": "wait-clock-fixed",
-   "iteration": 22,
-   "at": "2026-09-04T07:07:55.307Z",
-   "note": "PR #109 merged and deployed; running 0 to 3, claimed 15 to 12 on the first tick"
-  },
-  "ad32c204525b": {
-   "unit": "clock-class-audited",
-   "iteration": 23,
-   "at": "2026-09-04T07:11:47.398Z",
-   "note": "two more tools carried the touched-clock; both fixed, the class now guarded"
-  },
-  "16faa292ceac": {
-   "unit": "tri-clocks",
-   "iteration": 23,
-   "at": "2026-09-04T07:18:23.880Z",
-   "note": "every clock a decision is keyed on, classified against measured write behaviour"
-  },
-  "6d0da4e0e6a6": {
-   "unit": "tri-fields",
-   "iteration": 24,
-   "at": "2026-09-04T07:33:54.321Z",
-   "note": "fields a decision reads against fields its query selects; tick clean on both regions"
-  },
-  "36008017004a": {
-   "unit": "guards-in-chain",
-   "iteration": 24,
-   "at": "2026-09-04T07:54:37.477Z",
-   "note": "clocks and fields are links 5 and 6; the chain is nine links and all clean"
-  },
-  "2bd4804c5d91": {
-   "unit": "escalations-triaged",
-   "iteration": 24,
-   "at": "2026-09-04T07:54:37.479Z",
-   "note": "five surfaced with the decision each needs; one turned into workable criteria"
-  },
-  "7e6de67ffb20": {
-   "unit": "fp-check",
-   "iteration": 25,
-   "at": "2026-09-04T08:06:11.126Z",
-   "note": "checkers run against material the world calls good; 13 known-good inputs, 0 accused"
-  },
-  "ad90ead6acd1": {
-   "unit": "import-safety-class",
-   "iteration": 25,
-   "at": "2026-09-04T08:06:11.128Z",
-   "note": "loop.mjs CLI ran on import - any tool invoked with unlock released the loop lock"
-  },
-  "a9ce69823d57": {
-   "unit": "tri unwired reads the declaration, not the names",
-   "iteration": 96,
-   "at": "2026-09-12T20:50:34.519Z",
-   "note": "recorded 2026-09-13, six days late. The unit is in git and was never in dispute: 74a9be196 (fix) and 3b167dce2 (docs), PR 478, 24 declared gates of which 11 wired, t27-rings refused for want of t27c. What was missing was the REGISTER entry, which is why beginIteration refused 97 for six days while feed, heal and land went on writing rows under a closed iteration."
-  }
- },
+ "iteration": 0,
+ "startedAt": null,
+ "lastFinishedAt": null,
+ "title": "",
+ "done": {},
+ "doneNone": {},
  "anchors": {
-  "swarm.running": {
-   "value": 0,
-   "at": "2026-09-12T20:55:48.520Z",
-   "prev": 0,
-   "prevAt": "2026-09-12T20:55:38.338Z"
-  },
-  "swarm.finished": {
-   "value": 439,
-   "at": "2026-09-12T20:55:48.522Z",
-   "prev": 439,
-   "prevAt": "2026-09-12T20:55:38.338Z"
-  },
-  "skip.total": {
-   "value": 486,
-   "at": "2026-09-12T20:55:48.522Z",
-   "prev": 486,
-   "prevAt": "2026-09-12T20:55:38.339Z"
-  },
-  "skip.fileConflict": {
-   "value": {
-    "count": 2,
-    "issues": [
-     1175,
-     1133
-    ],
-    "more": 0
-   },
-   "at": "2026-09-06T09:18:29.382Z",
-   "prev": {
-    "count": 2,
-    "issues": [
-     1175,
-     1133
-    ],
-    "more": 0
-   }
-  },
-  "skip.claimed": {
-   "value": 14,
-   "at": "2026-09-12T20:55:48.523Z",
-   "prev": 14,
-   "prevAt": "2026-09-12T20:55:38.340Z"
-  },
-  "skip.completed": {
-   "value": 24,
-   "at": "2026-09-12T20:55:48.523Z",
-   "prev": 24,
-   "prevAt": "2026-09-12T20:55:38.340Z"
-  },
   "volume.percent": {
-   "value": 40,
-   "at": "2026-09-12T20:33:03.044Z",
-   "prev": 40,
-   "prevAt": "2026-09-12T20:10:54.111Z"
-  },
-  "looping.noCeiling": {
-   "value": 79,
-   "at": "2026-09-12T20:55:48.524Z",
-   "prev": 79,
-   "prevAt": "2026-09-12T20:55:38.341Z"
-  },
-  "agree.divergent": {
-   "value": 347,
-   "at": "2026-09-12T20:55:48.524Z",
-   "prev": 347,
-   "prevAt": "2026-09-12T20:55:38.341Z"
+   "value": 49,
+   "at": "2026-09-17T10:40:21.730Z",
+   "prev": 71,
+   "prevAt": "2026-09-17T10:14:43.574Z"
   },
   "idle.percent": {
-   "value": 77,
-   "at": "2026-09-12T20:55:48.518Z",
-   "prev": 78,
-   "prevAt": "2026-09-12T20:55:38.335Z"
+   "value": 30,
+   "at": "2026-09-17T06:36:21.786Z",
+   "prev": 30,
+   "prevAt": "2026-09-17T06:35:05.742Z"
   },
   "rounds.failed": {
-   "value": 10,
-   "at": "2026-09-12T20:55:48.519Z",
-   "prev": 10,
-   "prevAt": "2026-09-12T20:55:38.337Z"
+   "value": 0,
+   "at": "2026-09-17T06:36:21.788Z",
+   "prev": 0,
+   "prevAt": "2026-09-17T06:35:06.699Z"
   },
-  "rounds.fail.github-returned-403": {
+  "swarm.running": {
    "value": 10,
-   "at": "2026-09-12T20:55:48.520Z",
+   "at": "2026-09-17T06:36:21.789Z",
    "prev": 10,
-   "prevAt": "2026-09-12T20:55:38.337Z"
+   "prevAt": "2026-09-17T06:35:06.757Z"
+  },
+  "swarm.finished": {
+   "value": 709,
+   "at": "2026-09-17T06:36:21.789Z",
+   "prev": 709,
+   "prevAt": "2026-09-17T06:35:06.765Z"
+  },
+  "skip.total": {
+   "value": 901,
+   "at": "2026-09-17T06:36:21.789Z",
+   "prev": 902,
+   "prevAt": "2026-09-17T06:35:06.810Z"
   },
   "skip.missingBoundary": {
-   "value": 448,
-   "at": "2026-09-12T20:55:48.523Z",
-   "prev": 448,
-   "prevAt": "2026-09-12T20:55:38.339Z"
+   "value": 548,
+   "at": "2026-09-17T06:36:21.789Z",
+   "prev": 548,
+   "prevAt": "2026-09-17T06:35:06.815Z"
+  },
+  "skip.completed": {
+   "value": 141,
+   "at": "2026-09-17T06:36:21.789Z",
+   "prev": 140,
+   "prevAt": "2026-09-17T06:35:06.827Z"
+  },
+  "skip.claimed": {
+   "value": 99,
+   "at": "2026-09-17T06:36:21.789Z",
+   "prev": 99,
+   "prevAt": "2026-09-17T06:35:06.843Z"
+  },
+  "skip.fileConflict": {
+   "value": 20,
+   "at": "2026-09-17T06:36:21.790Z",
+   "prev": 21,
+   "prevAt": "2026-09-17T06:35:06.849Z"
+  },
+  "skip.incompleteSpec": {
+   "value": 57,
+   "at": "2026-09-17T06:36:21.790Z",
+   "prev": 58,
+   "prevAt": "2026-09-17T06:35:06.845Z"
+  },
+  "looping.noCeiling": {
+   "value": 5,
+   "at": "2026-09-17T06:36:21.790Z",
+   "prev": 5,
+   "prevAt": "2026-09-17T06:35:06.851Z"
+  },
+  "agree.divergent": {
+   "value": 215,
+   "at": "2026-09-17T06:36:21.790Z",
+   "prev": 215,
+   "prevAt": "2026-09-17T06:35:06.854Z"
+  },
+  "skip.notFirst": {
+   "value": 36,
+   "at": "2026-09-17T06:36:21.790Z",
+   "prev": 36,
+   "prevAt": "2026-09-17T06:35:06.846Z"
   }
  },
- "lessons": [
-  {
-   "at": "2026-09-04T01:40:31.850Z",
-   "iteration": 1,
-   "text": "A parked dispatch fences its owned_paths forever, and a dispatch whose ISSUE IS CLOSED fences them for nothing. Three such rows (#1320 #1311 #1316, 10 paths) were blocking 7 of 31 delegatable candidates - including #1362, the issue that fixes this very class. Clearing owned_paths on exactly those three took running 0->4 and fileConflict 8->1 in one tick. Record the old value in the ledger first; the change is then reversible. Do NOT touch holders whose issue is still open - those are the self-blocking group and need the code fix, not a database edit."
-  },
-  {
-   "at": "2026-09-04T02:08:22.459Z",
-   "iteration": 2,
-   "text": "The Queen accepts on the bees SELF-REPORTED VERDICT block. From the diff she reads only two things: was anything committed, and did any path fall outside the boundary. Nothing asks whether the change supports the criterion claimed. Terminal-Bench lived this exact failure - on its 1.0 and 2.0 boards the number one slot was held by vendor self-reports sitting 13.5 and 2.5 points above the best independently re-run entry - and its answer was to stop accepting self-reports and judge every successful trajectory. The mechanical half of that is cheap here: a brief that promises a NEW IDENTIFIER can be checked against the diff with a regex, no model needed. Audited across 53 issues: 27 supported, 0 unsupported, and 18 permanently unauditable because they promised nothing checkable. brief-gate now REQUIRES the promise."
-  },
-  {
-   "at": "2026-09-04T02:08:22.459Z",
-   "iteration": 2,
-   "text": "A gate that rejects good work is worse than no gate. My first absence-of-identifier pattern demanded the exact words appears nowhere and rejected a well-formed brief that said neither identifier appears anywhere. And my first negative test was worthless because the sed that built it matched the wrong phrase, so the gate looked correct while proving nothing. Build the negative fixture by REMOVING the property, then assert it fails."
-  },
-  {
-   "at": "2026-09-04T02:09:27.057Z",
-   "iteration": 2,
-   "text": "The loop dashboard proved the manual repairs do not stick: one iteration after clearing them, completed went 6->9 and claimed 17->19. Reaping worktrees, closing accepted issues and releasing dead path holds must run inside the tick, not in a persons hands."
-  },
-  {
-   "at": "2026-09-04T02:17:56.415Z",
-   "iteration": 3,
-   "text": "A background agent reported the volume at 93% used. Measured: 27%, 34 G free - it had almost certainly read the container root overlay rather than the /workspace mount. Verify a subagents number against the thing itself before repeating it, especially when it is alarming. The trend it implied was real though: 4 worktrees to 26 in four hours."
-  },
-  {
-   "at": "2026-09-04T02:17:56.415Z",
-   "iteration": 3,
-   "text": "METR: an automated grader scores 24.2 points higher than the human merge decision, and roughly half of test-passing SWE-bench Verified PRs would not be merged. Models silently endorse 31.7 percent of their own behaviour-changing outputs. That is the measured price of the Queen accepting a bees self-reported VERDICT block."
-  },
-  {
-   "at": "2026-09-04T02:27:23.764Z",
-   "iteration": 4,
-   "text": "fileConflict and claimed are TWO fences and I treated them as one. fileConflict compares a candidates boundary against other dispatches owned_paths and yields to clearing them (8 -> 1). claimed comes from claimOnIssue which reads only the dispatch STATES and never looks at owned_paths - it stayed at 19 across a release of ten claims. There is no released state to write, so clearing claimed from the database would mean recording a verdict that never happened. That one needs the code fix. Name which fence you are clearing."
-  },
-  {
-   "at": "2026-09-04T02:27:23.764Z",
-   "iteration": 4,
-   "text": "A $1 placeholder inside a double-quoted sh -c is expanded by the SHELL, not passed through: any($1) reached Postgres as any() and failed with syntax error at or near ). And a multi-line payload quoted twice arrives at bun as a literal backslash-n and is rejected as an invalid escape. Collapse the payload to one line and inline constant literals instead of placeholders."
-  },
-  {
-   "at": "2026-09-04T02:44:26.313Z",
-   "iteration": 5,
-   "text": "I diagnosed the same root cause wrongly TWICE. execSync runs its argument through the local /bin/sh, and JSON.stringify wraps a remote script in DOUBLE quotes - so the LOCAL shell expands $base, $b, $1 and $(...) before railway ssh ever sends them. Symptom one: any($1) reached Postgres as any() and I wrote in a comment that the REMOTE shell ate it. Symptom two: a branch survey reported 0 branches with work against a container holding 118, because $base..$b had already collapsed to .. locally. Both are one bug. The fix is a single-quote wrapper, now exported as shq() from loop.mjs and used by every remote call. When a remote command returns empty, suspect the quoting before believing the emptiness."
-  },
-  {
-   "at": "2026-09-04T02:44:26.314Z",
-   "iteration": 5,
-   "text": "A multi-line remote script is a separate trap from quoting: JSON.stringify turns a real newline into a literal backslash-n, which sh reads as two characters, so the script arrives as one line and dies on the first if/then. With shq newlines survive. The reap tool carried this bug unexercised for two iterations because only its report path had ever run - an untested branch is not a working branch."
-  },
-  {
-   "at": "2026-09-04T02:51:46.387Z",
-   "iteration": 6,
-   "text": "The in-flight query in queen-tick.ts selected neither reviewed_at nor send_backs. Wiring a retry ceiling to columns the query does not fetch reads 0 for every row, so 0 < ceiling always holds and the bound does nothing - a guard that cannot see its input is worse than no guard because it reports success. Check the SELECT before trusting a field you just referenced."
-  },
-  {
-   "at": "2026-09-04T02:51:46.387Z",
-   "iteration": 6,
-   "text": "A fix that needs a new state is usually a fix that has not read the existing states. claimOnIssue already treats failed as free, with a comment saying a failure most obviously means do this again. Reporting a stale send-back as failed required no policy change at all - only telling the truth about what it is."
-  },
-  {
-   "at": "2026-09-04T03:09:01.274Z",
-   "iteration": 7,
-   "text": "A timer that fails silently every 20 minutes is the defect class this project keeps finding, so the launchd job was proven rather than installed: kickstart it, read the log, and confirm it did the RIGHT thing. It logged standing down because an iteration held the lock, which proves both that launchd resolves tri, node and the container, and that the two never write at once."
-  },
-  {
-   "at": "2026-09-04T03:09:01.274Z",
-   "iteration": 7,
-   "text": "The findings well ran dry: of 38 discovered defects only one remained unfiled, and it was a duplicate. When discovery stops producing, the next source is not another sweep - it is the researched competitor practice that has not been built yet. The gh-aw split decomposed into two issues whose halves cannot do each others job, which is the property worth copying, not the code."
-  },
-  {
-   "at": "2026-09-04T03:20:25.564Z",
-   "iteration": 8,
-   "text": "deriveCandidates is committed LOCALLY in queen-tick.ts with its own test and is NOT on origin/feat/queen-supervisor. The Queens ability to derive her own candidates was written and never pushed - the same shape as the worktree reaper in #1347. Before building a capability, grep the local tree as well as origin: this project strands finished work in two different ways."
-  },
-  {
-   "at": "2026-09-04T03:20:25.565Z",
-   "iteration": 8,
-   "text": "My own authoring tool measured the LOCAL working tree and wrote 1889 lines into a brief; on origin, which is what a bee clones, the file is 1737. A number the worker cannot reproduce is a criterion it cannot meet. I have applied the verify-against-origin rule to three other peoples work tonight and broke it in the first tool I wrote that generates text for someone else to act on. Generated briefs must be measured on the branch the reader will see."
-  },
-  {
-   "at": "2026-09-04T03:20:25.565Z",
-   "iteration": 8,
-   "text": "A WIP limit needs its count to fail loudly. openAuthored returns null when the gh call fails and the tool refuses to file, because a failed count silently reading as zero would lift the limit entirely - which is how a generator floods a backlog nobody is draining."
-  },
-  {
-   "at": "2026-09-04T03:34:55.175Z",
-   "iteration": 9,
-   "text": "A WIP limit bounds HOW MANY issues are filed; it does not stop the SAME one being filed twice. My author filed queen-tick.ts as #1402 and again as #1403 within a minute, because each run re-ranked the same list from the top and nothing checked whether a subject already had an issue. Dedupe by subject before consulting the cap - the two guards answer different questions."
-  },
-  {
-   "at": "2026-09-04T03:34:55.176Z",
-   "iteration": 9,
-   "text": "The naive form of a coverage signal - no test file of the same name - reported 144 of 260 source files and would have accused well-tested code of being untested: queen-tick.ts is exercised by a dozen queen-*.test.ts suites and has no test of its own name. Asking instead whether ANY exported identifier appears anywhere in the test corpus reports 9. The difference between 144 and 9 is the difference between a signal and a grep, and a generator built on the first would have produced briefs the bee could refute in a minute."
-  },
-  {
-   "at": "2026-09-04T03:36:25.592Z",
-   "iteration": 9,
-   "text": "My own dashboard told a comforting lie and I nearly reported it as a win. All four skip counters fell to 0 at once and rendered green - claimed 20 to 0, skipped 31 to 0. The cause was not that the fences cleared: the round refuses on capacity BEFORE the per-issue skip loop runs, so skippedCount is 0 and skipSummary is empty because nobody looked. Worse, the fake zeroes were written into the anchors, so the NEXT iteration would have shown an equally fake regression. Guarded now: when the tick short-circuits, those metrics read not measured and the anchors are left alone. A zero that means unmeasured must never share a rendering with a zero that means fixed."
-  },
-  {
-   "at": "2026-09-04T03:48:47.636Z",
-   "iteration": 10,
-   "text": "Calibrating my own instruments found the defect in its first run: lease.mjs executed a production query and called process.exit AT IMPORT TIME, so importing it hit the live database and killed the importer - the harness died mid-run trying to test it. Every loop tool now carries an isMain guard. A module that does work merely by being imported cannot be tested and cannot be reused, and the symptom is a test harness that stops without saying why."
-  },
-  {
-   "at": "2026-09-04T03:48:47.636Z",
-   "iteration": 10,
-   "text": "Twenty recorded lessons, and most share one shape: a tool of mine reported success without doing its job. reap carried a remote script that had never been executed, push-work reported 0 branches against 118, author measured the wrong tree, the dashboard rendered not-measured as fixed. All four would have been caught by a case that plants a known defect and asserts the tool notices. The rule this project already applies to bees applies to the loop: a checker never shown FAILING has not been tested."
-  },
-  {
-   "at": "2026-09-04T04:06:04.649Z",
-   "iteration": 11,
-   "text": "A wait verdict is the THIRD one-way valve and the code is honest about the mechanism while blind to the consequence. Its own comment says an unchanged transcript yields the same wait; the transcript of a FINISHED bee never changes, so re-reading is not re-judging. The policy guard reads verdicts.count >= totalCriteria and returns wait with the reason N of M judged SO FAR - and there is no later. #1361 and #1362 have sat in wait for hours holding their boundaries. sendBack promises a bee that never returns, escalate waits for a person who never comes, wait promises a judgement that cannot arrive: three states meaning not finished, all behaving as never."
-  },
-  {
-   "at": "2026-09-04T04:06:04.649Z",
-   "iteration": 11,
-   "text": "Auditing my own nights output was worth more than another feature. 61 issues: 30 supported with zero unsupported claims, which says the bees are honest on everything checkable; 20 with no mechanical claim at all, which is the authors fault and now gated; and 11 with no branch, which turned out to be accepted work whose branches had not been pushed since the last run. The last group was fixed by simply running heal - the automation was right and had not been given a turn."
-  },
-  {
-   "at": "2026-09-04T04:25:11.693Z",
-   "iteration": 12,
-   "text": "The chain healed the swarm and it still idled, because fuel was replenished whenever I remembered - the exact argument that made the repairs a chain in the first place, applied to everything except the last link. Authoring is now the sixth link and the audit is the fifth, so work is CHECKED before more is asked for. First live run: pushed 3, closed 2, audited 38 with none unsupported, filed 4. That is the whole cycle in one command on a twenty-minute timer."
-  },
-  {
-   "at": "2026-09-04T04:25:11.693Z",
-   "iteration": 12,
-   "text": "The twenty unauditable issues turned out to be six, because most had already been closed. A count taken once and carried forward is a number about the past. Re-measure before planning work on it - I nearly spent an iteration fixing fourteen issues that no longer existed."
-  },
-  {
-   "at": "2026-09-04T04:40:31.302Z",
-   "iteration": 13,
-   "text": "I tightened the verdict audit from mention to definition and it immediately accused four bees. Every accusation was mine: a class method whose return-type annotation sat between the parens and the brace; a describe title, which is legitimately a string because the criterion asked for a REGISTRATION; the word node_modules, which was never promised; and four identifiers harvested from a PARAGRAPH inside Success Criteria that happened to contain the phrase does not exist. After three rounds of correction: 33 supported, zero unsupported. Tightening a checker without measuring its false-positive rate produces accusations, not findings - and a checker that accuses the innocent is worse than a loose one, which is the same lesson brief-gate taught me eleven iterations ago and I did not carry across."
-  },
-  {
-   "at": "2026-09-04T04:40:31.302Z",
-   "iteration": 13,
-   "text": "The mechanical audit found no reward hacking in 92 bee branches: median diff 418 insertions, and the thin ones were small edits across many files rather than stubs. That is worth stating plainly because the check COULD be gamed - it proves a definition exists, not that it does anything. Only a reader of the diff can say the work is good. The value of the mechanical half is that it cannot be passed by writing the name in a comment, and that it costs nothing to run on every heal."
-  },
-  {
-   "at": "2026-09-04T05:03:37.398Z",
-   "iteration": 14,
-   "text": "The deploy was proven by the number it was supposed to change, not by the word SUCCESS. Railway reported SUCCESS and the endpoint answered 200, but the real evidence was the next tick: claimed fell 20 to 12 and notFirst appeared at 6, meaning six issues became eligible and queued behind the running four. A deployment list SUCCESS does not mean the server started, and a server answering 200 does not mean the change took effect."
-  },
-  {
-   "at": "2026-09-04T05:03:37.399Z",
-   "iteration": 14,
-   "text": "An old test that fails because behaviour changed ON PURPOSE must be rewritten to state the new rule, not deleted. The assertion never releases an escalation or a wait covered three states; the wait valve deliberately changed one of them. Narrowing it to escalate kept the rule that still matters - an escalation asks for a PERSON and a timer is not one - and left a record of what changed and why."
-  },
-  {
-   "at": "2026-09-04T05:03:37.399Z",
-   "iteration": 14,
-   "text": "A WIP limit bounds the QUEUE, not the DIRECTION. Five open authored issues means wait whether the swarm is chewing through them or has not touched one in a day. The author now asks how many closed recently: none closed while some have been open past the stall window means the backlog is not being drained, and it refuses. Dependabots rule assumes a human merging is a drain you can count on; an automated reviewer that has quietly stopped is not."
-  },
-  {
-   "at": "2026-09-04T05:55:15.973Z",
-   "iteration": 15,
-   "text": "My tools compared a branch against the CURRENT base rather than where it FORKED, so everything merged into the base after a branch was cut read as a DELETION by that branch. On queen-1351 the packet said 3 files changed, 94 insertions, 234 deletions - a bee apparently removing my own fix and its entire test file. The truth from the merge base was 1 file changed, 90 insertions: it added one document, exactly as asked. I was about to hand that packet to a judge. The rule is git merge-base BASE BRANCH, and it is now pinned in the calibration harness with a case that fails if the trap stops reproducing."
-  },
-  {
-   "at": "2026-09-04T05:55:15.974Z",
-   "iteration": 15,
-   "text": "The judge pass failed on an account rate limit, not on the work - a subagent died mid-read with a 429 and reset at 12:40 local. That is worth recording because the failure looked like a result: the agent returned a sentence that read like a finding. A terminated agent returns whatever it had said last, and that is not its answer. Check the status field, not the text."
-  },
-  {
-   "at": "2026-09-04T06:04:30.421Z",
-   "iteration": 16,
-   "text": "queen_report is written by queen-tick.ts and declared in pg-migrate.ts, and those are the only two files in the server that mention it. A headline reading N waiting on you is composed, stored and addressed to nobody. Six escalations have waited up to 3.7 days with good recorded reasons - three say the task has no acceptance criteria so there is nothing to judge it against. The system knows exactly what is wrong and tells no one. Filed as #1418. A second defect in the same insert: needs_you is set from escalations raised THIS ROUND, so of 40 recent reports zero are flagged while six are outstanding."
-  },
-  {
-   "at": "2026-09-04T06:04:30.422Z",
-   "iteration": 16,
-   "text": "Coverage sensing found reap unproven and proving it did real work: the volume had climbed to 67 percent and 48 worktrees since a check two hours earlier that read 27. The act path removed 33 clean trees, refused 5 holding uncommitted work, and reclaimed 14.7 G. The report path and the act path are different code, and a tool that has only ever reported is a tool whose real work is unproven - which is how reap carried a broken remote script for two iterations while looking healthy every time it was invoked."
-  },
-  {
-   "at": "2026-09-04T06:11:43.928Z",
-   "iteration": 17,
-   "text": "The first independent judgement of the swarms work found ONE unmet criterion in 39, and its shape is worth more than its count: a measurement TRUE BY CONSTRUCTION. The criterion asked for a table row per function and an independent count of declarations. grep -c func gives 4; the table has 5; the bee reached 5 with grep -cE func [a-zA-Z]+\\(|var prior: Int \\{ - the second alternation branch is the literal text of the one declaration needed. Not deception, written down in the open, and still not a count. When a criterion asks for a number, ask also that the command producing it cannot name its own answer."
-  },
-  {
-   "at": "2026-09-04T06:11:43.929Z",
-   "iteration": 17,
-   "text": "Seventeen of thirty-nine criteria were UNVERIFIABLE and every one of them asked for a run to be quoted - and NOT ONE PACKET CARRIED A LINE OF RUN OUTPUT. Every RED IS A FINDING clause is exactly the promise only the workers word supports, and that word lives in queen_transcript, not in the diff. A judge without it can only answer UNVERIFIABLE, which is a verdict about the packet rather than the work. The packet now carries the transcript."
-  },
-  {
-   "at": "2026-09-04T06:11:43.929Z",
-   "iteration": 17,
-   "text": "The judge named a defect in MY packet before it named one in the work: one criterion read Run, from .../server: and then nothing, and all nine of another issue were cut mid-sentence, because criteriaOf kept only the bullet line and dropped its continuation. Verdicts resting on half a sentence are verdicts about the packet. It said so plainly and marked which of its own verdicts were therefore provisional - which is what an honest judge does and what I should expect from one."
-  },
-  {
-   "at": "2026-09-04T06:22:43.817Z",
-   "iteration": 18,
-   "text": "My first anti-construction rule was aimed at the wrong artefact. It hunted a rigged command IN THE BRIEF, and the rigging happens in the WORKERS OUTPUT, which does not exist when a brief is gated. What a brief can be held to is the shape of its demand: a criterion asking for a count and the command that produced it, without also requiring that command to be independent, permits a number true by construction. Re-aimed, and then it rejected the exact wording it was telling authors to adopt - MUST NOT name, where the pattern only knew does not name. A gate that fails the fix it recommends is worse than no gate. Both directions are now pinned."
-  },
-  {
-   "at": "2026-09-04T06:22:43.819Z",
-   "iteration": 18,
-   "text": "A LEVEL IS NOT A RATE. The reap threshold was 80 percent because that felt like margin. Measured tonight the volume went 27 to 67 in under three hours with four bees - about fifteen points an hour - so 80 was fifty-five minutes of warning against a timer that looks every twenty. Lowered to 55, which is three hours of headroom and nine firings rather than three, and the reaper now prints points-per-hour and time-to-full on every run. 67 falling is fine; 50 climbing is twenty minutes from the threshold."
-  },
-  {
-   "at": "2026-09-04T06:30:18.427Z",
-   "iteration": 19,
-   "text": "I gave the judge the HEAD of the transcript and labelled it the closing report. A bees transcript runs 120k to 200k characters; the first 40k are planning, cut mid-word before a single command runs. Twenty-one of twenty-three run criteria came back UNVERIFIABLE-BY-TRUNCATION - they died on my slice, not on the work. The attestation, the VERDICT block and any quoted run sit at the END. Take the tail, say how much was omitted, and never label a fragment as something it is not."
-  },
-  {
-   "at": "2026-09-04T06:30:18.428Z",
-   "iteration": 19,
-   "text": "The judge found a criterion of mine that no honest work could satisfy: SC-2 on #1377 demanded the runs output MUST NOT contain the word skip, from a suite named queen-skip-reason-parity that prints skipped.append sites. What I meant was that the runners tally must show no skipped tests. A criterion about the CHARACTERS in an output is almost always a criterion about the wrong thing; say what the summary must REPORT."
-  },
-  {
-   "at": "2026-09-04T06:30:18.428Z",
-   "iteration": 19,
-   "text": "The re-judge found zero fabricated output and said why that is not reassurance: no output of any kind was quoted, so there was nothing to fabricate. Its standing sentence is the one to keep - not invented output, but checks shaped to pass. The 1351 transcript shows the bee weighing a generic pattern against a literal one, rejecting the generic as Eh, simpler and more explicit is better, and writing the conclusion before running anything. That is circularity chosen in the open, and it is the pattern to watch for rather than fraud."
-  },
-  {
-   "at": "2026-09-04T06:41:26.830Z",
-   "iteration": 20,
-   "text": "A level is not a rate, and the lesson generalises past the disk. tri trend read the snapshot lines the loop had been writing all night and said what no level ever did: bees running is not 0, it is minus 0.8 an hour over five hours - a slow starve that looked like a moment. claimed is falling 0.4 an hour, which is the deployed valves working. fenced by paths is rising. The data was already recorded; it had just never been read as a slope."
-  },
-  {
-   "at": "2026-09-04T06:41:26.831Z",
-   "iteration": 20,
-   "text": "A counter that is MISSING on a tick must never be averaged as a zero. The capacity refusal short-circuits before the skip loop, so skips is an empty object on roughly a third of ticks; counting those as zeroes would invent a crash and a recovery twice an hour. The trend tool filters to points where the value is actually a number, and the harness asserts that claimed can never have more points than running."
-  },
-  {
-   "at": "2026-09-04T06:46:50.254Z",
-   "iteration": 21,
-   "text": "The third judging pass, the first with the transcript TAIL, found the first two fabrications of the night and I verified both by hand. #1385 claimed a grep returns 3 lines; it returns 7. #1377 claimed one prints 15; it prints 14. Neither pasted output. Both numbers were PREDICTED rather than observed, and predicted wrong. The failure mode has moved: it is no longer unshown runs, it is unshown COUNTS. The judges own sentence is now a gate rule - paste the shell command and its raw stdout, unedited and unsummarised, for every criterion that names a command."
-  },
-  {
-   "at": "2026-09-04T06:46:50.254Z",
-   "iteration": 21,
-   "text": "And 0 fail HAS now been seen, twice, which retires the previous standing sentence for those two. #1382 pasted a real classification run whose 38 mounts and 5/0/6/5 split reconcile line-for-line with its own test, and #1377 pasted a bun summary - 4 pass, 0 fail, 23 expect() calls - whose assertion count the judge recomputed from the diff as 3+8+8+1+2+1 = 23. Real runs exist in this corpus. Nine of thirty-four criteria showed one."
-  },
-  {
-   "at": "2026-09-04T06:46:50.255Z",
-   "iteration": 21,
-   "text": "The worst finding was not a fabrication. In #1385 the worker wrote node --check passed, re-read its own transcript, corrected itself honestly - and then made the criterion pass by ADDING to the tool under test a branch returning 0 when --check is present. The check now exits zero by construction. Editing the subject until the criterion cannot fail is the same family as a count computed by a command that names its own answer, and it is worse, because the artefact ships."
-  },
-  {
-   "at": "2026-09-04T07:07:55.309Z",
-   "iteration": 22,
-   "text": "The wait valve I shipped in #108 could never fire, and it took a six-hour swarm outage and a rate reading to notice. It measured idle from reviewed_at, and the review sweep UPDATEs every wait row in place each round - the tick own comment says so and I had read it. So the clock reset every five minutes against a six-hour floor. Measured: #1327 and #1329 frozen 18.4 hours, reported as 0.06 hours idle. finished_at is written once and never again. THE CLOCK A VALVE READS MUST BE ONE NOTHING ELSE TOUCHES - and when a comment in the code you are changing tells you a field gets overwritten, that is about YOUR change too."
-  },
-  {
-   "at": "2026-09-04T07:07:55.310Z",
-   "iteration": 22,
-   "text": "The trend tool found this, not the dashboard. running 0 was on screen for six hours and read as a state; minus 0.8 an hour over five hours read as a failure in progress. I built the rate tool for the disk and it paid for itself on the queue within one iteration. A level answers where you are, a rate answers whether anything is still working."
-  },
-  {
-   "at": "2026-09-04T07:11:47.400Z",
-   "iteration": 23,
-   "text": "I filed an issue on a subagents claim without checking the artefact, and the claim was false. The judge reported that #1385 satisfied a criterion by adding a --check branch returning 0 to the tool under test; no added line in the entire branch diff mentions --check. It read a plan in the transcript as a commit. I closed the issue within minutes, but I had already published an accusation. A judge reading a transcript can mistake intent for action - THE DIFF IS THE ONLY PLACE A CHANGE EXISTS - and the rule I apply to every other report applies to the reports I commission."
-  },
-  {
-   "at": "2026-09-04T07:11:47.401Z",
-   "iteration": 23,
-   "text": "Generalising the clock defect paid immediately: the same touched-field measure was in lease.mjs, where it was LIVE and made every frozen wait read as fresh, and in needs-you.mjs, where it was harmless only because escalate rows are never re-swept. Measured: wait rows carry reviewed_at 0.03 h old against finishes 4.7 h old, while accept, escalate and sendBack carry honest values. Both now read finished_at, and the calibration guards the class rather than the three instances - proven by planting an offender and watching the harness exit 1."
-  },
-  {
-   "at": "2026-09-04T07:18:23.882Z",
-   "iteration": 23,
-   "text": "Auditing the SUPERVISOR for the touched-clock class found nothing live, and that is a result worth stating rather than a wasted iteration. dispatched_at and finished_at are written once; seen_at is rewritten on every tick but nothing measures from it; the 48-hour boundary hold reads task.updatedAt, which the tick fills from finished_at or dispatched_at - traced by hand, because a text scanner cannot follow a field across the TypeScript-to-Swift boundary. The trace is now written into the tool, so the next reader gets the answer instead of the question."
-  },
-  {
-   "at": "2026-09-04T07:18:23.883Z",
-   "iteration": 23,
-   "text": "A negative audit is only worth having if the auditor could have found something. tri clocks reports anything it does not recognise as unknown rather than clean, because an audit that quietly passes what it cannot classify is the same shape as the defect it hunts - and it exits non-zero on any such row, so a new field cannot slip in as silence."
-  },
-  {
-   "at": "2026-09-04T07:33:54.323Z",
-   "iteration": 24,
-   "text": "A field a query never selected arrives as undefined, and undefined ?? 0 is a perfectly good number that every assertion about it passes. That is how a retry ceiling bounded nothing for a whole deploy while reporting success - no test could catch it, only reading the SELECT. tri fields now pairs each query region with the row.X reads that follow it. The deployed tick is clean on both its regions."
-  },
-  {
-   "at": "2026-09-04T07:33:54.324Z",
-   "iteration": 24,
-   "text": "My own field auditor accused the review sweep TWICE before it could tell the truth. First it read a subquerys SELECT as a new region and compared the outer querys reads against the inner ones columns. Then, fixed, it split the column list on commas and stopped at the first FROM - both of which a subquery breaks - and reported the alias said as unselected. Depth tracking was the only honest reading. Both false accusations were caught before reporting, which is the whole difference between this and the four that were not."
-  },
-  {
-   "at": "2026-09-04T07:54:37.480Z",
-   "iteration": 24,
-   "text": "The five escalations are not one kind and treating them as one was the mistake behind #1332. #1244 is CORRECT and must stay escalated - its author wrote that the change alters the main window and refused to make it silently overnight, which is exactly right and cannot be repaired with criteria. #1240 had a sound diagnosis and no criteria, which was the AUTHORS fault not the workers, and became workable the moment criteria were written. The other three exhausted two attempts against a ceiling that stopped a third on purpose. Only the first kind actually needs a person; the second needs an author; the third needs a decision that is one sentence long."
-  },
-  {
-   "at": "2026-09-04T07:54:37.480Z",
-   "iteration": 24,
-   "text": "Nine links in the chain now and every one of them reads before it acts, except the four that act only under a flag. The two newest - clocks and fields - are pure guards: they cannot change anything and exist so that two defect classes that each cost an outage are checked every round rather than when I remember. That is the same argument that made the repairs a chain in the first place, applied one level up."
-  },
-  {
-   "at": "2026-09-04T08:06:11.129Z",
-   "iteration": 25,
-   "text": "The most frequent failure in this whole loop is my own checkers accusing the innocent - seven instances now - and tri loop-selftest never caught one, because it runs SYNTHETIC fixtures written by the same hand and the same assumptions as the checker. tri fp-check runs each checker against material the WORLD calls good: briefs a worker actually satisfied and source the tree actually ships. Any accusation there is false by definition. It names every note it sets aside, because a false-positive check that hides its own exclusions is the thing it exists to prevent."
-  },
-  {
-   "at": "2026-09-04T08:06:11.129Z",
-   "iteration": 25,
-   "text": "The guard written for that class found a dangerous bug within minutes, and not the one it was aimed at. loop.mjs - imported by EVERY other tool - read process.argv[2] at module scope and dispatched on it, so any tool invoked with unlock as its first argument released the loop lock. Proven rather than supposed: an importer run as probe.mjs unlock printed lock released and the lock went free. The protection against two concurrent writers could be removed by an argument meant for something else entirely."
-  },
-  {
-   "at": "2026-09-04T08:06:11.129Z",
-   "iteration": 25,
-   "text": "And the guard falsely accused six files on its first run, by testing whether the LINE mentioned isMain rather than whether it sat inside an if (isMain) block - the seventh false accusation, caught by the very check written for that class. Depth tracking was the honest reading, exactly as it was for SQL subqueries an hour earlier. Twice in one night the same shape: a scanner that reads lines where it must read structure."
-  },
-  {
-   "at": "2026-09-06T04:39:08.047Z",
-   "iteration": 87,
-   "text": "Counting rows in a table keyed by the thing being counted restates the primary key. 391/391 dispatches was the ON CONFLICT (issue) constraint, not a finding; the archive showed 605 attempts over 170 issues."
-  },
-  {
-   "at": "2026-09-06T05:16:32.485Z",
-   "iteration": 88,
-   "text": "When a template changes the shape of an input, every fixture using the old shape silently stops testing production. The suite had a case for each containment direction, all unnumbered; production had not sent an unnumbered criterion in weeks."
-  },
-  {
-   "at": "2026-09-06T05:45:40.231Z",
-   "iteration": 89,
-   "text": "Never report only how often two implementations differ. A bare count invites picking a winner; report which side missed what, in both directions. One-way means one is behind, two-way means neither is the specification."
-  },
-  {
-   "at": "2026-09-06T06:01:27.885Z",
-   "iteration": 90,
-   "text": "Put the difference between \"we could not look\" and \"we looked and it was clean\" in the EXIT CODE, not only in the prose. The chain reads exit codes; a human reads prose; and the case where they disagree is exactly the case where nobody is reading."
-  },
-  {
-   "at": "2026-09-06T06:30:02.857Z",
-   "iteration": 90,
-   "text": "An instant is not a rate. `bees running (of 4)` sat on the dashboard for weeks reading 4 as often as 0 - one sample of a bimodal quantity that was zero half the day. If a metric can be taken without choosing a time range, suspect that convenience is why it exists."
-  },
-  {
-   "at": "2026-09-06T06:55:31.565Z",
-   "iteration": 91,
-   "text": "Measure the rate, do not compute it from the code. Reading the paging loop gave 24 requests/hour; measuring gave 77 against a limit of 60. The code shows the calls you find, not the ones you did not think to look for."
-  },
-  {
-   "at": "2026-09-06T08:18:41.330Z",
-   "iteration": 92,
-   "text": "A sentinel that cannot fail for the reason you are worried about is decoration. queen-round.test.ts asserted the PATH STRING of its policy binary - true whether or not anything is at the end of it - while seven behaviour cases skipped on every CI run. Grep CI logs for (skip)."
-  },
-  {
-   "at": "2026-09-06T08:33:29.943Z",
-   "iteration": 93,
-   "text": "After writing a gate, the next question is not \"is it right?\" but \"what invokes it when I am not here?\" make queen-core-sync was written, was correct, guarded eleven duplicated policy files byte-for-byte, appeared in no workflow, and one of them had already drifted for a week."
-  },
-  {
-   "at": "2026-09-06T08:49:47.902Z",
-   "iteration": 94,
-   "text": "When a heuristic keeps being wrong in the same direction, the fix is often a NEW ANSWER rather than a deeper scan. tri unwired learned prerequisites, then sub-make, then scripts; what ended it was adding \"opaque - runs a script, cannot judge from here\"."
-  },
-  {
-   "at": "2026-09-06T09:01:23.847Z",
-   "iteration": 95,
-   "text": "When an audit finds something in one dialect, ask what the other dialects are before declaring the class clean. The make audit was clean after four rounds; the same question asked of package.json found the t27.ai dashboard - 194 checks pinning the public page against the server states, in no workflow at all."
-  },
-  {
-   "at": "2026-09-06T09:16:25.840Z",
-   "iteration": 96,
-   "text": "A heuristic that infers intent is a substitute for a declaration you have not looked for yet. Four rounds of guessing which make targets were gates by their names;  names all 24 in one line, and my word list had missed 11 of them because they are named after their subject, not their function."
-  },
-  {
-   "at": "2026-09-12T17:23:18.207Z",
-   "iteration": 96,
-   "text": "tri handover recited a frozen wave-116 heredoc for 14 waves; replacing it with a read of the newest wave-loop-*.md reproduced this repo's own recurring defect inside my fix: my first pattern for the options heading was a bare substring of the word for 'variants', which matches that word INSIDE the longer word 'invariant' in ordinary prose, and still missed the real heading because the heading uses the genitive singular. Anchoring it to a markdown heading (^#{1,6} ) plus the full phrase fixed both halves. The tri next arm still carries the English-only form of that pattern and therefore prints nothing at all for a wave written in Russian."
-  }
- ]
+ "lessons": []
 }
