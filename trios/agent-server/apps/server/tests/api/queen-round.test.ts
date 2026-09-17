@@ -279,6 +279,15 @@ function finishedRow(sendBacks: number): FinishedRow {
   }
 }
 
+/**
+ * A branch whose diff read fine and holds no commit. Injected because a diff
+ * that FAILS is no longer read as an empty branch: it decides nothing.
+ */
+const EMPTY_BRANCH = {
+  committedFilesResult: async () => ({ ok: true as const, files: [] }),
+  laneCandidates: () => [],
+}
+
 /** The UPDATE that records a verdict, as opposed to the reaper's. */
 const reviewUpdate = (queries: Array<{ sql: string; params: unknown[] }>) =>
   queries.find(
@@ -290,7 +299,9 @@ const reviewUpdate = (queries: Array<{ sql: string; params: unknown[] }>) =>
 describe('queen round, send-backs counted', () => {
   it.if(present)('returns a first failure for a second pass', async () => {
     const { pool, queries } = roundPool([finishedRow(0)])
-    await runRound(pool, 'me', 7, { held: false }, [ISSUE])
+    await runRound(pool, 'me', 7, { held: false }, [ISSUE], {
+      review: EMPTY_BRANCH,
+    })
 
     const update = reviewUpdate(queries)
     expect(update?.params[1]).toBe('sendBack')
@@ -304,7 +315,9 @@ describe('queen round, send-backs counted', () => {
    */
   it.if(present)('names the pass it is actually asking for', async () => {
     const { pool, queries } = roundPool([finishedRow(1)])
-    await runRound(pool, 'me', 7, { held: false }, [ISSUE])
+    await runRound(pool, 'me', 7, { held: false }, [ISSUE], {
+      review: EMPTY_BRANCH,
+    })
 
     const update = reviewUpdate(queries)
     expect(update?.params[1]).toBe('sendBack')
@@ -321,7 +334,9 @@ describe('queen round, send-backs counted', () => {
     'escalates at the ceiling instead of returning for ever',
     async () => {
       const { pool, queries } = roundPool([finishedRow(2)])
-      await runRound(pool, 'me', 7, { held: false }, [ISSUE])
+      await runRound(pool, 'me', 7, { held: false }, [ISSUE], {
+        review: EMPTY_BRANCH,
+      })
 
       const update = reviewUpdate(queries)
       expect(update?.params[1]).toBe('escalate')
@@ -334,7 +349,9 @@ describe('queen round, send-backs counted', () => {
     'increments only on a send-back, in the statement that records it',
     async () => {
       const { pool, queries } = roundPool([finishedRow(0)])
-      await runRound(pool, 'me', 7, { held: false }, [ISSUE])
+      await runRound(pool, 'me', 7, { held: false }, [ISSUE], {
+        review: EMPTY_BRANCH,
+      })
 
       const update = reviewUpdate(queries)
       expect(update?.sql).toContain('send_backs = CASE')
@@ -351,7 +368,9 @@ describe('queen round, send-backs counted', () => {
    */
   it.if(present)('adds the column before the round reads it', async () => {
     const { pool, sql } = roundPool([finishedRow(0)])
-    await runRound(pool, 'me', 7, { held: false }, [ISSUE])
+    await runRound(pool, 'me', 7, { held: false }, [ISSUE], {
+      review: EMPTY_BRANCH,
+    })
 
     const added = sql().findIndex((s) =>
       s.includes('ADD COLUMN IF NOT EXISTS send_backs'),

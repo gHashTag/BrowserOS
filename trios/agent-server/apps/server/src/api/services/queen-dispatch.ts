@@ -991,7 +991,17 @@ function run(
   args: string[],
   cwd: string,
   timeoutMs = 120_000,
-): Promise<{ code: number; out: string }> {
+  /**
+   * Stop reading, and kill the group, once this many characters have
+   * arrived. Optional and additive: every existing caller reads its whole
+   * output exactly as before. The reviewer's patch needs it because the
+   * cut it applies afterwards protected the prompt and not the process - a
+   * bee that commits a few hundred MB of generated text would otherwise be
+   * held in full, several times over, inside the server every running bee
+   * streams through.
+   */
+  maxOutChars?: number,
+): Promise<{ code: number; out: string; capped?: boolean }> {
   const quoted = [command, ...args]
     .map((a) => `'${a.replaceAll("'", `'\\''`)}'`)
     .join(' ')
@@ -1006,12 +1016,28 @@ function run(
     let killTimer: ReturnType<typeof setTimeout> | undefined
     let hardTimer: ReturnType<typeof setTimeout> | undefined
 
+    let capped = false
     const finish = (code: number, extra = '') => {
       if (settled) return
       settled = true
       if (killTimer) clearTimeout(killTimer)
       if (hardTimer) clearTimeout(hardTimer)
-      resolve({ code, out: (out + extra).trim() })
+      resolve(
+        capped
+          ? { code: 0, out: out.slice(0, maxOutChars), capped: true }
+          : { code, out: (out + extra).trim() },
+      )
+    }
+    const stopAtCap = () => {
+      if (maxOutChars === undefined || capped || out.length < maxOutChars)
+        return
+      capped = true
+      try {
+        if (child.pid) process.kill(-child.pid, 'SIGKILL')
+      } catch {
+        child.kill('SIGKILL')
+      }
+      finish(0)
     }
 
     // SIGKILL on `su` alone leaves the git it spawned alive, and that grandchild
@@ -1038,10 +1064,14 @@ function run(
     )
 
     child.stdout.on('data', (d) => {
+      if (capped) return
       out += d
+      stopAtCap()
     })
     child.stderr.on('data', (d) => {
+      if (capped) return
       out += d
+      stopAtCap()
     })
     child.on('error', (e) => finish(-1, String(e)))
     child.on('close', (code) => finish(code ?? -1))
@@ -1202,6 +1232,26 @@ export async function baseHeadSha(): Promise<string | null> {
 }
 
 /**
+ * The commit a bee's branch forked from the base at, or null.
+ *
+ * The other half of the reviewer's cache key, in place of the base head. The
+ * patch a reviewer reads is `base...branch`, which git measures from exactly
+ * this commit - so the base moving on (every `git fetch` a round or a dispatch
+ * does) changes nothing the reviewer was shown, and keying on the base HEAD
+ * re-bought an identical review each time it did.
+ */
+export async function mergeBaseSha(issue: number): Promise<string | null> {
+  return shaFrom(
+    await run(
+      'git',
+      ['merge-base', baseRef(), `queen-${issue}`],
+      workspaceRoot(),
+      30_000,
+    ),
+  )
+}
+
+/**
  * What the branch changed, as a patch a reviewer can cite line by line.
  *
  * Bounded, and the bound is SAID: a patch silently cut at N characters reads
@@ -1214,16 +1264,36 @@ export async function branchPatch(
   issue: number,
   maxChars: number,
 ): Promise<string | null> {
+  // `--no-ext-diff --no-textconv`: the linked worktrees share the main
+  // `.git/config`, and the bee account can write it. A `diff.external` or a
+  // textconv driver set from a worktree decides what this command PRINTS - so
+  // without these flags the defendant could write the patch its adversary
+  // reads. Measured on a scratch repository laid out like the volume: one
+  // `git config diff.external` run inside `.worktrees/queen-N` replaced the
+  // real patch with the script's text.
+  //
+  // Read with a cap at twice the bound, so an oversized patch is known to be
+  // oversized - and by how much, up to the cap - without ever being held
+  // whole.
   const out = await run(
     'git',
-    ['diff', '--no-color', `${baseRef()}...queen-${issue}`],
+    [
+      'diff',
+      '--no-color',
+      '--no-ext-diff',
+      '--no-textconv',
+      `${baseRef()}...queen-${issue}`,
+    ],
     workspaceRoot(),
     60_000,
+    maxChars * 2 + 1,
   )
   if (out.code !== 0) return null
-  if (out.out.length <= maxChars) return out.out
+  if (!out.capped && out.out.length <= maxChars) return out.out
+  // Past the cap the exact remainder is unknown, and it is not guessed: the
+  // marker says "at least this many".
   const dropped = out.out.length - maxChars
-  return `${out.out.slice(0, maxChars)}\n[truncated ${dropped} chars]`
+  return `${out.out.slice(0, maxChars)}\n[truncated ${dropped}${out.capped ? '+' : ''} chars]`
 }
 
 /**
@@ -3233,6 +3303,22 @@ export async function recordDispatch(
            -- whose review_state IS NULL.
            review_state = CASE WHEN EXCLUDED.started THEN NULL
                                ELSE queen_dispatch.review_state END,
+           -- free_attempts survives a redispatch on purpose: it counts
+           -- consecutive attempts that produced nothing judgeable. The one
+           -- exception is an issue a PERSON (or the round's 7-day window) put
+           -- back after it escalated or was released as failed: without the
+           -- reset the dead-letter count of 3 carried over, and the first
+           -- silent attempt of the person's retry escalated again at once.
+           -- Read before review_state is cleared, because the SET list sees
+           -- the old row.
+           free_attempts = CASE
+             WHEN EXCLUDED.started
+                  AND queen_dispatch.review_state IN ('escalate', 'failed')
+             THEN 0 ELSE queen_dispatch.free_attempts END,
+           -- Undelivered reviews are about ONE attempt's commit; a new
+           -- attempt starts the count again.
+           reviewer_misses = CASE WHEN EXCLUDED.started THEN 0
+                                  ELSE queen_dispatch.reviewer_misses END,
            review_note = CASE WHEN EXCLUDED.started THEN NULL
                               ELSE queen_dispatch.review_note END`,
     [

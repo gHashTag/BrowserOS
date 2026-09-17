@@ -36,11 +36,11 @@
 import { createHash, randomUUID } from 'node:crypto'
 import type { LLMProvider } from '@browseros/shared/schemas/llm'
 import {
-  baseHeadSha,
   baseRef,
   branchHeadSha,
   branchPatch,
   committedFilesResult,
+  mergeBaseSha,
   POOL_KEY_STRIDE,
   reviewLaneCandidates,
   type Witness,
@@ -48,7 +48,7 @@ import {
   witnessSpecs,
   worktreeDirtCount,
 } from './queen-dispatch'
-import { parseVerdictBlockDetailed } from './queen-tick'
+import { parseVerdictBlocks } from './queen-tick'
 
 /**
  * A token in every adversarial brief, the same literal the Swift side uses.
@@ -166,22 +166,68 @@ export function poolOfKeyIndex(keyIndex: unknown): number | undefined {
 export interface ReviewerChoice {
   lane: WorkerProvider
   /**
-   * Whether the reviewer runs on the same pool and model as the bee. `true`
-   * means role separation by prompt was the only safeguard; `null` means the
-   * bee's identity was not on its row, so nobody can say.
+   * Whether the reviewer runs the same MODEL as the bee. `true` means role
+   * separation by prompt was the only safeguard; `null` means the bee's
+   * identity was not on its row, so nobody can say.
    */
   sameVendor: boolean | null
+}
+
+const normalisedModel = (model?: string | null): string =>
+  (model ?? '').trim().toLowerCase()
+
+function hostOf(url?: string): string {
+  if (!url) return ''
+  try {
+    return new URL(url).host.toLowerCase()
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * Whether a reviewer is the bee's own model, from what a row can say.
+ *
+ * The model name is the identity that matters: two pools serving one model
+ * are two accounts of the same judge. Only when the bee's model is unknown
+ * does the provider label stand in for it. One function for a fresh choice
+ * and a cached one, because the two used to disagree - a cached copy of a
+ * review logged `true` while the round that bought it logged `false`.
+ */
+export function sameModelAs(
+  bee: BeeIdentity,
+  reviewer: { provider?: unknown; model?: unknown },
+): boolean | null {
+  if (bee.model) {
+    return (
+      normalisedModel(bee.model) ===
+      normalisedModel(String(reviewer.model ?? ''))
+    )
+  }
+  if (bee.provider) return bee.provider === reviewer.provider
+  return null
 }
 
 /**
  * Which lane the reviewer uses.
  *
- * A DIFFERENT pool or model than the one that ran the bee, whenever one has a
- * free lane - so the assumptions that wrote the code are not the ones grading
- * it. Otherwise the same pool, and the adversarial prompt alone carries the
- * independence; `sameVendor` then says so in the log rather than letting a
- * model name imply a separation that did not happen (the Swift side's
- * `journalModelLine` makes the same promise).
+ * A DIFFERENT MODEL than the one that ran the bee, whenever one has a free
+ * lane - so the assumptions that wrote the code are not the ones grading it.
+ * Ranked, not merely filtered: `find(differs)` took the first lane whose pool
+ * number differed, and with pools 1 and 2 both serving glm and pool 3 serving
+ * another model, a bee from pool 1 was graded by pool 2 - its own model on a
+ * second account - while the other vendor sat idle, and the log said
+ * `reviewerSameVendor=false`. The order now:
+ *
+ *   0  another model on another host
+ *   1  another model on the bee's host
+ *   2  the bee's model on another pool (a second account, same judge)
+ *   3  the bee's own lane
+ *
+ * For 2 and 3 the adversarial prompt alone carries the independence, and
+ * `sameVendor` says so in the log rather than letting a pool number imply a
+ * separation that did not happen (the Swift side's `journalModelLine` makes
+ * the same promise).
  *
  * `TRIOS_QUEEN_REVIEW_POOL` pins the pool number and `TRIOS_QUEEN_REVIEW_MODEL`
  * the model name, for an operator who has a reviewer model in mind.
@@ -193,6 +239,16 @@ export function chooseReviewerLane(
 ): ReviewerChoice | null {
   const pinnedPool = Number(env.TRIOS_QUEEN_REVIEW_POOL)
   const pinnedModel = env.TRIOS_QUEEN_REVIEW_MODEL?.trim()
+  const beePool = poolOfKeyIndex(bee.keyIndex)
+  // Read before the pin filters it away: the bee's host is a property of its
+  // pool whether or not the reviewer may use that pool.
+  const beeHost =
+    beePool === undefined
+      ? ''
+      : hostOf(
+          candidates.find((lane) => (lane.poolNumber ?? 1) === beePool)
+            ?.baseUrl,
+        )
   let lanes = candidates
   if (Number.isInteger(pinnedPool) && pinnedPool >= 1) {
     lanes = lanes.filter((lane) => (lane.poolNumber ?? 1) === pinnedPool)
@@ -201,22 +257,82 @@ export function chooseReviewerLane(
     lanes = lanes.map((lane) => ({ ...lane, model: pinnedModel }))
   if (lanes.length === 0) return null
   // The emptiest credential first, so a review takes an idle key before it
-  // takes the second lane of a busy one.
+  // takes the second lane of a busy one. Stable, so ties keep pool order.
   lanes = [...lanes].sort((a, b) => (a.laneIndex ?? 0) - (b.laneIndex ?? 0))
 
-  const beePool = poolOfKeyIndex(bee.keyIndex)
   const known = Boolean(bee.provider || bee.model || beePool !== undefined)
-  const differs = (lane: WorkerProvider): boolean =>
-    Boolean(
-      (bee.provider && lane.provider !== bee.provider) ||
-        (bee.model && lane.model !== bee.model) ||
-        (beePool !== undefined &&
-          lane.poolNumber !== undefined &&
-          lane.poolNumber !== beePool),
-    )
-  const other = lanes.find(differs)
-  if (other) return { lane: other, sameVendor: false }
-  return { lane: lanes[0], sameVendor: known ? true : null }
+  if (!known) return { lane: lanes[0], sameVendor: null }
+  const rank = (lane: WorkerProvider): number => {
+    const sameModel = sameModelAs(bee, lane)
+    const otherPool =
+      beePool !== undefined &&
+      lane.poolNumber !== undefined &&
+      lane.poolNumber !== beePool
+    const host = hostOf(lane.baseUrl)
+    const otherHost = Boolean(beeHost && host && host !== beeHost)
+    if (sameModel === false) return otherHost || !beeHost ? 0 : 1
+    return otherPool || otherHost ? 2 : 3
+  }
+  let best = lanes[0]
+  for (const lane of lanes) if (rank(lane) < rank(best)) best = lane
+  return { lane: best, sameVendor: sameModelAs(bee, best) ?? true }
+}
+
+/**
+ * A lane that just failed in a way retrying will not fix, remembered for a
+ * while.
+ *
+ * `chooseReviewerLane` is deterministic, so a lane that always fails - a
+ * revoked key, a model name that 404s, a legacy `MOONSHOT_API_KEY` whose
+ * factory throws "Moonshot provider requires baseUrl" before any request - was
+ * chosen again every round and held every commit on the swarm in `wait`.
+ * Process memory, not a column: a restart forgetting it costs one failed call
+ * per lane, and a column would outlive the configuration it describes.
+ */
+export const REVIEWER_LANE_BACKOFF_MS = 30 * 60 * 1000
+const failedLanes = new Map<string, number>()
+
+export function reviewerLaneKey(lane: WorkerProvider): string {
+  return [
+    lane.provider,
+    hostOf(lane.baseUrl),
+    lane.poolNumber ?? '',
+    lane.keyIndex ?? '',
+    normalisedModel(lane.model),
+    // A second-vendor legacy key has no index; its secret's position is not
+    // recoverable, so its digest stands in, never the secret itself.
+    lane.keyIndex === undefined
+      ? createHash('sha256')
+          .update(lane.apiKey ?? '')
+          .digest('hex')
+          .slice(0, 12)
+      : '',
+  ].join('|')
+}
+
+export function markReviewerLaneFailed(
+  lane: WorkerProvider,
+  now: number = Date.now(),
+): void {
+  failedLanes.set(reviewerLaneKey(lane), now + REVIEWER_LANE_BACKOFF_MS)
+}
+
+export function reviewerLaneBackedOff(
+  lane: WorkerProvider,
+  now: number = Date.now(),
+): boolean {
+  const until = failedLanes.get(reviewerLaneKey(lane))
+  if (until === undefined) return false
+  if (until <= now) {
+    failedLanes.delete(reviewerLaneKey(lane))
+    return false
+  }
+  return true
+}
+
+/** For suites: every lane is trusted again. */
+export function forgetReviewerLaneFailures(): void {
+  failedLanes.clear()
 }
 
 /**
@@ -264,7 +380,7 @@ export interface ReviewerMessageInput {
  */
 export function reviewerMessage(input: ReviewerMessageInput): string {
   const truncated =
-    input.patch !== null && /\n\[truncated \d+ chars\]$/.test(input.patch)
+    input.patch !== null && /\n\[truncated \d+\+? chars\]$/.test(input.patch)
   const lines = [
     `[${REVIEWER_PROMPT_MARKER}] Review of ${input.repo}#${input.issue}, ` +
       `branch queen-${input.issue} against ${input.base ?? baseRef()}.`,
@@ -313,20 +429,23 @@ export function reviewerMessage(input: ReviewerMessageInput): string {
 }
 
 /**
- * The cache key of a review: the branch head, the base head and the contract.
+ * The cache key of a review: the branch head, the commit the patch is measured
+ * from, and the contract.
  *
- * A `wait` row is re-read every round. A head that has not moved, against a
- * base that has not moved, judged against the same criteria, is the same
- * question - and asking it again buys the same answer at the price of a lane
- * a bee could have used.
+ * A `wait` row is re-read every round. A head that has not moved, over the
+ * same merge base, judged against the same criteria, is the same question -
+ * and asking it again buys the same answer at the price of a lane a bee could
+ * have used. The criteria are in the key because a review is numbered by
+ * them: an issue whose criteria changed before a redispatch would otherwise
+ * map yesterday's verdict for criterion 2 onto today's criterion 2.
  */
 export function reviewerFingerprint(
   branchHead: string,
-  baseHead: string,
+  mergeBase: string,
   criteria: string[],
 ): string {
   return createHash('sha256')
-    .update(`${branchHead}\n${baseHead}\n${JSON.stringify(criteria)}`)
+    .update(`${branchHead}\n${mergeBase}\n${JSON.stringify(criteria)}`)
     .digest('hex')
 }
 
@@ -339,12 +458,18 @@ export interface ReviewerAnswer {
 }
 
 /**
- * A reviewer's text, read by the bee's parser and keyed by criterion number.
+ * A reviewer's text, keyed by criterion number.
  *
  * Lines that name no number, or a number outside the contract, are dropped:
  * they judge nothing the policy was asked about. Several lines for one number
  * resolve to the WORST of them, because a reviewer that said both met and
- * unmet about a criterion did not establish met.
+ * unmet about a criterion did not establish met - and that holds ACROSS
+ * blocks, not only inside one. The bee's parser keeps the longest block and
+ * the first of a tie, which let a reasoning model's draft (all met) outrank
+ * its corrected final block (one unmet) of the same length: run through this
+ * function, the draft-then-correction answer came back all met. A `<think>`
+ * section is dropped first, because endpoints that return reasoning inline
+ * put exactly those drafts into the text.
  */
 export function reviewerAnswers(
   text: string,
@@ -352,7 +477,8 @@ export function reviewerAnswers(
 ): Map<number, ReviewerAnswer> {
   const rank = { met: 0, 'could-not-check': 1, unmet: 2 } as const
   const out = new Map<number, ReviewerAnswer>()
-  for (const line of parseVerdictBlockDetailed(text)) {
+  const visible = text.replace(/<think>[\s\S]*?(<\/think>|$)/gi, '')
+  for (const line of parseVerdictBlocks(visible).flat()) {
     const slot = line.criterion.match(/^(\d{1,3})\.\s*(.*)$/s)
     if (!slot) continue
     const number = Number(slot[1])
@@ -376,6 +502,110 @@ export function reviewerAnswers(
  */
 export function hasStatedReason(answer: ReviewerAnswer): boolean {
   return answer.reason.replace(/[^a-z0-9]/gi, '').length >= 8
+}
+
+/** The paths whose diff the patch the reviewer was shown actually contains. */
+export function visiblePatchPaths(patch: string | null): string[] {
+  if (!patch) return []
+  const out = new Set<string>()
+  for (const m of patch.matchAll(/^diff --git a\/(\S+) b\/(\S+)$/gm)) {
+    out.add(m[1])
+    out.add(m[2])
+  }
+  return [...out]
+}
+
+/**
+ * Whether a `met` cites something the reviewer was actually shown.
+ *
+ * The prompt says "a met without a citation is not a verdict", and until this
+ * nothing enforced it: `- 1.: met` and `- 2. ok: met` both accepted a commit
+ * in a probe against the real `queend`, while an unmet had to carry a reason.
+ * The looser rule sat on the side that passes work. A met must now name a
+ * path whose diff is IN the patch shown (so a patch cut before `src/x.ts`
+ * cannot yield a met citing it from the file list), or the file of a machine
+ * measurement that passed. Anything else is read as could-not-check - unmet,
+ * and never a finding against the bee.
+ */
+export function citesEvidence(
+  reason: string,
+  visiblePaths: string[],
+  machine: Array<{ criterion: string; met: boolean }>,
+): boolean {
+  const measured = machine
+    .filter((m) => m.met)
+    .flatMap((m) => [...m.criterion.matchAll(/(\S+\.[A-Za-z0-9]+)\b/g)])
+    .map((m) => m[1])
+  const citable = [...visiblePaths, ...measured]
+  // Tokens of the reason, with a trailing `:42` or `:42-50` line reference
+  // removed, so `src/a.ts:42` and `(a.ts)` both name `a.ts`.
+  const tokens = reason
+    .split(/[\s,;()[\]`'"]+/)
+    .map((t) => t.replace(/:\d+(-\d+)?:?$/, '').replace(/[.:]+$/, ''))
+    .filter((t) => t.length > 0)
+  return citable.some((path) => {
+    const base = path.split('/').pop() ?? ''
+    return tokens.some(
+      (t) =>
+        t === path ||
+        t.endsWith(`/${path}`) ||
+        (base.includes('.') &&
+          base.length >= 4 &&
+          (t === base || t.endsWith(`/${base}`))),
+    )
+  })
+}
+
+/** A reviewer's answer as the sweep counts it. */
+export interface JudgedReview {
+  answers: Map<number, ReviewerAnswer>
+  /** Criterion numbers with no usable line at all. */
+  unanswered: number[]
+  /** The answers as counted, re-rendered as one VERDICT block for the cache. */
+  canonical: string
+}
+
+/**
+ * Read a reviewer's text into the verdicts the policy will weigh.
+ *
+ * Two rules the prompt states and the code now keeps: a `met` must cite
+ * something the reviewer was shown (`citesEvidence`) or it is could-not-check,
+ * and every criterion must be answered or the review is not a review. The
+ * canonical block is what gets cached, so a later round reuses the verdicts as
+ * they were COUNTED, without the patch the citation check needed.
+ */
+export function judgeReviewerText(
+  text: string,
+  criteriaCount: number,
+  visiblePaths: string[],
+  machine: Array<{ criterion: string; met: boolean }>,
+): JudgedReview {
+  const raw = reviewerAnswers(text, criteriaCount)
+  const answers = new Map<number, ReviewerAnswer>()
+  const unanswered: number[] = []
+  const lines = ['## VERDICT']
+  for (let number = 1; number <= criteriaCount; number++) {
+    const found = raw.get(number)
+    if (!found) {
+      unanswered.push(number)
+      continue
+    }
+    const answer: ReviewerAnswer =
+      found.verdict === 'met' &&
+      !citesEvidence(found.reason, visiblePaths, machine)
+        ? {
+            number,
+            verdict: 'could-not-check',
+            reason: `a met that cites nothing the reviewer was shown (${found.reason || 'no reason given'})`,
+          }
+        : found
+    answers.set(number, answer)
+    // One line, whatever the reason held: a newline in it must not become a
+    // second line when the cache is read back.
+    const reason = answer.reason.replace(/\s+/g, ' ')
+    lines.push(`- ${number}. ${reason}: ${answer.verdict}`)
+  }
+  return { answers, unanswered, canonical: lines.join('\n') }
 }
 
 export type ReviewerCallResult =
@@ -448,7 +678,8 @@ export interface ReviewDeps {
     issue: number,
   ) => Promise<{ ok: true; files: string[] } | { ok: false; error: string }>
   branchHeadSha: (issue: number) => Promise<string | null>
-  baseHeadSha: () => Promise<string | null>
+  /** The commit `base...branch` is measured from; half the cache key. */
+  mergeBaseSha: (issue: number) => Promise<string | null>
   branchPatch: (issue: number, maxChars: number) => Promise<string | null>
   worktreeDirtCount: (issue: number) => Promise<number | null>
   witness: (issue: number, files: string[]) => Promise<Witness>
@@ -465,7 +696,7 @@ export function defaultReviewDeps(): ReviewDeps {
   return {
     committedFilesResult,
     branchHeadSha,
-    baseHeadSha,
+    mergeBaseSha,
     branchPatch,
     worktreeDirtCount,
     witness: witnessSpecs,
