@@ -1,0 +1,41 @@
+{
+  "schemaVersion": "mimosa-finding-history/v1",
+  "runId": "20260831T225725084Z-74926-2da8010ae992",
+  "runStatus": "inconclusive",
+  "errors": [
+    "bash-discovery:.worktrees/prod/queen-5002/trios/agent-server/apps/agent/entrypoints/app/layout/SidebarLayout.tsx: bash_discovery_incomplete: project enumeration exceeded 5000 reviewable files",
+    "baseline:.: baseline_partial: baseline capture had enumeration or snapshot errors"
+  ],
+  "target": ".",
+  "revision": "f6e2da95e2973b1f4f7d2f6a1e1d03c1839b2f4f",
+  "diffHash": "6e03a65b3bf7695302c810152ff4f0f0da43a53618a224975881f7a15973f76d",
+  "rulesVersion": "unavailable",
+  "recordedAt": "2026-08-31T22:57:25.084Z",
+  "timing": {
+    "startedAt": "2026-08-31T22:57:24.280Z",
+    "completedAt": "2026-08-31T22:57:25.084Z",
+    "durationMs": 804
+  },
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "total": 0,
+    "modelCalls": 0,
+    "measurement": "known-zero"
+  },
+  "findings": {
+    "total": 0,
+    "bySeverity": {},
+    "byStatus": {}
+  },
+  "coverage": {
+    "status": "partial",
+    "reasonCounts": {
+      "bash_discovery_incomplete": 1,
+      "baseline_partial": 1,
+      "project_check_failed": 2
+    }
+  },
+  "evidenceBoundary": "static_only",
+  "immutableReport": ".mimosa/reports/task-review-sess_2c244a44-c950-44f1-91c3-11aa8d7a76e9-20260831T225725084Z-74926-2da8010ae992.json"
+}

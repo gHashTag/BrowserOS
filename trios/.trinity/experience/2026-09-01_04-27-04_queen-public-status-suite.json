@@ -1,0 +1,20 @@
+{
+  "timestamp": "2026-09-01T04:27:04Z",
+  "task_id": "QUEEN-PUBLIC-STATUS-001",
+  "claim_id": "B2AD0166-19CB-43C9-AA84-651A9513A751",
+  "action": "Run the focused Queen regression suite and workspace typecheck",
+  "result": "PASS",
+  "evidence": {
+    "commands": [
+      "bun test apps/server/tests/api/queen-public-status.test.ts apps/server/tests/api/queen-lease.test.ts apps/server/tests/api/routes/queen-lease.test.ts apps/server/tests/api/queen-round.test.ts apps/server/tests/api/queend-choose.test.ts",
+      "bun run typecheck"
+    ],
+    "facts": [
+      "37 tests passed and none failed",
+      "All workspace typecheck tasks passed"
+    ]
+  },
+  "residual_risks": [
+    "Production still needs TRUSTED_ORIGINS=https://t27.ai and a verified deployment."
+  ]
+}

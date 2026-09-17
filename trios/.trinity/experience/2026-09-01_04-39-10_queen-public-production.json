@@ -1,0 +1,16 @@
+{
+  "timestamp": "2026-09-01T04:39:10Z",
+  "task_id": "QUEEN-PUBLIC-BOARD-001",
+  "claim_id": "B2AD0166-19CB-43C9-AA84-651A9513A751",
+  "action": "Deploy and probe the public Queen projections in Railway production",
+  "result": "PASS",
+  "evidence": {
+    "status_endpoint": "HTTP 200, scheduler enabled at 1800 seconds, cache-control no-store",
+    "board_endpoint": "HTTP 200, 6 columns, 53 cards, only number/title/column/criteria/needs card keys",
+    "cors": "access-control-allow-origin: https://t27.ai",
+    "guard": "unauthenticated /queen/board remains HTTP 403"
+  },
+  "residual_risks": [
+    "The T27 frontend still needs browser preview and publication."
+  ]
+}

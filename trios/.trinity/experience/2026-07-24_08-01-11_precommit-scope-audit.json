@@ -1,0 +1,29 @@
+{
+  "timestamp": "2026-07-24T08:01:11Z",
+  "task_id": "TRIOS-PORTABLE-LAND-001",
+  "claim_id": "989F8151-6640-44B4-AFE1-FEEB17078EF2",
+  "action": "precommit_scope_secret_and_portability_audit",
+  "result": "PASS_WITH_EXCLUSIONS",
+  "evidence": {
+    "commands": [
+      "git status --short",
+      "git diff --check over the proposed scope",
+      "ASCII scan over added and untracked proposed source/spec files",
+      "credential-pattern and developer-path scans over the proposed scope"
+    ],
+    "exit_codes": [0, 0, 0, 0],
+    "artifact": "proposed scoped commit on feat/zai-provider",
+    "facts": [
+      "No whitespace errors or conflict markers were found.",
+      "No non-ASCII content was found in proposed new source/spec files or added lines.",
+      "The only credential-like value is an intentional test fixture used to verify redaction.",
+      "Developer-specific paths found in tracked history describe already-remediated defects rather than runtime defaults.",
+      "INSTALL_TODO.md and TRIOS_INSTALLATION_GUIDE.pdf appeared concurrently during runtime testing and are excluded because they were not in the reviewed scope.",
+      "Active queue, claims, events, checkpoints, root .agents, root .build, and amp remain excluded."
+    ]
+  },
+  "residual_risks": [
+    "The concurrently generated installation guide contains unverified and stale installation claims.",
+    "Published Queen and mesh dependencies remain non-reproducible."
+  ]
+}

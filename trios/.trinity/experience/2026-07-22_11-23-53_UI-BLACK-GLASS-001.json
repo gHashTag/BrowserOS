@@ -1,0 +1,27 @@
+{
+  "task_id": "UI-BLACK-GLASS-001",
+  "claim_id": "6ED78C40-7EBD-41F6-8B46-023EC9EAE4E7",
+  "timestamp": "2026-07-22T11:23:53Z",
+  "action": "build_verify_learn",
+  "result": "clean",
+  "problem": "Neutral TriOS surfaces mixed opaque grey colors, direct black values, and unrelated blur tint constants. Compact and expanded chat therefore could not be darkened consistently from one place.",
+  "solution": "Added one Black Glass profile for every neutral opacity and mapped the legacy palette, native material tint, chat workspace, composer, tool details, diff surfaces, borders, dividers, text neutrals, shadows, and ambient bloom to that profile. All black fills stay translucent over the native macOS backdrop blur.",
+  "verification": {
+    "theme_contract_tests": "PASS",
+    "chat_glass_tests": "PASS",
+    "composer_style_tests": "PASS",
+    "swift_build": "PASS",
+    "compiled_swift_files": 73,
+    "compiler_warnings": 0,
+    "code_signature": "PASS",
+    "visual_mini": "PASS",
+    "visual_fullscreen": "PASS",
+    "live_health": {
+      "status": "ok",
+      "cdpConnected": true
+    },
+    "runtime_launch": "PASS",
+    "pid": 18009
+  },
+  "lesson": "A glass interface needs one semantic opacity ladder, not independent RGB greys. Keeping fill opacity below one preserves the live material while the central hierarchy makes global tuning predictable."
+}

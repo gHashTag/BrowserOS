@@ -1,0 +1,29 @@
+{
+  "task_id": "CHAT-STATUS-BAR-001",
+  "claim_id": "C61A86BF-2D8C-49E1-91D8-B234202160B5",
+  "timestamp": "2026-07-22T16:36:45Z",
+  "action": "spec_tdd_build_verify_learn",
+  "result": "clean",
+  "problem": "The chat status bar was an edge-to-edge rectangular strip with different width, surface treatment, spacing, and visual emphasis from the rounded glass composer below it.",
+  "solution": "Added centralized status-bar metrics derived from the composer geometry. The status bar now shares compact and expanded horizontal insets, uses native black glass with a complete continuous border, has fixed centered heights, balanced vertical gaps, stable dividers, explicit icon metrics, and neutral CDP text while preserving semantic connection dots.",
+  "verification": {
+    "status_bar_style_tests": "PASS",
+    "composer_style_tests": "PASS",
+    "glass_style_tests": "PASS",
+    "swift_build": "PASS",
+    "compiled_swift_files": 84,
+    "code_signature": "PASS",
+    "visual_compact": "PASS",
+    "visual_expanded": "PASS",
+    "expanded_edge_alignment": "PASS",
+    "diff_check": "PASS",
+    "ascii_check": "PASS",
+    "live_health": {
+      "status": "ok",
+      "cdpConnected": true
+    },
+    "runtime_launch": "PASS",
+    "pid": 82618
+  },
+  "lesson": "Adjacent application chrome should derive from one geometry system, not merely share similar colors. Matching outer insets, vertical rhythm, material, borders, and optical baselines makes status information read as part of the composer instead of an unrelated console strip."
+}

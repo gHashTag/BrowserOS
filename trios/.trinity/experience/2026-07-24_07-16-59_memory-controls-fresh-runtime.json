@@ -1,0 +1,25 @@
+{
+  "timestamp": "2026-07-24T07:16:59Z",
+  "task_id": "MEMORY-CONTROLS-001",
+  "claim_id": "2621A8A0-22B7-4E85-AA5C-3F2857AFD10C",
+  "action": "fresh_binary_relaunch_and_runtime_e2e",
+  "result": "PASS",
+  "evidence": {
+    "app_pid": 58983,
+    "security_agent": "NOT_RUNNING_AFTER_USER_DECISION",
+    "health": "{\"status\":\"ok\",\"cdpConnected\":true}",
+    "e2e_command": "bash e2e/trios_e2e_flow.sh",
+    "e2e_exit_code": 0,
+    "report": "/tmp/trios_e2e/report_1784877390.md",
+    "screenshot": "/tmp/trios_e2e/screenshot_1784877390.png",
+    "chat_screenshot": "/tmp/trios_e2e/fresh-build-chat-workspace.png",
+    "accessibility": [
+      "Online status is visible",
+      "Chat workspace is visible",
+      "Execution plan is idle with 0/0 done",
+      "Message composer is visible",
+      "Provider and token controls are visible"
+    ],
+    "log_note": "Connection-refused entries target the optional canary health port 9205; production health on port 9105 is OK."
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "wave": "WAVE-062",
+  "date": "2026-07-28",
+  "domain": "chat pane layout, nested plan steps, mid-run plan revision",
+  "summary": "Delivered all three WAVE-061 follow-up options. The layout fix was a regression traced back to the dynamic-steps change of the previous wave.",
+  "findings": [
+    {
+      "id": "L1",
+      "finding": "The chat pane stacked message area, planner, and composer in a plain VStack. The planner used to be a fixed three rows, so its height was effectively constant; once steps became dynamic it grew to a dozen rows and took the space out of its neighbours, hiding the composer and pushing the scroll view up. This is the footer/scroll glitch the user reported.",
+      "fix": "rings/SR-00/ChatPaneLayout.swift bounds the planner to a fraction of the pane, scrolls it internally, hides it entirely when the pane is too short, and gives the composer layoutPriority so it is never negotiable."
+    },
+    {
+      "id": "N1",
+      "finding": "Long plans had no structural answer beyond folding, while competitor UIs answer length with nesting.",
+      "fix": "rings/SR-00/PlanNesting.swift builds parent/child nodes, rolls child state up to the parent, and counts progress across the whole tree. A failed child surfaces through a parent marked complete; an orphaned child stays visible rather than being dropped."
+    },
+    {
+      "id": "R1",
+      "finding": "Plans were append-only, but AgentScope treats revise_current_plan as first-class, so a running plan must tolerate reshaping.",
+      "fix": "rings/SR-00/PlanRevision.swift supports replacePending, insertAfterCurrent, dropPending and rename, under one invariant: history is immutable. Completed, failed and cancelled steps cannot be rewritten or removed, and the running step cannot be dropped."
+    }
+  ],
+  "lessons": [
+    {
+      "lesson": "Making a component's height dynamic changes the layout contract of everything stacked with it. The planner growing from 3 to 12 rows silently took space from the composer.",
+      "how_to_apply": "When a view's content becomes unbounded, give it an explicit height budget in the same change, and give the non-negotiable sibling layoutPriority."
+    },
+    {
+      "lesson": "Roll-up must be pessimistic. A parent that reports complete while a child failed hides exactly what the user needs.",
+      "how_to_apply": "PlanNesting.rolledUpState surfaces failure first, then running, then pending; complete requires every child complete."
+    },
+    {
+      "lesson": "Mid-run revision is only safe with an explicit immutability boundary.",
+      "how_to_apply": "PlanReviser.isHistory defines it, and wouldRewriteHistory lets a caller report a refusal instead of silently doing nothing."
+    }
+  ],
+  "artifacts": {
+    "new_sources": [
+      "rings/SR-00/ChatPaneLayout.swift",
+      "rings/SR-00/PlanNesting.swift",
+      "rings/SR-00/PlanRevision.swift"
+    ],
+    "modified_sources": ["BR-OUTPUT/ChatPanelView.swift", "rings/RUST-02/clade-e2e/src/main.rs"],
+    "new_tests": [
+      "tests/swift/chat_pane_layout_test.swift",
+      "tests/swift/plan_nesting_revision_test.swift"
+    ]
+  },
+  "verification": {
+    "build_sh": "0 app-source errors, trios_app built, chat e2e 0 failures",
+    "clade_e2e": "11/11 Swift logic suites passed",
+    "new_assertions": 72,
+    "runtime": "app running, server health ok, cdpConnected true"
+  },
+  "known_gaps": [
+    "PlanNesting and PlanReviser are complete and tested but not yet wired into TODOPlanner or the view - the agent does not yet emit parent/child relationships or revision requests.",
+    "A2A registration was empty at the end of this wave; it recovers on the next bootstrap.",
+    "The postgres stale-lease auth failure in the agent server is still unaddressed and needs DATABASE_URL."
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "task_id": "TOOL-DETAILS-001",
+  "claim_id": "993DC1F3-4348-487E-B0C1-0B6FBEA4D0AA",
+  "timestamp": "2026-07-22T09:48:36Z",
+  "action": "build_verify_learn",
+  "result": "clean",
+  "problem": "Tool request details rendered arguments and results as one raw monospaced string, exposing JSON escape sequences and allowing large embedded code payloads to distort the chat layout.",
+  "solution": "A pure recursive parser now converts JSON, arrays, nested JSON strings, scalars, and fallback text into semantic nodes. Tool cards render those nodes through independently expandable hierarchy levels with bounded selectable text viewers.",
+  "verification": {
+    "parser_tests": "PASS",
+    "swift_build": "PASS",
+    "compiled_swift_files": 64,
+    "code_signature": "PASS",
+    "live_health": {"status": "ok", "cdpConnected": true},
+    "ascii_audit": "PASS",
+    "diff_check": "PASS",
+    "app_relaunch": "PASS",
+    "visual_capture": "/private/tmp/trios-nested-details.png"
+  },
+  "lesson": "Operational payloads should be parsed into a safe semantic tree before presentation. Recursive disclosure controls preserve hierarchy, while bounded text leaves prevent code and logs from taking over the conversation layout."
+}

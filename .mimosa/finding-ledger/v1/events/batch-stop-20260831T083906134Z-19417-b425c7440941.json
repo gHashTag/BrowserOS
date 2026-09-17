@@ -1,0 +1,80 @@
+{
+  "schemaVersion": "mimosa-finding-ledger-batch/v1",
+  "batchId": "stop-20260831T083906134Z-19417-b425c7440941",
+  "runId": "20260831T083906134Z-19417-b425c7440941",
+  "runStatus": "inconclusive",
+  "coverage": {
+    "status": "partial",
+    "reasons": [
+      {
+        "code": "bash_discovery_incomplete",
+        "stage": "bash-discovery",
+        "target": "trios/.worktrees/prod/queen-5002/trios/agent-server/apps/agent/entrypoints/app/connect-mcp/useGetUserMCPIntegrations.tsx",
+        "detail": "project enumeration exceeded 5000 reviewable files",
+        "affectsCompletion": true
+      },
+      {
+        "code": "baseline_partial",
+        "stage": "baseline",
+        "target": "trios/.worktrees/prod/queen-5002/trios/agent-server/apps/agent/entrypoints/app/connect-mcp/useRemoveManagedServer.tsx",
+        "detail": "baseline exceeded 5000 candidate files",
+        "affectsCompletion": true
+      },
+      {
+        "code": "scanner_failed",
+        "stage": "scan",
+        "target": "trios/agent-server/apps/server/src/api/server.ts",
+        "detail": "spawnSync /Users/playra/.nvm/versions/node/v22.22.0/bin/node ETIMEDOUT",
+        "affectsCompletion": true
+      },
+      {
+        "code": "scanner_failed",
+        "stage": "scan",
+        "target": "trios/agent-server/apps/server/src/api/services/queen-tick.ts",
+        "detail": "spawnSync /Users/playra/.nvm/versions/node/v22.22.0/bin/node ETIMEDOUT",
+        "affectsCompletion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "bash-discovery",
+        "target": "trios/.worktrees/prod/queen-5002/trios/agent-server/apps/agent/entrypoints/app/connect-mcp/useGetUserMCPIntegrations.tsx",
+        "detail": "bash_discovery_incomplete: project enumeration exceeded 5000 reviewable files",
+        "affectsCompletion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "baseline",
+        "target": "trios/.worktrees/prod/queen-5002/trios/agent-server/apps/agent/entrypoints/app/connect-mcp/useRemoveManagedServer.tsx",
+        "detail": "baseline_partial: baseline exceeded 5000 candidate files",
+        "affectsCompletion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "scan",
+        "target": "trios/agent-server/apps/server/src/api/server.ts",
+        "detail": "scanner_failed: spawnSync /Users/playra/.nvm/versions/node/v22.22.0/bin/node ETIMEDOUT",
+        "affectsCompletion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "scan",
+        "target": "trios/agent-server/apps/server/src/api/services/queen-tick.ts",
+        "detail": "scanner_failed: spawnSync /Users/playra/.nvm/versions/node/v22.22.0/bin/node ETIMEDOUT",
+        "affectsCompletion": true
+      }
+    ]
+  },
+  "source": {
+    "component": "zcode-hook",
+    "operationId": "Stop"
+  },
+  "revision": "4dc220be840d1ee33f1dfaa06e44e29d285fd47f",
+  "diffHash": "b4d13be566bfca63dc92a7cd654c56ee3c7735f9329fa650c2e45e3f7a5dcfd4",
+  "rulesVersion": "unavailable",
+  "sessionHash": "0fde83bfae4e4e2cce03467ccebfdac95f0d5d7ec1f0c92bb1d6c388ca5b7493",
+  "reportRef": ".mimosa/reports/task-review-sess_2c244a44-c950-44f1-91c3-11aa8d7a76e9-20260831T083906134Z-19417-b425c7440941.json",
+  "events": [],
+  "observedFindingIds": [],
+  "verifiedFiles": [],
+  "recordedAt": "2026-08-31T08:39:06.435Z"
+}

@@ -1,0 +1,51 @@
+{
+  "title": "Failure-Kind-Aware Volatility Learning — Cycle 26",
+  "date": "2026-07-24",
+  "loop": "026",
+  "road": "B",
+  "ring": "SR-00 / SR-02 / BR-OUTPUT",
+  "agents": ["claude"],
+  "problem": "Cycles 23-25 made predictive warmup adaptive and stale-aware, but the volatility tracker only knew success vs failure. Auth, balance, rate-limit, gateway, connection, timeout, context-length, and model-unavailable failures were all treated identically, so the system could not shrink TTL for transient errors, suppress cached-winner reuse for context-length errors, or surface meaningfully different cooldowns and UI messages per failure kind. The SSE transport also misclassified any HTTP 400 as a balance error due to an operator-precedence bug.",
+  "root_cause": "ProviderCircuitBreakerFailureKind had no .contextLength case and no volatilityWeight. TransportError lacked properties to distinguish auth/balance/context-length/model-unavailable errors. SSETransport.isBalanceError used || in a way that matched every 400-family response. ModelHealthResult did not carry failureKind or Retry-After. WarmupVolatilityTracker stored only binary outcomes and recommended TTL/interval without considering failure severity. VolatilityHistoryStore had no schema for per-kind counts. ChatViewModel and ModelConfigurationStore recorded failures as unclassified.",
+  "fix": "Added .contextLength to ProviderCircuitBreakerFailureKind with a kind-specific breaker cooldown and a volatilityWeight (auth/balance/contextLength = 0.0 so they never poison volatility; rateLimit/gateway/connection/timeout = 0.5; modelUnavailable/unknown = 0.75). Added classification properties to TransportError (isBalanceError, isAuthError, isContextLengthError, isInvalidModelError, isModelUnavailableError, isEligibleForCrossProviderFailover, retryAfter) and fixed isBalanceError to require status 400/403 plus body wording. Added RFC 7231 numeric + HTTP-date Retry-After parsing to SSETransport. Extended ModelHealthResult with failureKind and retryAfter and classified every non-2xx probe status to a kind. Wired breaker failures, health results, and chat send failures through recordCachedWinnerOutcome(success:candidate:kind:). Updated WarmupVolatilityTracker to track per-kind failure counts and compute averageFailureSeverity, failureRate(for:), dominantFailureKind(for:), recommendedMaxStaleness, and kind-aware recommendedTTL / recommendedInterval. Bumped VolatilityHistoryStore to schema v2 storing successes, failures, and failureKinds while decoding legacy outcomes. Added PredictiveWarmupCache.staleness(relativeTo:) helper and ModelConfigurationStore.restartPredictiveWarmupIfIntervalChanged() so severe transient kinds immediately shrink the background scheduler interval. Updated ModelsTabView circuit-breaker detail for .contextLength and ChatViewModel.formatRequestError with a dedicated context-length branch. Added/extended tests in ChatFailureTests, ProviderCircuitBreakerTests, ModelHealthServiceTests, WarmupVolatilityTrackerTests, and VolatilityHistoryStoreTests.",
+  "files": [
+    "trios/rings/SR-01/SSETransport.swift",
+    "trios/rings/SR-00/ProviderCircuitBreaker.swift",
+    "trios/rings/SR-00/ModelHealthService.swift",
+    "trios/rings/SR-00/ModelWarmupService.swift",
+    "trios/rings/SR-00/WarmupVolatilityTracker.swift",
+    "trios/rings/SR-00/VolatilityHistoryStore.swift",
+    "trios/rings/SR-00/PredictiveWarmupCache.swift",
+    "trios/rings/SR-00/ModelConfigurationStore.swift",
+    "trios/rings/SR-02/ChatViewModel.swift",
+    "trios/BR-OUTPUT/ModelsTabView.swift",
+    "trios/tests/TriOSKitTests/ChatFailureTests.swift",
+    "trios/tests/TriOSKitTests/ProviderCircuitBreakerTests.swift",
+    "trios/tests/TriOSKitTests/ModelHealthServiceTests.swift",
+    "trios/tests/TriOSKitTests/WarmupVolatilityTrackerTests.swift",
+    "trios/tests/TriOSKitTests/VolatilityHistoryStoreTests.swift",
+    ".claude/plans/trios-cycle26-failure-kind-volatility-loop-026.md",
+    ".claude/plans/trios-cycle26-failure-kind-volatility-loop-026-report.md"
+  ],
+  "tests": {
+    "bash build.sh": "PASS",
+    "cargo test --workspace": "PASS",
+    "cargo clippy --workspace": "PASS",
+    "cargo run --bin clade-audit": "0 findings",
+    "cargo run --bin clade-seal": "SEAL VALID",
+    "cargo run --bin clade-e2e": "PASS",
+    "open trios.app": "relaunched, /health ok, menu-bar logo present"
+  },
+  "next_options": [
+    "Per-conversation provider/model pinning — allow the user to pin a provider or model per chat thread so adaptive warmup and failover only operate within allowed boundaries",
+    "Predictive warmup budget cap — track probe spend and cap daily/weekly budget, deprioritizing probes when close",
+    "Context-length-aware request routing — detect context-length failures proactively and route to models with larger context windows or trim history before send"
+  ],
+  "learnings": [
+    "Failure-kind classification must sit as close to the transport boundary as possible; once an error is reduced to a Bool the rest of the stack loses the signal needed for differentiated cooldowns, volatility, and UI messages.",
+    "Operator-precedence bugs in composite boolean classification are easy to miss; separating status checks into explicit guards with required literal wording prevents a single keyword from over-classifying every 4xx response.",
+    "Retry-After can be either a delta-seconds integer or an HTTP-date string; parsing both forms once at the transport layer lets every upstream consumer treat it as a TimeInterval without re-implementing RFC 7231.",
+    "Volatility weights of 0.0 for user-correctable failure kinds (auth, balance, contextLength) prevent the adaptive warmup system from aggressively deprioritizing providers the user can fix with credentials, a top-up, or a shorter message.",
+    "A single runtime interval restart path, driven by the same store that records outcomes, keeps adaptive TTL and background cadence aligned when severe transient failures demand faster re-probing."
+  ]
+}

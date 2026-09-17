@@ -1,0 +1,28 @@
+{
+  "task_id": "CHAT-ATTACHMENTS-001",
+  "claim_id": "223D24C2-6145-477B-AED7-BC5F1366FF92",
+  "timestamp": "2026-07-22T17:09:33Z",
+  "action": "spec_tdd_build_verify_learn",
+  "result": "clean",
+  "problem": "The native chat composer accepted text only and had no safe way to drop, preview, remove, or send images and files with a task.",
+  "solution": "Added a centralized attachment policy, a file and image importer, native NSTextView file-drop interception, SwiftUI drop targeting, a multi-file picker, thumbnail and file cards, duplicate and size limits, attachment-only sending, task-bound cleanup, late-callback invalidation, and an explicit untrusted local-path manifest for agent tools.",
+  "verification": {
+    "red_test": "PASS",
+    "attachment_policy_tests": "PASS",
+    "attachment_importer_tests": "PASS",
+    "swift_build": "PASS",
+    "compiled_swift_files": 86,
+    "code_signature": "PASS",
+    "native_text_view_drop_hook": "PASS",
+    "visual_runtime": "PASS",
+    "diff_check": "PASS",
+    "ascii_check": "PASS",
+    "live_health": {
+      "status": "ok",
+      "cdpConnected": true
+    },
+    "runtime_launch": "PASS",
+    "pid": 1312
+  },
+  "lesson": "Reliable macOS attachment UX needs two coordinated drop paths: a SwiftUI drop destination for hover feedback and non-file image providers, plus an NSTextView destination for file URLs dropped directly over the editor. Stable local paths and an explicit trust boundary let tool-capable agents inspect files without inflating requests or treating file content as instructions."
+}

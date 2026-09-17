@@ -1,0 +1,23 @@
+{
+  "timestamp": "2026-07-24T08:17:21Z",
+  "task_id": "TRIOS-PORTABLE-LAND-001",
+  "claim_id": "989F8151-6640-44B4-AFE1-FEEB17078EF2",
+  "action": "terminal_streaming_indicator_tdd_green",
+  "result": "PASS",
+  "evidence": {
+    "command": "bash tests/swift/run_chat_sse_e2e.sh",
+    "exit_code": 0,
+    "artifact": "unified ChatViewModel terminal assistant finalizer",
+    "facts": [
+      "The harness compiled 61 Swift files.",
+      "All 21 ChatSSEEndToEnd scenarios passed.",
+      "SSE error, explicit Stop, and thrown transport error now clear the assistant streaming indicator.",
+      "Existing finish, abort, unterminated EOF, planner, memory, race, and scroll contracts remain green."
+    ]
+  },
+  "residual_risks": [
+    "The complete application build and runtime artifact still need regeneration.",
+    "Independent Agent V must review the resolved diff.",
+    "Portable release dependencies and release optimization remain unresolved."
+  ]
+}

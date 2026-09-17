@@ -1,0 +1,27 @@
+{
+  "timestamp": "2026-07-24T09:26:37Z",
+  "task_id": "TRIOS-PORTABLE-LAND-001",
+  "claim_id": "989F8151-6640-44B4-AFE1-FEEB17078EF2",
+  "action": "merged_dev_optimized_build_and_signature",
+  "result": "PASS_WITH_WARNINGS",
+  "evidence": {
+    "command": "TRINITY_ROOT=/Users/playra/trinity TRIOS_SWIFT_OPTIMIZATION=-O ./build.sh",
+    "exit_code": 0,
+    "commit": "def368fc98eec80a6c6617d32b06df1690f883ac",
+    "facts": [
+      "The build ran from the clean local dev worktree.",
+      "QueenUILib built, the optimized app compiled 99 Swift files, and the bundle was signed.",
+      "The embedded harness compiled 61 Swift files and all 22 scenarios passed.",
+      "Strict signature verification passed for trios/trios.app with CDHash 9c8e6cbf2e5a19c51be335d847ba9a29ea9b8b0f."
+    ],
+    "warnings": [
+      "The first signature command used the worktree root instead of trios/trios.app and returned path-not-found; the corrected exact path passed.",
+      "XCTest was skipped because the selected toolchain does not provide xctest.",
+      "The existing A2AMessageRouter and onChange deprecation warnings remain."
+    ]
+  },
+  "residual_risks": [
+    "The optimized merged-dev bundle still requires exact launch, health, runtime E2E, and visual checks.",
+    "The bundle is ad-hoc signed and not a notarized transferable release."
+  ]
+}

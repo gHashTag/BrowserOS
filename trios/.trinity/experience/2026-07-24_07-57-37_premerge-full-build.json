@@ -1,0 +1,32 @@
+{
+  "timestamp": "2026-07-24T07:57:37Z",
+  "task_id": "TRIOS-PORTABLE-LAND-001",
+  "claim_id": "989F8151-6640-44B4-AFE1-FEEB17078EF2",
+  "action": "premerge_full_build_and_signature",
+  "result": "PASS_WITH_WARNINGS",
+  "evidence": {
+    "commands": [
+      "./build.sh",
+      "codesign --verify --deep --strict --verbose=2 trios.app",
+      "codesign -dv --verbose=4 trios.app"
+    ],
+    "exit_codes": [0, 0, 0],
+    "artifact": "trios.app bundle identifier com.browseros.trios",
+    "facts": [
+      "The canonical local QueenUILib dependency built successfully.",
+      "The application compiled from 97 Swift files.",
+      "The build script reran all 18 ChatSSEEndToEnd scenarios successfully.",
+      "The generated application bundle passed deep strict signature verification.",
+      "The local development signature has no TeamIdentifier."
+    ],
+    "warnings": [
+      "A2AMessageRouter uses a var that can be let and contains a pre-existing non-ASCII comment.",
+      "Three ChatPanelView onChange overloads are deprecated on macOS 14.",
+      "XCTest was skipped because this command-line toolchain does not provide XCTest."
+    ]
+  },
+  "residual_risks": [
+    "Runtime health and UI checks still need fresh pre-merge evidence.",
+    "The published dependency graph still cannot reproduce this local build on a clean machine."
+  ]
+}

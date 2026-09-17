@@ -1,0 +1,20 @@
+{
+  "task_id": "CHAT-LOADING-001",
+  "claim_id": "5E0B39EB-E5DB-4CC8-913C-B0E55E87A7AE",
+  "timestamp": "2026-07-22T09:57:00Z",
+  "action": "build_verify_learn",
+  "result": "clean",
+  "problem": "The active response indicator used a trailing spacer, anchoring its dots and agent label to the leading message edge.",
+  "solution": "The dots and agent label now form one full-width row centered relative to the shared chat column while remaining inside normal message flow.",
+  "verification": {
+    "layout_tests": "PASS",
+    "swift_build": "PASS",
+    "compiled_swift_files": 66,
+    "code_signature": "PASS",
+    "live_health": {"status": "ok", "cdpConnected": true},
+    "ascii_audit": "PASS",
+    "diff_check": "PASS",
+    "app_relaunch": "PASS"
+  },
+  "lesson": "Transient status UI should align to the content column that owns it. Centering the complete status group avoids visual drift from labels with different lengths and remains correct when a history sidebar is present."
+}

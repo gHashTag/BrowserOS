@@ -1,0 +1,29 @@
+╭─ TRIOS CONTINUOUS LOOP  ● UNKNOWN ───────────────────────────────────────────╮
+│ drawn from a reading      just now    2026-09-17 09:59:25Z                   │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ iteration                 0                                                  │
+│ last advanced             -           the loop state could not be read       │
+│ driver (iterations)       NONE        nothing schedules an iteration         │
+│ timers (housekeeping)     4 launchd   heal wrote 8m ago                      │
+│ lock                      cycle 0m                                           │
+├─ SWARM   measured just now ──────────────────────────────────────────────────┤
+│ bees running              16                                                 │
+│ dispatches finished       750                                                │
+│ tick refusal              16 workers already running (l…                     │
+│ candidates skipped        0                                                  │
+│   missing boundary        -                                                  │
+│   claimed by a fence      -                                                  │
+│   done but still open     -                                                  │
+│ available to a bee        -           needs a deep cycle                     │
+├─ TREE ───────────────────────────────────────────────────────────────────────┤
+│ branch                    feat/queen-supervisor  ahead 1  behind 1           │
+│ uncommitted source        9 mod / 244 new  generated files excluded          │
+│ worktrees                 22                                                 │
+│ volume used               99%         bees die at 0s when this fills         │
+│ gates declared / wired    25 / 8      17 run only on a Mac                   │
+├─ ANOMALIES   0 blocker  2 high  2 medium ────────────────────────────────────┤
+│ ! the Queen's board says running 16 right now; the dashboard file is 3.4h…   │
+│ ! the volume is 99% used; how much of it the loop owns was not measured t…   │
+│ ● 8 of them appear in a workflow CI will load; 17 run only on a developer…   │
+│ ● 244 untracked source file(s) and 9 modified one(s) exist only on this d…   │
+╰──────────────────────────────────────────────────────────────────────────────╯

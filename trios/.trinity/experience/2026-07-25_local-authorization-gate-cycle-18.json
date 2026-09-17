@@ -1,0 +1,60 @@
+{
+  "title": "Local Authorization Gate for Agent/Skill Creation",
+  "cycle": 18,
+  "date": "2026-07-25",
+  "ring": "packages/browseros-agent/apps/server",
+  "agents": ["claude"],
+  "road": "B",
+  "problem": "POST /agents and POST /skills were protected only by requireTrustedAppOrigin(). A malicious local webpage or compromised browser extension that could reach the loopback port could create persistent agents or skills without a second factor, matching the AgentForger/BioShocking agent trust failure pattern.",
+  "root_cause": "Origin trust alone is not enough for high-impact creation routes; there was no server-issued, local-app-bound capability token or human confirmation boundary.",
+  "fix": "Added an in-memory LocalAuthService that generates a 256-bit token and validates X-TriOS-Local-Auth with crypto.timingSafeEqual. Added requireLocalAuth middleware and mounted GET /auth/local-token behind requireTrustedAppOrigin. Gated POST /agents and POST /skills with the middleware. Wired the service through server.ts and added tests for missing/invalid/valid tokens plus remote-origin denial.",
+  "files": [
+    "packages/browseros-agent/apps/server/src/api/services/local-auth-service.ts",
+    "packages/browseros-agent/apps/server/src/api/utils/require-local-auth.ts",
+    "packages/browseros-agent/apps/server/src/api/routes/local-auth.ts",
+    "packages/browseros-agent/apps/server/src/api/routes/agents.ts",
+    "packages/browseros-agent/apps/server/src/api/routes/skills.ts",
+    "packages/browseros-agent/apps/server/src/api/server.ts",
+    "packages/browseros-agent/apps/server/tests/api/routes/auth-routes.test.ts",
+    "trios/.claude/plans/trios-local-auth-cycle-18-report.md"
+  ],
+  "tests": {
+    "bun_tsc_noEmit": "clean",
+    "bun_test_auth_routes": "29 pass, 0 fail",
+    "cargo_clade_build": "PASS",
+    "cargo_clade_e2e": "PASS",
+    "cargo_clade_seal": "SEAL VALID",
+    "trios_app_relaunch": "ok"
+  },
+  "variants": [
+    {
+      "name": "A - in-memory token gate",
+      "selected": true,
+      "summary": "Server issues a random in-memory token; POST /agents and POST /skills require it. Fast, no persistence, low blast radius."
+    },
+    {
+      "name": "B - Keychain-backed token + Swift client",
+      "selected": false,
+      "summary": "Store token in macOS Keychain, bind to signed TriOS app, add TriosMCPClient.localAuthToken fetch/inject helper."
+    },
+    {
+      "name": "C - pending-confirmation queue with UI dialog",
+      "selected": false,
+      "summary": "Creation requests become pending; TriOS UI shows confirmation dialog and user must approve before persistence."
+    }
+  ],
+  "next_options": [
+    "Keychain-backed Swift client token fetch/injection (Variant B)",
+    "Extend the gate to other high-impact routes",
+    "Pending-confirmation queue with UI dialog (Variant C)"
+  ],
+  "law_compliance": {
+    "L1_TRACEABILITY": true,
+    "L2_GENERATION": true,
+    "L3_PURITY": true,
+    "L4_TESTABILITY": true,
+    "L5_IDENTITY": true,
+    "L6_CEILING": true,
+    "L7_UNITY": true
+  }
+}

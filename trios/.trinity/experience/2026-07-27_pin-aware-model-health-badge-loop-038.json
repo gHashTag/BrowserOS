@@ -1,0 +1,24 @@
+{
+    "date": "2026-07-27",
+    "title": "Pin-Aware Model Health Badge - Cycle 38 Closure",
+    "ring": "BR-OUTPUT / SR-02",
+    "agents": "claude",
+    "road": "B",
+    "problem": "Cycle 37 made warmup, routing, and failover respect a per-conversation provider/model/baseURL pin, but the Models tab UI still presented global controls as if no pin existed. The active model section did not show the pin, Warm up now could switch away from it, and cross-provider failover controls gave no hint that pinned conversations ignore them.",
+    "root_cause": "ModelsTabView only observed ModelConfigurationStore and had no access to the current ChatViewModel, so it could not read conversationModelConstraint and never adapted its labels or actions.",
+    "fix": "Injected ChatViewModel into ModelsTabView via QueenTabView. Added pin-aware computed properties (isConversationModelPinned, conversationModelConstraint, pinnedModelLabel, activeModelSubtitle). Updated activeModelSection to show a pin.fill badge, pinned base URL, and a pinned subtitle. Added a note under the custom-model row explaining that global changes do not affect a pinned conversation. Changed the Warm up now button label to Warm up pinned model when pinned and passed the constraint into runAdaptiveWarmup(constrainedTo:). Added a help tooltip and a note in crossProviderSection explaining that pinned conversations ignore cross-provider failover. Also fixed the pre-existing unused-result warning in the warmup button.",
+    "files": [
+        "trios/BR-OUTPUT/QueenTabView.swift",
+        "trios/BR-OUTPUT/ModelsTabView.swift",
+        "trios/.claude/plans/trios-cycle38-pin-aware-model-health-badge.md",
+        "trios/.claude/plans/trios-cycle38-pin-aware-model-health-badge-report.md",
+        "trios/.trinity/experience/2026-07-27_pin-aware-model-health-badge-loop-038.json"
+    ],
+    "tests": "TRIOS_SKIP_CHAT_E2E=1 ./build.sh PASS; cargo test -p trios-mesh PASS (101 tests); TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-build PASS; TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-audit PASS (0 hard-gate findings); TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-seal SEAL VALID. swift test unavailable in CommandLineTools-only environment. Chat integration tests skipped because a pre-existing memory database schema version 4 assertion in the e2e harness fails in this environment.",
+    "next_options": [
+        "Conversation-level learned-limit reset - add a menu action to clear the learned context/output ceilings for the current conversation only, without resetting the global StreamingContextLimitLearner history.",
+        "Output-budget progress during streaming - render a live progress indicator inside the streaming assistant message showing consumed output tokens vs. the effective budget/ceiling, with color bands and approaching-limit warnings.",
+        "Pin-aware send-button guardrails - when the draft exceeds the pinned model's context window or output ceiling, show a cause-specific disabled-state tooltip and offer a one-tap Clear pin and send escape hatch."
+    ],
+    "claim": null
+}

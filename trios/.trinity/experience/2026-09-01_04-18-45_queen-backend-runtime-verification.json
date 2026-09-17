@@ -1,0 +1,50 @@
+{
+  "timestamp": "2026-09-01T04:18:45Z",
+  "task_id": "QUEEN-BACKEND-RUNTIME-001",
+  "claim_id": "BB29986D-D12D-46D5-A4EC-60B30D68D780",
+  "action": "Verify the production Queen supervisor through configuration, live API, Railway logs, UI, and focused tests",
+  "result": "PASS",
+  "evidence": {
+    "service": "trios-agent-server",
+    "deployment_id": "1e109043-0804-4ee8-a234-b27a4668fce8",
+    "public_domain": "trios-agent-server-production.up.railway.app",
+    "health": {
+      "status": "ok",
+      "durable": true,
+      "configured": true,
+      "database_error": null
+    },
+    "scheduler": {
+      "interval_seconds": 1800,
+      "repository": "gHashTag/trios",
+      "policy_binary": "/usr/local/bin/queend"
+    },
+    "manual_tick": {
+      "ran": true,
+      "fence": 211,
+      "decided_at": "2026-09-01T04:17:42.983Z",
+      "candidate_count": 36,
+      "allowed": false,
+      "refusal": "nothing to choose",
+      "skipped_reason_count": 39
+    },
+    "dispatch_history": {
+      "recent_rows": 8,
+      "finished": 8,
+      "running": 0,
+      "latest_issue": 1290,
+      "latest_outcome": "finished"
+    },
+    "tests": {
+      "command": "bun test apps/server/tests/api/queen-lease.test.ts apps/server/tests/api/routes/queen-lease.test.ts apps/server/tests/api/queen-round.test.ts apps/server/tests/api/queend-choose.test.ts",
+      "passed": 34,
+      "failed": 0
+    }
+  },
+  "interpretation": "The Queen backend is running and deciding. The current no-dispatch outcome is a policy decision: every open candidate is already accepted/awaiting review, incomplete as a spec, or collides with claimed work.",
+  "residual_risks": [
+    "The open issue queue contains no currently eligible spec, so the latest tick correctly dispatched no new Bee.",
+    "The service logs a non-critical 404 while fetching the remote skill catalog.",
+    "The health endpoint intentionally reports cdpConnected=false because the Railway backend is headless."
+  ]
+}

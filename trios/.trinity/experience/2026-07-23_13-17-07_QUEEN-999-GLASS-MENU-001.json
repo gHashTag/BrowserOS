@@ -1,0 +1,39 @@
+{
+  "task_id": "QUEEN-999-GLASS-MENU-001",
+  "claim_id": "1FD0F6F3-8936-4F72-8E41-1CD283D4518E",
+  "timestamp": "2026-07-23T13:17:07Z",
+  "action": "spec_tdd_style_build_verify_learn",
+  "result": "clean",
+  "problem": "The 999 menu displayed three persistent realm labels, hard-coded the EXPLAIN petal as a cyan pulse, and covered the shared Trios glass with opaque Queen black layers.",
+  "solution": "Added a tested presentation policy, disabled the realm labels, removed the EXPLAIN-only animation, gave every idle petal the same translucent neutral fill, introduced an explicit host-glass Queen surface style, and removed redundant black backgrounds from the embedded host path.",
+  "verification": {
+    "red_test": "PASS",
+    "presentation_tests": {
+      "status": "PASS",
+      "count": 2
+    },
+    "queen_tests": {
+      "status": "PASS",
+      "count": 49
+    },
+    "trios_build": {
+      "status": "PASS",
+      "compiled_swift_files": 103
+    },
+    "petal_hit_targets": 27,
+    "realm_labels_hidden": "PASS",
+    "explain_uniform": "PASS",
+    "host_glass_visible": "PASS",
+    "code_signature": "PASS",
+    "compact_visual": ".trinity/e2e/queen_999_glass_compact.png",
+    "fullscreen_visual": ".trinity/e2e/queen_999_glass_fullscreen.png",
+    "browseros_health": {
+      "status": "ok",
+      "cdpConnected": true
+    },
+    "runtime_launch": "PASS",
+    "pid": 49724,
+    "diff_check": "PASS"
+  },
+  "lesson": "An embedded interface must expose transparency deliberately at every root layer. One opaque fallback can hide the host material, while a special-case animation can make a single navigation target look selected even when it is idle."
+}

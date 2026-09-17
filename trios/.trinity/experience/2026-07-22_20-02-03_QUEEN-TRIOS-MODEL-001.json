@@ -1,0 +1,37 @@
+{
+  "task_id": "QUEEN-TRIOS-MODEL-001",
+  "claim_id": "8EE74D77-7CB6-436A-925C-286500C98956",
+  "timestamp": "2026-07-22T20:02:03Z",
+  "action": "spec_tdd_connect_build_verify_learn",
+  "result": "clean",
+  "problem": "Queen discovered local Ollama models but preserved an unavailable default cloud selection, so embedded Chat falsely reported that .env keys were missing even though Trios already had a working local provider and selected model.",
+  "solution": "Added a deterministic Ollama selection policy, preserved valid Queen choices, reused the shared trios.model.ollama.selection preference, rechecked connectivity after automatic model changes, and skipped the standalone fixed-width onboarding only in the embedded host.",
+  "verification": {
+    "red_test": "PASS",
+    "selection_policy_tests": {
+      "status": "PASS",
+      "count": 3
+    },
+    "queen_tests": {
+      "status": "PASS",
+      "count": 45
+    },
+    "trios_build": {
+      "status": "PASS",
+      "compiled_swift_files": 91
+    },
+    "selected_model": "ollama:qwen3.5:cloud",
+    "ollama_catalog": "PASS",
+    "offline_warning_removed": "PASS",
+    "compact_onboarding_overflow_removed": "PASS",
+    "code_signature": "PASS",
+    "browseros_health": {
+      "status": "ok",
+      "cdpConnected": true
+    },
+    "runtime_launch": "PASS",
+    "pid": 37003,
+    "diff_check": "PASS"
+  },
+  "lesson": "An embedded module should share the host's provider choice, not only its network endpoint. Selection must distinguish a valid user choice from an unavailable default, and host-specific onboarding must not overflow the host window."
+}

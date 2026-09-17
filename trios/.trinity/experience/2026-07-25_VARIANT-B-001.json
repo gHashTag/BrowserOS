@@ -1,0 +1,38 @@
+{
+  "date": "2026-07-25",
+  "task_id": "VARIANT-B-001",
+  "domain": "SR-01 / BrowserOS server",
+  "agents": ["claude"],
+  "road": "B",
+  "problem": "Continue Variant B implementation from the decomposed weak-spot plan: server startup failed when bundled limactl was missing; chat/task PostgreSQL tables had to be created manually; DB retry logic was duplicated and lacked jitter; Swift retry/SSE logic had no unit tests.",
+  "root_cause": "configureVmRuntime() in Application.start() ran before the OpenClaw best-effort try/catch and synchronously resolved the bundled limactl, crashing the whole server. Chat/task services created their own pools without a startup schema guarantee, and each service inlined identical exponential backoff without jitter.",
+  "fix_pattern": "Moved configureVmRuntime({ resourcesDir }) inside the OpenClaw try/catch so a missing limactl logs a warning and the server continues. Added pg-migrate.ts with runPgMigrations() called after core services to auto-create agent_tasks, conversations, and conversationMessages. Extracted lib/db/retry.ts exporting withDbRetry() with jitter, replacing duplicated retry loops in ChatHistoryService and TaskQueueService. Added NetworkRetryPolicyTests.swift and SSETransportTests.swift with a mock URLProtocol; refactored SSETransport to accept injected URLSession and NetworkRetrier.",
+  "files_changed": [
+    "packages/browseros-agent/apps/server/src/main.ts",
+    "packages/browseros-agent/apps/server/src/lib/db/pg-migrate.ts",
+    "packages/browseros-agent/apps/server/src/lib/db/retry.ts",
+    "packages/browseros-agent/apps/server/src/api/services/chat-history-service.ts",
+    "packages/browseros-agent/apps/server/src/api/services/task-queue-service.ts",
+    "packages/browseros-agent/apps/server/src/api/routes/chat-history.ts",
+    "packages/browseros-agent/apps/server/src/api/services/a2a/pg-agent-store.ts",
+    "trios/rings/SR-01/SSETransport.swift",
+    "trios/tests/TriOSKitTests/NetworkRetryPolicyTests.swift",
+    "trios/tests/TriOSKitTests/SSETransportTests.swift"
+  ],
+  "tests_added": [
+    "trios/tests/TriOSKitTests/NetworkRetryPolicyTests.swift",
+    "trios/tests/TriOSKitTests/SSETransportTests.swift"
+  ],
+  "tests": [
+    "bun run typecheck in packages/browseros-agent/apps/server PASS",
+    "./build.sh PASS (chat integration tests PASS)",
+    "cargo run --bin clade-e2e PASS (server healthy, app running)",
+    "trios.app relaunched and menu-bar logo present"
+  ],
+  "lessons": [
+    "Synchronous resource resolution for optional subsystems (OpenClaw/lima) must happen inside best-effort guards, not on the critical startup path.",
+    "PostgreSQL-backed services should not assume migrations are applied elsewhere; a single best-effort migration step at server startup removes manual DB setup.",
+    "Centralize retry+jitter in one helper rather than duplicating it across services; it makes policy changes testable and reduces drift.",
+    "Make Swift network actors testable by injecting the URLSession (via URLProtocol) and the retrier; this keeps production behavior identical while enabling fast XCTest suites."
+  ]
+}

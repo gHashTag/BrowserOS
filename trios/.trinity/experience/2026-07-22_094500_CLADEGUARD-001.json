@@ -1,0 +1,33 @@
+{
+  "task_id": "CLADEGUARD-001",
+  "issue_url": "https://github.com/gHashTag/trios/issues/T27-EPIC-001",
+  "domain": "Kernel",
+  "agent_chain": ["t27-queen", "t27-creator", "t27-verifier"],
+  "root_cause": "CladeGuard.swift was hand-written rollback/health code with no T27 spec or provenance, violating L2 GENERATION. The existing clade-guard.md spec existed but had no active claim, task, or seal artifacts.",
+  "fix_pattern": "Updated clade-guard.md spec with full invariants, interface, decision flow, and tests. Acquired claim CLADEGUARD-001. t27-creator added T27-CANON header, aligned docs, removed /dev/null fallback, and added tests/swift/clade_guard_test.swift for verifyChecksum. Build was blocked by unrelated untracked mesh-chat files (MeshChatModels Character Codable error + MeshTabView extra brace); triaged with AGENT-V-WAIVER blocks and ownership-index entries. Verifier re-issued CLEAN verdict; seal written.",
+  "files_changed": [
+    "trios/.trinity/specs/clade-guard.md",
+    "trios/BR-OUTPUT/CladeGuard.swift",
+    "trios/tests/swift/clade_guard_test.swift",
+    "trios/.trinity/claims/active/clade_guard.json",
+    "trios/.trinity/state/verdicts/CLADEGUARD-001.json",
+    "trios/.trinity/seals/CladeGuard.json",
+    "trios/.trinity/state/ownership-index.json",
+    "trios/BR-OUTPUT/MeshTabView.swift",
+    "trios/BR-OUTPUT/MeshChatModels.swift",
+    "trios/BR-OUTPUT/MeshChatListView.swift",
+    "trios/BR-OUTPUT/MeshChatView.swift",
+    "trios/BR-OUTPUT/MeshChatViewModel.swift",
+    "trios/BR-OUTPUT/MeshChatThreadView.swift"
+  ],
+  "tests_added": [
+    "trios/tests/swift/clade_guard_test.swift"
+  ],
+  "lessons": [
+    "A single pre-existing build error in an unrelated untracked file blocks the entire L4 gate for every T27 seal.",
+    "Use AGENT-V-WAIVER with an expiry to triage files that are not part of the current wave, then create ownership-index entries so clade-audit --canon sees them.",
+    "Fix the literal build error too if it is trivial (extra brace) so the wave can proceed; leave deeper semantic fixes for a follow-up issue.",
+    "Keep claims refreshed before verifier runs; stale claims turn CLEAN implementations into NEEDS_FIX."
+  ],
+  "timestamp": "2026-07-22T09:45:00Z"
+}

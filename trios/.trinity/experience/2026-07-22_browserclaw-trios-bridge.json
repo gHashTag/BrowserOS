@@ -1,0 +1,17 @@
+{
+  "issue": "T27-EPIC-001",
+  "title": "BrowserClaw and TRIOS MCP bridge integration",
+  "date": "2026-07-22",
+  "problem": "The TRIOS bridge used legacy BrowserOS tool names and shared port 9200 with the current BrowserClaw server.",
+  "solution": "Reserve port 9200 for BrowserClaw, move the TRIOS bridge to 9203, detect the advertised MCP catalog, translate bridge operations to the current BrowserClaw tools, and supervise the compatible chat server on localhost port 9105 without requiring the optional OpenClaw VM runtime. TriOS now discovers the BrowserOS CDP port, adopts an existing healthy server, retries owned launches through a readiness window, and terminates only processes it owns. The build re-signs the completed app bundle so macOS can launch it after replacing its executable.",
+  "verification": [
+    "BrowserClaw contract tests pass",
+    "TRIOS MCP bridge and BrowserOS server type-checks pass",
+    "Live health reports cdpConnected true",
+    "Cold TriOS launch starts BrowserOS Agent as its child process and reaches healthy readiness",
+    "The completed app bundle passes strict code-signature verification",
+    "Live chat SSE request through Ollama qwen3.5:cloud returns OK",
+    "Bridge suite passes except two pre-existing tri CLI availability tests"
+  ],
+  "lesson": "MCP integrations should negotiate against advertised tool capabilities instead of assuming product versions or historical tool names. A desktop supervisor must distinguish liveness from readiness, wait for dependency initialization, preserve ownership boundaries, and sign the final bundle rather than an intermediate executable."
+}

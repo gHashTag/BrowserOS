@@ -1,0 +1,21 @@
+{
+  "timestamp": "2026-07-24T07:14:36Z",
+  "task_id": "MEMORY-CONTROLS-001",
+  "claim_id": "2621A8A0-22B7-4E85-AA5C-3F2857AFD10C",
+  "action": "fresh_full_build_and_signature",
+  "result": "PASS",
+  "evidence": {
+    "build_command": "TRIOS_REUSE_QUEEN_BUILD=1 ./build.sh",
+    "build_exit_code": 0,
+    "swift_files_compiled": 97,
+    "chat_sse_scenarios": 18,
+    "app_bundle": "trios.app",
+    "signature_command": "codesign --verify --deep --strict trios.app",
+    "signature_exit_code": 0,
+    "xctest": "SKIPPED_TOOLCHAIN_UNAVAILABLE",
+    "warnings": [
+      "A2AMessageRouter.swift has a pre-existing var-to-let warning and a non-ASCII comment.",
+      "ChatPanelView.swift uses three macOS 14-deprecated onChange overloads."
+    ]
+  }
+}

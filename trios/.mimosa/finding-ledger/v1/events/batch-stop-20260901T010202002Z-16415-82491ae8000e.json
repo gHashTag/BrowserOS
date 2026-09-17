@@ -1,0 +1,63 @@
+{
+  "schemaVersion": "mimosa-finding-ledger-batch/v1",
+  "batchId": "stop-20260901T010202002Z-16415-82491ae8000e",
+  "runId": "20260901T010202002Z-16415-82491ae8000e",
+  "runStatus": "inconclusive",
+  "coverage": {
+    "status": "partial",
+    "reasons": [
+      {
+        "code": "bash_discovery_incomplete",
+        "stage": "bash-discovery",
+        "target": ".worktrees/prod/queen-5003/trios/agent-server/apps/agent/entrypoints/app/search-provider/SearchProviderGrid.tsx",
+        "detail": "project enumeration exceeded 5000 reviewable files",
+        "affectsCompletion": true
+      },
+      {
+        "code": "baseline_partial",
+        "stage": "baseline",
+        "target": ".worktrees/prod/queen-5002/trios/agent-server/apps/agent/entrypoints/app/layout/SidebarLayout.tsx",
+        "detail": "baseline exceeded 5000 candidate files",
+        "affectsCompletion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "bash-discovery",
+        "target": ".worktrees/prod/queen-5003/trios/agent-server/apps/agent/entrypoints/app/search-provider/SearchProviderGrid.tsx",
+        "detail": "bash_discovery_incomplete: project enumeration exceeded 5000 reviewable files",
+        "affectsCompletion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "baseline",
+        "target": ".worktrees/prod/queen-5002/trios/agent-server/apps/agent/entrypoints/app/layout/SidebarLayout.tsx",
+        "detail": "baseline_partial: baseline exceeded 5000 candidate files",
+        "affectsCompletion": true
+      }
+    ]
+  },
+  "source": {
+    "component": "zcode-hook",
+    "operationId": "Stop"
+  },
+  "revision": "63ae538a396fa2ad6f15a8a3d202ce8b486aa38d",
+  "diffHash": "09579f9dfe24ce1aefd4f6593826e5783f8b2037fd175d938529e95077f9de79",
+  "rulesVersion": "unavailable",
+  "sessionHash": "0fde83bfae4e4e2cce03467ccebfdac95f0d5d7ec1f0c92bb1d6c388ca5b7493",
+  "reportRef": ".mimosa/reports/task-review-sess_2c244a44-c950-44f1-91c3-11aa8d7a76e9-20260901T010202002Z-16415-82491ae8000e.json",
+  "events": [],
+  "observedFindingIds": [
+    "mimosa-9d2ab88931657415502952fd",
+    "mimosa-eec1497c9e61e592d39ea86f",
+    "mimosa-94a95a0a140cf5e29f556866",
+    "mimosa-30fa7bea5f546aea5d6b6219"
+  ],
+  "verifiedFiles": [
+    {
+      "file": "build.sh",
+      "direct": "complete",
+      "projectContext": "partial"
+    }
+  ],
+  "recordedAt": "2026-09-01T01:02:02.262Z"
+}

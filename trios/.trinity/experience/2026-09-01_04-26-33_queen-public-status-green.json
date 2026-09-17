@@ -1,0 +1,19 @@
+{
+  "timestamp": "2026-09-01T04:26:33Z",
+  "task_id": "QUEEN-PUBLIC-STATUS-001",
+  "claim_id": "B2AD0166-19CB-43C9-AA84-651A9513A751",
+  "action": "Implement and run the public Queen status route contract",
+  "result": "PASS",
+  "evidence": {
+    "command": "bun test apps/server/tests/api/queen-public-status.test.ts",
+    "exit_code": 0,
+    "facts": [
+      "3 tests passed",
+      "The response omits holder identity, branches, conversation IDs and provider details",
+      "The route closes its database pool and disables caching"
+    ]
+  },
+  "residual_risks": [
+    "The full focused Queen suite and production deployment remain."
+  ]
+}

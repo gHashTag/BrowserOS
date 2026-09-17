@@ -1,0 +1,35 @@
+{
+  "title": "Chat Feedback Endpoint — Cycle 17 Closure",
+  "ring": "SR-02 / BrowserOS server",
+  "agents": ["claude"],
+  "road": "B",
+  "problem": "After Cycle 16 made clade-seal a promotion gate, one tracked TODO remained: ChatViewModel.swift:510 `sendFeedback` logged locally but did not wire to a server endpoint, so the seal had to permit one TODO.",
+  "root_cause": "The BrowserOS chat route had no feedback endpoint, and ChatHistoryService had no method to store message-level feedback. The Swift client therefore had no destination for its thumbs-up/down calls.",
+  "fix": "Added POST /:conversationId/messages/:messageId/feedback to the chat route, protected by requireTrustedAppOrigin. Added ChatHistoryService.storeFeedback that updates metadata.feedback JSONB. Wired ChatViewModel.sendFeedback to POST to ProjectPaths.mcpBaseURL with NetworkRetrier. Emptied ALLOWED_TODO_FINGERPRINTS in clade-seal.",
+  "files": [
+    "trios/rings/SR-02/ChatViewModel.swift",
+    "trios/rings/RUST-08/clade-promote/src/seal.rs",
+    "packages/browseros-agent/apps/server/src/api/routes/chat.ts",
+    "packages/browseros-agent/apps/server/src/api/server.ts",
+    "packages/browseros-agent/apps/server/src/api/services/chat-history-service.ts",
+    "packages/browseros-agent/apps/server/src/api/utils/validation.ts",
+    "packages/browseros-agent/apps/server/tests/api/routes/auth-routes.test.ts",
+    "trios/.claude/plans/trios-feedback-endpoint-cycle-17.md",
+    "trios/.claude/plans/trios-feedback-endpoint-cycle-17-report.md"
+  ],
+  "tests": {
+    "clade_audit": "TODO gate 0 findings, all hard gates green",
+    "clade_seal": "SEAL VALID",
+    "clade_build": "PASS",
+    "clade_e2e": "PASS",
+    "cargo_test_workspace": "101 passed",
+    "bun_test_auth_routes": "24 passed, 0 failed",
+    "bun_tsc": "clean",
+    "trios_health": "ok"
+  },
+  "next_options": [
+    "Extend feedback into signed receipts with dedicated table (Variant B)",
+    "Surface aggregated feedback in QueenStatusViewModel",
+    "Add offline feedback queue with retry"
+  ]
+}

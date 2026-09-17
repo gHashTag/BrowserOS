@@ -1,0 +1,56 @@
+{
+  "id": "2026-08-23_the-cooldown-paced-the-pileup-it-was-meant-to-prevent",
+  "date": "2026-08-23",
+  "ring": "SR-00",
+  "branch": "feat/queen-supervisor",
+  "title": "Five reads dispatched 69 seconds apart settled at the same instant: the cooldown paced the pile-up it was written to prevent",
+  "severity": "high",
+  "agent": "Queen",
+  "problem": "The conversation encryption key took 290.5 seconds to answer, with 2807 callers refused in the window. The launch gate was the obvious suspect and it is not: main.swift lowers it five seconds after applicationDidFinishLaunching, measured in the log as keychain.launch_gate.cleared at +5.0s.",
+  "root_cause": "KeychainSecrets.readInFlight is a boolean, and the timeout path clears it deliberately - a read blocked forever would otherwise latch it and blind the app for the life of the process, which is the 2026-08-21 defect. So the flag reads false while a read is still running, and every cooldown expiry dispatches another read into the same blocked queue. The guard's own comment says it exists 'to stop callers piling up behind a hung securityd'. It does not stop the pile-up; it paces it to one every sixty seconds.",
+  "findings": [
+    "Release log 2026-08-23T07:10, offsets from server.launch: gate cleared at +5.0s; keychain.read.stalled at +13.1s and +15.1s; then nothing until +294.9s.",
+    "At +299.4s FIVE keychain.read.settled events fired at the same instant with elapsed 294.4 / 239.1 / 170.2 / 101.3 / 32.5 - starts roughly 69 seconds apart, which is the 60-second cooldown plus overhead. They were not slow individually. They queued behind one block and returned together.",
+    "encrypt_fallback fired 16 times in the first 30 seconds, 7 of them BEFORE the gate cleared at +5s. The plaintext exposure is concentrated in the first half-minute, consistent with the previous round's finding that it is transient.",
+    "clearLaunchGate() has exactly one caller: main.swift:60, inside a detached task that sleeps five seconds. main.swift is another agent's uncommitted work, so it was read and not touched.",
+    "What blocked securityd from +13s to +299s is NOT identified. This round did not find it and the fix does not touch it.",
+    "make check DID return a verdict this round, green, after roughly fifty minutes in the harness-lock queue: cassettes passed, and every working-tree mutation was caught (2 of 19 selected). An earlier draft of this record said no verdict was returned; that was written while it was still queued."
+  ],
+  "fix": "outstandingReads records each dispatch keyed by service/account and clears it when the call settles, whatever the status. A caller now refuses rather than stacking a second read on an item whose first has not answered, and logs keychain.read.not_restacked with the outstanding read's age. Past outstandingReadPatience (600s) the read is treated as abandoned and a fresh dispatch is allowed, keeping the escape hatch the timeout path was written to provide.",
+  "files_changed": [
+    "rings/SR-00/KeychainSecrets.swift",
+    "tools/forensics.py"
+  ],
+  "prevention": [
+    "A boolean cannot carry the question that decides the branch. 'Is a read in flight' and 'how long has it been in flight' are different facts, and only the second one can tell a pile-up from a latch.",
+    "When a guard's comment states its purpose, check the purpose against the log rather than the code. This one had been read many times and its claim never measured.",
+    "Two failure modes traded against each other usually means a missing third state. Latching blinds the app; clearing stacks the queue; recording the dispatch does neither.",
+    "Offsets from the launch anchor make a timeline legible where absolute timestamps do not. Five settles at +299.4s with descending elapsed values is a queue signature and nothing else looks like it."
+  ],
+  "corrections_to_earlier_claims": [
+    "Last round I recommended variant B-prime, 'narrow the launch-gate window', on the assumption that the 290 seconds were the gate. The gate is five seconds. The recommendation named the wrong subsystem, and I only found that by reading main.swift rather than reasoning from the number."
+  ],
+  "not_verified": [
+    "keychain.read.not_restacked did NOT fire in the window after the change. The guard is in the running release binary and was never exercised, because no second dispatch was attempted: the first read settled at +30.6s with elapsed 25.7s, well before the 60-second cooldown from +13.0s could expire. So the refusal path has no live proof."
+  ],
+  "related_episodes": [
+    "2026-08-23_the-gate-that-returned-nil-and-let-exists-answer",
+    "2026-08-23_the-refusal-that-never-asked-the-keychain",
+    "2026-08-21_unmeasured-cause-and-the-bricked-queen-chat"
+  ],
+  "tags": [
+    "unmeasured-cause",
+    "keychain",
+    "cooldown",
+    "boolean-for-state",
+    "shared-tree",
+    "not-proven-live"
+  ],
+  "the_window_collapsed_but_i_cannot_claim_it": {
+    "before_07_10": "conversation key 290.5s / 2807 refusals; memory 287.9s; five reads all settling at +299.4s; 16 encrypt_fallback in the first 30s",
+    "after_08_05": "conversation key 16.3s / 446 refusals; memory 19.5s; two reads settling at +30.6s and +34.9s; 3 encrypt_fallback",
+    "ratio": "18x shorter window",
+    "why_this_is_not_proof": "The improvement is real and measured, and I cannot attribute it to my change. The guard only acts when a SECOND dispatch is attempted for an item whose first has not settled; not_restacked never fired, so it never acted. The first read simply answered in 25.7s this time instead of stalling past the cooldown. Whether securityd was less loaded, or whether some other agent's change helped, is not measured. Claiming the fix caused this would be the exact defect this week has been about: a plausible cause nobody measured.",
+    "what_would_be_proof": "A window where a read has not settled when the cooldown expires. Then not_restacked fires with the outstanding read's age, and the settle count stays at one instead of climbing to five. Until such a window occurs the change is unexercised, not validated."
+  }
+}

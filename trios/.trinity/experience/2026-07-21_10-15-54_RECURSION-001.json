@@ -1,0 +1,29 @@
+{
+  "task_id": "RECURSION-001",
+  "issue_url": "#T27-EPIC-001",
+  "domain": "Kernel",
+  "agent_chain": [
+    "t27-creator",
+    "t27-verifier"
+  ],
+  "root_cause": "trios had layered single-instance failures: missing Info.plist bundle ID prevented NSRunningApplication activation, PID file was written after a window race, pgrep -x detection was unreliable, and bare-binary launch bypassed bundle checks.",
+  "fix_pattern": "Centralize singleton paths in ProjectPaths.swift; acquire POSIX flock before writing PID with retries; detect existing instance via NSRunningApplication bundle ID with comm/args fallback; generate Info.plist in build.sh; block bare-binary launch. Also made clade-worktree tests deterministic by parameterizing env-dependent helpers instead of mutating global TRIOS_ROOT.",
+  "files_changed": [
+    "trios/BR-OUTPUT/RecursionGuard.swift",
+    "trios/BR-OUTPUT/ProjectPaths.swift",
+    "trios/build.sh",
+    "trios/rings/RUST-10/clade-worktree/src/main.rs",
+    "trios/.trinity/specs/recursion-guard.md"
+  ],
+  "tests_added": [
+    "updated rings/RUST-10/clade-worktree tests to use parameterized helpers"
+  ],
+  "lessons": [
+    "Canon Swift files must be spec-driven; the .md spec is SSOT and .swift is a derived artifact.",
+    "Workspace tests must not mutate global env; use parameterized helpers to stay deterministic under parallel execution.",
+    "ASCII-only policy applies to specs, policy, agent instructions, skills, and changed source lines.",
+    "External BrowserOS server health can block e2e seal; record the dependency and rerun seal when the server is up."
+  ],
+  "seal_status": "BUILD_PASS, TEST_PASS, E2E_BLOCKED_BY_SERVER_HEALTH",
+  "timestamp": "2026-07-21T10:15:54Z"
+}

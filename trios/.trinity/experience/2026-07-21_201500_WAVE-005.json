@@ -1,0 +1,57 @@
+{
+  "id": "WAVE-005",
+  "date": "2026-07-21",
+  "ring": "RUST-13",
+  "phase": "verify",
+  "road": "B",
+  "agents_involved": [
+    "t27-creator",
+    "t27-verifier",
+    "t27-experience"
+  ],
+  "issue": "Recurring /loop macro: Wave 5 research and implementation of trios-mesh daemon panic hardening and runtime-state isolation.",
+  "problem": "trios-mesh production code contained 9 expect calls on crypto primitives plus 1 in discovery MAC computation; the unregistered trios-meshd binary panicked on bad config, bind failure, and missing files and used world-writable /tmp/mesh.drop; the workspace lint expect_used was only warn, allowing new panic surfaces to land.",
+  "fix": "Added MeshError::CryptoInternal and propagated Result through crypto.rs, discovery.rs, and all callers. Rewrote trios_meshd.rs with Result-based startup, line-numbered config errors, mutex poison recovery, and .trinity/run/mesh.drop default with TRIOS_MESH_DROP override. Elevated workspace expect_used/unwrap_used to deny and added test-only exemptions. ASCII-cleaned touched source, specs, and skills.",
+  "files_changed": [
+    "trios/Cargo.toml",
+    "trios/rings/RUST-13/trios-mesh/src/lib.rs",
+    "trios/rings/RUST-13/trios-mesh/src/crypto.rs",
+    "trios/rings/RUST-13/trios-mesh/src/discovery.rs",
+    "trios/rings/RUST-13/trios-mesh/src/router.rs",
+    "trios/rings/RUST-13/trios-mesh/src/bin/trios_meshd.rs",
+    "trios/rings/RUST-13/clade-meshd/src/main.rs",
+    "trios/.trinity/specs/mesh-panic-hardening.md",
+    "trios/.trinity/wave-loop-005.md",
+    "trios/.claude/skills/ascii-lint/SKILL.md",
+    "trios/.claude/skills/panic-hardening/SKILL.md"
+  ],
+  "tests_added": "Existing trios-mesh 101 tests + clade-meshd 2 tests continue to pass; no new tests added.",
+  "verification": "./build.sh passed; cargo test -p trios-mesh --all-features passed 101 tests; cargo test -p clade-meshd --all-features passed 2 tests; cargo clippy -p trios-mesh -p clade-meshd --all-targets --all-features clean; ASCII scan of changed files clean; no expect/unwrap violations in production code.",
+  "pattern": "Convert daemon production expect/unwrap to Result propagation with a domain-internal error variant, add workspace clippy deny, exempt tests only, and move runtime /tmp state to project-relative paths with env override.",
+  "anti_pattern": "Do not use expect/unwrap on I/O, crypto, or config in daemon code; do not use world-writable /tmp for runtime state; do not register a binary with API drift.",
+  "tags": [
+    "panic-hardening",
+    "trios-mesh",
+    "clade-meshd",
+    "result-propagation",
+    "crypto-internal",
+    "mutex-poison-recovery",
+    "tmp-migration",
+    "ascii-only",
+    "L1-TRACEABILITY",
+    "L3-PURITY",
+    "L7-UNITY"
+  ],
+  "commit": "fed884eb0",
+  "branch": "feat/zai-provider",
+  "skills_saved": [
+    "trios/.claude/skills/ascii-lint/SKILL.md",
+    "trios/.claude/skills/panic-hardening/SKILL.md"
+  ],
+  "next_wave_options": [
+    "meshd-revival",
+    "tmp-zero",
+    "seal-automation"
+  ],
+  "closeout_report": "trios/.trinity/wave-loop-005.md"
+}

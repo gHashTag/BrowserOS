@@ -1,0 +1,27 @@
+{
+  "date": "2026-07-27",
+  "title": "Streaming Context Watchdog Hardening — Cycle 29 Closure",
+  "ring": "SR-00 / SR-02 / BR-OUTPUT",
+  "agents": "claude",
+  "road": "B",
+  "problem": "Cycle 28 added a streaming context watchdog that pauses mid-stream and offers to continue on a larger model, summarize so far, or stop. In practice the paused UI never surfaced because pauseStreamForContextLimit invalidated the stream and then re-checked isCurrentStream(generation), the final delta that triggered the limit was not applied before pausing, continuation on a larger model dropped the partial assistant response because sendMessage used messages.dropLast(), approaching-limit warnings were persisted as system messages, and context-limit pauses were recorded as successful sends.",
+  "root_cause": "The pause path mixed stream-invalidation (which bumps streamGeneration) with generation-gated UI updates and history saves. executeStream checked the watchdog before applying the delta. sendMessage built previousConversation by dropping the last message, assuming it was always the current user message. showApproachingContextLimitWarning mutated the persisted message array. executeStream returned a plain StreamLatency with no way to distinguish a context-limit pause from a normal completion.",
+  "fix": "Updated .trinity/specs/streaming-context-watchdog.md with INV-8 through INV-11. Removed the post-invalidation generation guard in pauseStreamForContextLimit and added a direct captureHistorySnapshot/persistHistorySnapshot path. Reordered executeStream to apply deltas via handleEvent before feeding the watchdog. Changed sendMessage to build historyForRequest with messages.filter { $0.id != sourceMessageId }, preserving the partial assistant on continuation. Replaced persisted system-message warnings with a @Published streamingContextWarning rendered as a transient banner in ChatPanelView. Reset all pause-related published state in sendMessage, cancelStreaming, newConversation, and performConversationSwitch. Added didPauseForContext to StreamLatency so sendMessage records success: false, reason: \"context limit\" for paused streams. Added canContinueOnLargerModel / canSummarizeStreamSoFar gating to the action bar. Added StreamingContextWatchdogIntegrationTests covering pause surfacing, final-delta preservation, continuation context, transient warning, state reset, and failure outcome recording.",
+  "files": [
+    "trios/rings/SR-02/ChatViewModel.swift",
+    "trios/rings/SR-02/ConversationStateMachine.swift",
+    "trios/BR-OUTPUT/ChatPanelView.swift",
+    "trios/tests/TriOSKitTests/StreamingContextWatchdogIntegrationTests.swift",
+    "trios/.trinity/specs/streaming-context-watchdog.md",
+    "trios/.claude/plans/trios-cycle29-streaming-context-watchdog-hardening-loop-029-report.md",
+    "trios/.trinity/experience.md",
+    "trios/.trinity/experience/2026-07-27_streaming-context-watchdog-hardening-loop-029.json"
+  ],
+  "tests": "./build.sh PASS; cargo test --workspace PASS; cargo clippy --workspace PASS; cargo run --bin clade-audit 0 findings; cargo run --bin clade-seal SEAL VALID; cargo run --bin clade-e2e PASS; open trios.app + /health ok, menu-bar logo present.",
+  "next_options": [
+    "Mid-stream summary memory — persist the summary produced by Summarize so far as a durable memory for follow-up questions.",
+    "Adaptive watchdog thresholds — learn per-(provider, model) effective output limits from finish_reason=length and context-length errors, adjusting ratios with an EMA.",
+    "Streaming token budget UI — live output/context budget progress bar and a per-send output-token cap that routes to a compatible model."
+  ],
+  "claim": "claim-STREAMING-WATCHDOG-HARDEN-029"
+}

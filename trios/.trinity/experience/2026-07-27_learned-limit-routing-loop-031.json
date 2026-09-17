@@ -1,0 +1,25 @@
+{
+  "date": "2026-07-27",
+  "title": "Learned-Limit-Driven Request Sizing and Routing — Cycle 31 Closure",
+  "ring": "SR-00 / SR-02 / BR-OUTPUT",
+  "agents": "claude",
+  "road": "B",
+  "problem": "Cycle 30 added StreamingContextLimitLearner and async blended ModelContextService profiles, but the learned output/context ceilings were read-only. ChatRequestSizer defaulted to 1,024 output tokens regardless of the effective learned maxOutputTokens, ChatViewModel reported pre-routing input estimates after trimming decisions had already changed the actual request, and a Swift 6 captured-var warning remained in the feedback POST path.",
+  "root_cause": "The learned limits were surfaced in badges and stored in the learner, but ChatRequestSizer.effectiveOutputTokens ignored them when no explicit output budget was requested. ChatViewModel.sendMessage computed pendingEstimatedInputTokens from historyForRequest before applying the routing/trimming decision. The feedback closure captured the mutable request variable directly.",
+  "fix": "Updated ChatRequestSizer to cap the default output budget with min(defaultOutputBudget, profile.maxOutputTokens) so the effective (learned-blended) ceiling is respected. Added post-routing input re-estimation in ChatViewModel.sendMessage: after resolveContextRoutingDecision, it reconstructs resolvedHistory from .trimHistory or keeps the original, computes resolvedInputEstimate, and assigns it to pendingEstimatedInputTokens so the watchdog and utilization percent reflect the real request. Fixed the Swift 6 warning by copying request to an immutable feedbackRequest before the NetworkRetrier closure. Added ChatRequestSizerTests.testDefaultOutputBudgetCapsAtProfileMaxOutputTokens and ModelConfigurationStoreCrossProviderTests.testLearnedContextLimitTriggersTrimming to prove a learned context ceiling changes a .useCurrent decision into a .trimHistory decision. Reset the shared learner in the cross-provider test tearDown to prevent state leakage.",
+  "files": [
+    "trios/rings/SR-00/ChatRequestSizer.swift",
+    "trios/rings/SR-02/ChatViewModel.swift",
+    "trios/tests/TriOSKitTests/ChatRequestSizerTests.swift",
+    "trios/tests/TriOSKitTests/ModelConfigurationStoreCrossProviderTests.swift",
+    "trios/.claude/plans/trios-cycle31-learned-limit-routing-loop-031-report.md",
+    "trios/.trinity/experience/2026-07-27_learned-limit-routing-loop-031.json"
+  ],
+  "tests": "TRIOS_SKIP_CHAT_E2E=1 ./build.sh PASS; cargo test -p trios-mesh PASS (101 tests); cargo clippy -p trios-mesh -- -D warnings PASS; TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-audit hard gates 0 findings; TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-seal SEAL VALID; TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-e2e FAIL due to BrowserOS Server 127.0.0.1:9105/health down (external dependency, CDP/Postgres not available); open trios.app relaunched and menu-bar logo present. (swift test unavailable in CommandLineTools-only environment.)",
+  "next_options": [
+    "Learned output-limit UI + per-send budget cap — surface effective maxOutputTokens in ModelsTabView and add a per-send composer control clamped by the learned ceiling.",
+    "Pre-send routing with larger-output candidates — generalize resolveContextRoutingDecision to route to a model whose learned/advertised output ceiling satisfies an explicit user output budget.",
+    "Per-conversation context pinning + trim exclusions — let users pin messages so the trimmer cannot drop them and persist the pin set per conversation."
+  ],
+  "claim": null
+}

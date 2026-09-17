@@ -1,0 +1,20 @@
+{
+  "timestamp": "2026-07-24T04:06:36Z",
+  "task_id": "MEMORY-CONTROLS-001",
+  "claim_id": "2621A8A0-22B7-4E85-AA5C-3F2857AFD10C",
+  "action": "unterminated_stream_tdd_red",
+  "command": "bash tests/swift/run_chat_sse_e2e.sh",
+  "result": "EXPECTED_FAIL",
+  "evidence": {
+    "compile_exit": 0,
+    "runtime_exit": 1,
+    "failed_assertions": [
+      "unterminated EOF marks the plan failed",
+      "unterminated EOF creates no durable memory",
+      "unterminated EOF clears the streaming indicator",
+      "unterminated EOF leaves a visible error state"
+    ],
+    "passing_control": "unterminated EOF preserves partial chat history",
+    "known_warning": "Pre-existing non-ASCII comment and never-mutated variable warning in BR-OUTPUT/A2AMessageRouter.swift"
+  }
+}

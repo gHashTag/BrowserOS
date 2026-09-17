@@ -1,0 +1,22 @@
+{
+  "date": "2026-07-25",
+  "title": "A2A registration + /doctor chat output",
+  "what": [
+    "Queen chat showed 'Failed to list agents' because A2A registration payload sometimes lacked a string endpoint and the server wasn't always ready at app launch.",
+    "/doctor and other Queen skills only updated the Queen status view, not the chat timeline."
+  ],
+  "fix": [
+    "A2ARegistryClient.register now builds an explicit A2ARegisterPayload dictionary with a string endpoint, guaranteeing the registry receives http://127.0.0.1:9105/a2a.",
+    "QueenBackgroundService.registerA2A retries up to 5 times with exponential backoff, so a transient 'server not ready' state doesn't leave the client unregistered.",
+    "Background status polls call listAgents(silent: true), so periodic agent-list failures no longer spam the Queen chat.",
+    "QueenStatusViewModel.runSkillReturningOutput runs claude <skill> synchronously, captures stdout/stderr, and returns the text; ChatViewModel appends that text directly into the Queen chat."
+  ],
+  "verification": [
+    "./build.sh and cargo run --bin clade-build passed.",
+    "cargo run --bin clade-e2e passed; server health ok; app running.",
+    "curl /a2a/agents shows trios-agent with endpoint.",
+    "UI automation via AXTextArea submitted /agents -> 'Online agents: trios-agent: TRIOS AGENT'.",
+    "UI automation submitted /doctor -> result text now appears in Queen chat (currently a model/auth message from the local claude CLI)."
+  ],
+  "laws": ["L2", "L4"]
+}

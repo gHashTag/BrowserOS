@@ -1,0 +1,24 @@
+{
+  "timestamp": "2026-07-24T09:52:18Z",
+  "task_id": "TRIOS-PORTABLE-LAND-001",
+  "claim_id": "989F8151-6640-44B4-AFE1-FEEB17078EF2",
+  "action": "single_command_installer_architecture_audit",
+  "result": "PASS",
+  "evidence": {
+    "command": "Independent read-only audit of build, package, path, process, manifest, rollback, and verification patterns",
+    "exit_code": 0,
+    "artifact": "def368fc98eec80a6c6617d32b06df1690f883ac",
+    "facts": [
+      "A version-pinned Bun CLI is the best fit for one-command bootstrap without adding a critical-path shell script.",
+      "The recommended UX is bunx --bun @ghashtag/trios-installer@<exact-version> install.",
+      "The installer should build in staging, verify exact commits and the bundle, then atomically promote a current release pointer.",
+      "A rerun of the same manifest should verify and no-op.",
+      "Failure before promotion must preserve the active installation; failure after promotion must restore the previous release."
+    ]
+  },
+  "residual_risks": [
+    "The publishable installer package and signed immutable release manifest do not exist yet.",
+    "Successful clean installation remains blocked by unpublished Queen and mesh inputs.",
+    "The final managed source location and update behavior still need design approval."
+  ]
+}

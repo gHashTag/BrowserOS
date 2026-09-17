@@ -1,0 +1,46 @@
+{
+  "title": "Adaptive Parallel Provider Warmup — Cycle 20 Closure",
+  "date": "2026-07-24",
+  "road": "B",
+  "ring": "SR-00 / SR-02 / BR-OUTPUT",
+  "agent": "claude",
+  "summary": "Extended the Cycle 19 provider circuit-breaker and failover stack with adaptive parallel provider warmup. Before each chat send, TriOS can now issue cheap liveness probes to all eligible provider/model/baseURL candidates, score them by observed TTFT, and automatically route the live request to the fastest reachable endpoint while still honoring circuit-breaker state, cost tiers, and learned reliability.",
+  "problem": "Cycle 19 hardened per-provider failure isolation, but the actual chat request still started on the pre-selected provider/model and only failed over reactively after a timeout or error. There was no way to know, before committing the user message, which provider was currently fastest or even reachable. A slow or half-open provider could add seconds of perceived latency before the first token, and cross-provider ranking used stale EMA scores rather than a fresh live signal.",
+  "root_cause": "ProviderCircuitBreaker could reject or defer sends but did not pre-check liveness with a lightweight probe. ModelReliabilityService kept historical EMA scores, not a current TTFT sample. ModelConfigurationStore had no warmup toggle or service. ChatViewModel's send path was still linear: preflight, then execute on the original selection. ModelsTabView exposed breaker status and failover controls but no warmup control.",
+  "fix": [
+    "Hardened ProviderCircuitBreaker with a single-probe lock in half-open state (probingKeys / beginProbe / endProbe) and a stuck-probe timeout so a hung recovery probe cannot block recovery forever.",
+    "Added deterministic jitter to recovery cooldowns using the endpoint-key hash, desynchronizing concurrent provider recoveries.",
+    "Created ModelWarmupService actor that races cheap max_tokens:1 probes across eligible CrossProviderModelCandidate tuples, deduplicates candidates, caps total probes, filters by cost tier, respects breaker open/half-open state, records outcomes into ModelReliabilityService, and returns the best live candidate.",
+    "Made CrossProviderModelCandidate Hashable so the warmup service can build deterministic candidate sets.",
+    "Extended ModelConfigurationStore with isAdaptiveProviderWarmupEnabled and lastAdaptiveWarmupAt / lastAdaptiveWarmupReason, persisted via UserDefaults, plus a warmupService dependency and runAdaptiveWarmup().",
+    "Added store-level outcome helpers so ChatViewModel can record send results and circuit-breaker successes through the store.",
+    "Restructured ChatViewModel.sendMessage to capture the initial provider/model/baseURL, run adaptive warmup after preflight when enabled, switch the active selection with a user-visible banner if a better candidate wins, and restore the original selection if the warmup or main send fails.",
+    "Added an adaptiveWarmupSection to ModelsTabView with a toggle, last-run reason/timestamp, and a manual 'Warm up now' button that refreshes breaker states."
+  ],
+  "files": [
+    "trios/rings/SR-00/ProviderCircuitBreaker.swift",
+    "trios/rings/SR-00/ModelWarmupService.swift",
+    "trios/rings/SR-00/ModelReliabilityService.swift",
+    "trios/rings/SR-00/ModelConfigurationStore.swift",
+    "trios/rings/SR-02/ChatViewModel.swift",
+    "trios/BR-OUTPUT/ModelsTabView.swift",
+    "trios/tests/TriOSKitTests/ProviderCircuitBreakerTests.swift",
+    "trios/tests/TriOSKitTests/ModelWarmupServiceTests.swift"
+  ],
+  "tests": {
+    "build": "PASS",
+    "cargo_test": "PASS",
+    "cargo_clippy": "PASS",
+    "clade_audit": "0 findings",
+    "clade_seal": "SEAL VALID",
+    "clade_e2e": "PASS",
+    "app_relaunch": "PASS /health ok"
+  },
+  "plan": ".claude/plans/trios-cycle20-adaptive-provider-warmup-loop-020.md",
+  "report": ".claude/plans/trios-cycle20-adaptive-provider-warmup-loop-020-report.md",
+  "next_options": [
+    "Budget/quota-aware warmup gating — read provider balance or quota headers during warmup and deprioritize or skip out-of-quota providers; add a 'Low balance' badge in ModelsTabView.",
+    "User-defined provider preference order — drag-to-rank providers in ModelsTabView and blend that priority with TTFT/reliability score in warmup ranking.",
+    "Predictive warmup scheduling — keep a background poller that warms up the top-N candidate combinations every 30-60s and caches the winner, so chat send latency is near-zero even when warmup is enabled."
+  ]
+}

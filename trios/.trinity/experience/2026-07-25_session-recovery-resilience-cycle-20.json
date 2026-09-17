@@ -1,0 +1,30 @@
+{
+  "timestamp": "2026-07-25T17:55:00+07:00",
+  "task_id": "SESSION-RECOVERY-002",
+  "issue_url": "https://github.com/gHashTag/trios/issues/T27-EPIC-001",
+  "domain": "SessionRecovery",
+  "agents": ["claude", "t27-verifier"],
+  "road": "B",
+  "root_cause": "The recovery flow was export-only and lacked a canonical package format with integrity checking, version gating, duplicate resolution, and progress UI, so imported ZIPs silently failed or produced inconsistent state.",
+  "fix_pattern": "Defined a manifest-driven package format (manifest.json + SHA-256 + size + schemaVersion/minReaderVersion). Added a resilient reader with path-traversal guard and LocalizedError taxonomy, a writer with 16 MiB log cap and encryption metadata, replace/merge/skip duplicate resolution in ChatViewModel, and a determinate progress overlay in ChatPanelView.",
+  "files_changed": [
+    "trios/rings/SR-00/SessionRecoveryExport.swift",
+    "trios/rings/SR-01/SessionRecoveryPackageWriter.swift",
+    "trios/rings/SR-01/SessionRecoveryPackageReader.swift",
+    "trios/rings/SR-02/ChatViewModel.swift",
+    "trios/BR-OUTPUT/ChatPanelView.swift",
+    "trios/tests/swift/session_recovery_resilience_test.swift",
+    "trios/.trinity/specs/session-recovery-resilience.md",
+    "trios/.trinity/specs/session-recovery-resilience-tdd.md"
+  ],
+  "tests_added": [
+    "trios/tests/swift/session_recovery_resilience_test.swift"
+  ],
+  "commit": "44967fec8",
+  "lessons": [
+    "Sanitize every touched canon file for ASCII-only after any edit; non-ASCII in pre-existing content is re-flagged when the file is modified.",
+    "Check whether persistence methods are throwing before adding do/catch rollback logic; unreachable catch blocks produce build warnings and mislead reviewers.",
+    "Start the BrowserOS server before running clade-e2e; a rebuilt app does not restart the server.",
+    "A first-class recovery reader should verify every manifest entry (size + SHA-256) before trusting extracted contents."
+  ]
+}

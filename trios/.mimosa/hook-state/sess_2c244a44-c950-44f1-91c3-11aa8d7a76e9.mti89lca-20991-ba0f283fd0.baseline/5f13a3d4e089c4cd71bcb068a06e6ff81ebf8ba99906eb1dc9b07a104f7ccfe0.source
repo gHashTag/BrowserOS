@@ -1,0 +1,123 @@
+import {
+  CLADO_PAGE_SCOPED_TOOLS,
+  type CladoActionPoint,
+  type CladoViewport,
+} from './types'
+
+export function clampCladoNormalizedCoordinate(value: number): number {
+  return Math.min(999, Math.max(0, Math.round(value)))
+}
+
+/** Converts Clado's 0-1000 normalized coordinate space into BrowserOS viewport pixels. */
+export function resolveCladoPoint(
+  viewport: CladoViewport,
+  normalizedX: number | undefined,
+  normalizedY: number | undefined,
+): CladoActionPoint {
+  const nx = clampCladoNormalizedCoordinate(normalizedX ?? 500)
+  const ny = clampCladoNormalizedCoordinate(normalizedY ?? 500)
+
+  return {
+    x: Math.round((nx / 1000) * viewport.width),
+    y: Math.round((ny / 1000) * viewport.height),
+  }
+}
+
+/** Adapts Clado action tool arguments to the BrowserOS MCP tool argument contract. */
+export function prepareCladoToolArgs(
+  toolName: string,
+  args: Record<string, unknown>,
+  pageId: number,
+): Record<string, unknown> {
+  const prepared: Record<string, unknown> = { ...args }
+
+  if (
+    toolName === 'evaluate_script' &&
+    typeof prepared.function === 'string' &&
+    prepared.expression === undefined
+  ) {
+    prepared.expression = toCladoEvaluateExpression(prepared.function)
+    delete prepared.function
+  }
+
+  if (
+    toolName === 'click_at' &&
+    typeof prepared.dblClick === 'boolean' &&
+    prepared.clickCount === undefined
+  ) {
+    prepared.clickCount = prepared.dblClick ? 2 : 1
+    delete prepared.dblClick
+  }
+
+  if (
+    CLADO_PAGE_SCOPED_TOOLS.has(toolName) &&
+    typeof prepared.page !== 'number'
+  ) {
+    prepared.page = pageId
+  }
+
+  return prepared
+}
+
+export function toCladoEvaluateExpression(rawFunction: unknown): string {
+  const source = String(rawFunction).trim()
+  if (source.startsWith('() =>') || source.startsWith('async () =>')) {
+    return `(${source})()`
+  }
+  if (source.startsWith('function')) {
+    return `(${source})()`
+  }
+  return source
+}
+
+export function normalizeCladoPressKey(key: string | undefined): string {
+  const raw = (key ?? '').trim()
+  if (!raw) throw new Error('press_key action missing key field')
+
+  const map: Record<string, string> = {
+    'C-a': 'Control+A',
+    'C-c': 'Control+C',
+    'C-v': 'Control+V',
+    'C-x': 'Control+X',
+    'C-z': 'Control+Z',
+    'C-y': 'Control+Y',
+    'C-s': 'Control+S',
+    'C-t': 'Control+T',
+    'C-w': 'Control+W',
+    'C-h': 'Control+H',
+    'C-f': 'Control+F',
+    'C-+': 'Control++',
+    'C--': 'Control+-',
+    'C-tab': 'Control+Tab',
+    'C-S-tab': 'Control+Shift+Tab',
+    'C-S-n': 'Control+Shift+N',
+    'C-down': 'Control+ArrowDown',
+    'M-a': 'Meta+A',
+    'M-c': 'Meta+C',
+    'M-v': 'Meta+V',
+    'M-x': 'Meta+X',
+    'M-f4': 'Alt+F4',
+  }
+  return map[raw] ?? raw
+}
+
+export function normalizeCladoDirection(
+  direction: string | undefined,
+): 'up' | 'down' | 'left' | 'right' {
+  if (
+    direction === 'up' ||
+    direction === 'down' ||
+    direction === 'left' ||
+    direction === 'right'
+  ) {
+    return direction
+  }
+  return 'down'
+}
+
+export function normalizeCladoScrollAmount(amount: number | undefined): number {
+  if (typeof amount !== 'number') return 500
+  if (amount <= 0) return 100
+  const clamped = Math.min(amount, 1000)
+  return Math.max(100, Math.round((clamped / 1000) * 900))
+}

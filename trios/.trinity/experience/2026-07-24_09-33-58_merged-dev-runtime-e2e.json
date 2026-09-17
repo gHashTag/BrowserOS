@@ -1,0 +1,26 @@
+{
+  "timestamp": "2026-07-24T09:33:58Z",
+  "task_id": "TRIOS-PORTABLE-LAND-001",
+  "claim_id": "989F8151-6640-44B4-AFE1-FEEB17078EF2",
+  "action": "merged_dev_runtime_and_visual_e2e",
+  "result": "PASS_WITH_ENVIRONMENT_GATES",
+  "evidence": {
+    "commit": "def368fc98eec80a6c6617d32b06df1690f883ac",
+    "facts": [
+      "The exact optimized app from the clean dev worktree launched as PID 36262.",
+      "The clean worktree initially lacked ignored node_modules; bun install --frozen-lockfile installed the companion dependencies without changing tracked files.",
+      "Production health returned status ok with cdpConnected true on port 9105.",
+      "Runtime E2E wrote /tmp/trios_e2e/report_1784885517.md and passed its process and health checks.",
+      "Command-1 opened Chat and /tmp/trios-merged-dev-chat.png shows Online, history, planner, composer, and provider controls without overlap or black rendering defects.",
+      "The macOS Keychain prompt was denied for autonomous fail-closed validation; full recall was not authorized."
+    ],
+    "warnings": [
+      "The host Bun version was 1.3.12 although package.json declares 1.3.6; frozen install and runtime succeeded, but the release manifest should retain the declared version.",
+      "The runtime log includes an expected failed probe to optional canary port 9205 while production 9105 is healthy."
+    ]
+  },
+  "residual_risks": [
+    "A user-approved Keychain launch is still needed to validate full long-term recall.",
+    "Portable release remains blocked by remote dependency publication and distribution signing."
+  ]
+}

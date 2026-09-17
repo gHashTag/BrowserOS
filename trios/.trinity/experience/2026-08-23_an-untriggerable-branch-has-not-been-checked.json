@@ -1,0 +1,45 @@
+{
+  "id": "2026-08-23_an-untriggerable-branch-has-not-been-checked",
+  "date": "2026-08-23",
+  "ring": "SR-00",
+  "branch": "feat/queen-supervisor",
+  "title": "The guard fired zero times in five launches, so I stopped waiting for the window and made the branch reachable",
+  "severity": "medium",
+  "agent": "Queen",
+  "problem": "The restack guard added earlier today shipped in the running release and never executed. keychain.read.not_restacked has zero occurrences across all five launches in the log. Its condition depends on securityd being slow that minute, which a round cannot arrange, so the branch could only ever be described as 'not disproven'.",
+  "root_cause": "The decision lived inside a private static method of KeychainSecrets, reading Date() directly and reachable only through a real Keychain read. Nothing about it could be triggered on demand, which is the same thing as nothing about it having been checked.",
+  "findings": [
+    "not_restacked: 0 occurrences across 5 server.launch anchors in .trinity/logs/trios-app.jsonl.",
+    "The round-start make check was red with two failures, both mine and both artefacts of running the gate while I was mid-edit: keychain_read_stacking_test.swift existed before its suite was registered, and the three suites that compile KeychainSecrets.swift needed the new file in their source lists. Fixed in the same commit; the rerun is 53 suites, 0 failures.",
+    "The clamp for a negative age is not defensive padding. A dispatch stamped in the future - a clock moved backwards - yields an age smaller than any patience, so every caller would be refused until the clock caught up. That is precisely the latch this guard was written to replace, arriving through arithmetic rather than logic."
+  ],
+  "fix": "KeychainReadStacking.decide(oldestOutstanding:now:patience:) is the decision as a pure function with an injected clock. KeychainSecrets keeps the dictionary bookkeeping and calls it. Seven checks cover every branch: nothing outstanding, a young read refused, an abandoned read that must not latch, the boundary at exactly patience, a backwards clock clamped to zero, and a replay of the five dispatches measured at 07:10 - four refused, one read left standing.",
+  "files_changed": [
+    "rings/SR-00/KeychainReadStacking.swift",
+    "rings/SR-00/KeychainSecrets.swift",
+    "tests/swift/keychain_read_stacking_test.swift",
+    "rings/RUST-02/clade-e2e/src/main.rs",
+    ".claude/skills/unmeasured-cause/SKILL.md"
+  ],
+  "prevention": [
+    "A branch that cannot be triggered on demand has not been checked. Extract it until it can be, rather than waiting for the conditions that reach it.",
+    "Inject the clock. Any decision that calls Date() itself is only reachable at the speed of the real world.",
+    "A pure-logic suite proves the decision, not the wiring. Say which one you have, and keep the other owed.",
+    "Replay the measured incident as a test case. The five dispatches from the release log are now a scenario, so the specific regression has a name and a check rather than a memory.",
+    "Guards reacquire their old failure mode through the edge case nobody wrote a case for. Ask what input makes the new guard behave like the thing it replaced."
+  ],
+  "not_verified": [
+    "The wiring. keychain.read.not_restacked still has no live occurrence, because no launch in this round produced a read that stayed unsettled past the cooldown. Whether KeychainSecrets invokes the decision correctly and whether the line reaches the journal are both unproven, and the suite header says so rather than leaving it to be assumed."
+  ],
+  "related_episodes": [
+    "2026-08-23_the-cooldown-paced-the-pileup-it-was-meant-to-prevent",
+    "2026-08-23_the-gate-that-returned-nil-and-let-exists-answer"
+  ],
+  "tags": [
+    "unmeasured-cause",
+    "untestable-branch",
+    "injected-clock",
+    "keychain",
+    "not-proven-live"
+  ]
+}

@@ -1,0 +1,98 @@
+{
+  "wave": "WAVE-060",
+  "date": "2026-07-28",
+  "domain": "chat reliability, unified observability, credential management, three-tab UX",
+  "summary": "Introduced TriosLogBus as the single source of truth for in-app events, added multi-key credential management, and fixed three concrete Z.AI defects that made chat fail silently and the Test button lie.",
+  "root_causes": [
+    {
+      "id": "W1",
+      "finding": "225 NSLog call sites across 29 Swift files went to the macOS unified log, while LogParser.loadLogSources only read .trinity/*.log. The app's own events were invisible in the app's own LOGS tab.",
+      "fix": "rings/SR-01/TriosLogBus.swift writes OTel-shaped NDJSON to .trinity/logs/trios-app.jsonl, tagged by subsystem, with a bounded ring buffer and an NSLog mirror."
+    },
+    {
+      "id": "W2",
+      "finding": "ModelCredentialStore keyed Keychain items by provider.rawValue alone, so save() deleted the previous key. One key per provider, no list, no per-key delete.",
+      "fix": "Accounts are now provider#uuid with kSecAttrLabel for the user label; list/add/delete/rename/activate operate per entry, and the legacy bare-provider account still resolves."
+    },
+    {
+      "id": "W3",
+      "finding": "makeChatURL appended /v1/chat/completions to a Z.AI base URL that already ended in /api/paas/v4, producing /v4/v1/chat/completions. Verified HTTP 404 live. Every Z.AI health probe failed regardless of key or balance.",
+      "fix": "Z.AI now shares the OpenAI path case (/chat/completions)."
+    },
+    {
+      "id": "W4",
+      "finding": "Key validation for Z.AI hit GET /models, which answers HTTP 200 for a key with zero balance, so Test reported a green 'Key valid' while every completion failed with business code 1113.",
+      "fix": "After the 200, a minimal completion probe runs; ZAIErrorParser classifies code 1113 as exhausted and the result carries a balanceWarning and a depleted quota."
+    },
+    {
+      "id": "W6",
+      "finding": "probeCloud discarded the response body, so a Z.AI 429 carrying code 1113 was classified as a retryable rate limit. A permanently failing request was retried.",
+      "fix": "The body is read and parsed; balance exhaustion returns failureKind .balance with no Retry-After."
+    },
+    {
+      "id": "W7",
+      "finding": "A2A registration failure always blamed startup timing. The registry was actually up (GET /a2a/agents -> 200) and rejecting with 403 Local authorization required; the caught error was never shown.",
+      "fix": "a2aRegistrationFailureMessage names the real cause per status, and repeated banners are deduplicated."
+    }
+  ],
+  "lessons": [
+    {
+      "lesson": "Reading modelStore from inside ChatViewModel.sendMessage perturbs the streaming turn. Adding provider/model attributes to a log call there broke two ChatSSEEndToEnd assertions (message count became 3 instead of 2).",
+      "how_to_apply": "Log only text-derived facts in the send hot path. Record provider and model from routing and transport events instead. Bisect by reverting the single suspect edit and rebuilding - it cost one build cycle and gave a definitive answer."
+    },
+    {
+      "lesson": "Piping build.sh through grep masks its exit code, so a failed build can look like a pass.",
+      "how_to_apply": "Redirect to a file and check $? directly: ./build.sh > /tmp/build.txt 2>&1; echo $?"
+    },
+    {
+      "lesson": "The working tree dropped ~19 files out of rings/SR-00 mid-build and restored them within seconds, twice. git status alternated between M and D for the same paths. clade-monitor only removes its own pidfile, and build.sh never deletes sources, so neither is the cause.",
+      "how_to_apply": "Back up edited and new files to /tmp before rebuilding, then poll until git status reports zero deletions for several consecutive samples before trusting a build result."
+    },
+    {
+      "lesson": "An unknown model's price should stay nil rather than be guessed. ModelCostService.cost returns an Optional and callers already handle nil.",
+      "how_to_apply": "glm-5.2 was added to the model list and context profiles but deliberately left out of the cost table until real pricing is known."
+    }
+  ],
+  "artifacts": {
+    "plan": ".trinity/wave-loop-060.md",
+    "new_sources": [
+      "rings/SR-01/TriosLogBus.swift",
+      "rings/SR-01/TriosLogsNavigator.swift",
+      "rings/SR-00/ZAIErrorParser.swift"
+    ],
+    "modified_sources": [
+      "rings/SR-00/ModelHealthService.swift",
+      "rings/SR-00/ModelConfigurationStore.swift",
+      "rings/SR-00/ModelProvider.swift",
+      "rings/SR-00/ModelContextService.swift",
+      "rings/SR-02/LogParser.swift",
+      "rings/SR-02/QueenBackgroundService.swift",
+      "rings/SR-02/ChatViewModel.swift",
+      "BR-OUTPUT/ModelsTabView.swift",
+      "BR-OUTPUT/LogsTabView.swift",
+      "BR-OUTPUT/QueenTabView.swift",
+      "BR-OUTPUT/ChatPanelView.swift",
+      "rings/RUST-02/clade-e2e/src/main.rs"
+    ],
+    "new_tests": [
+      "tests/swift/zai_error_parser_test.swift",
+      "tests/swift/trios_log_bus_test.swift",
+      "tests/swift/log_parser_trios_app_test.swift",
+      "tests/swift/TriosLogBusTestStubs.swift"
+    ]
+  },
+  "verification": {
+    "build_sh": "exit 0, zero errors, zero test failures",
+    "clade_e2e": "5/5 Swift logic suites passed (ChatLogic, OpenRouterCreditsParser, ZAIErrorParser, TriosLogBus, LogParserTriosApp); server OK; app running",
+    "new_assertions": 76,
+    "cargo": "cargo check and cargo clippy clean for clade-e2e",
+    "live_probes": "GET /api/paas/v4/models -> 200; POST /api/paas/v4/chat/completions -> 429 code 1113 for every model incl. glm-5.2; POST /api/paas/v4/v1/chat/completions -> 404 (the old buggy path); GET /a2a/agents -> 200; POST /a2a/register -> 403",
+    "blocked": "Post-ASCII-cleanup re-verification could not run: swiftc became blocked mid-session by the Xcode license agreement, which requires a sudo password. Last green run predates a two-character ASCII fix in one string literal and one comment."
+  },
+  "known_gaps": [
+    "The chat 'Failed after 3 attempts' retry loop lives in the BrowserOS Node agent, not in trios, so the client-side terminal-error classification does not stop it yet.",
+    "browseros-companion.log carries a postgres auth failure every 30 seconds from the stale-lease reclaimer, which is the bulk of its 207 errors and is server-side.",
+    "glm-5.2 has no entry in ModelCostService, so cost-aware ranking cannot score it.",
+    "Per-key health and quota tracking is not implemented; a depleted key is not yet distinguishable per entry in the list."
+  ]
+}

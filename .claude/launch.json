@@ -1,0 +1,25 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "queen-preview",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-lc",
+        "cd /Users/playra/trinity-game/apps/website && npx vite preview --port 4173 --strictPort --host 127.0.0.1"
+      ],
+      "port": 4173,
+      "url": "http://127.0.0.1:4173"
+    },
+    {
+      "name": "site-fix",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-lc",
+        "cd /Users/playra/trinity-site-fix/apps/website && npx vite --port 5199 --strictPort --host 127.0.0.1"
+      ],
+      "port": 5199,
+      "url": "http://127.0.0.1:5199"
+    }
+  ]
+}

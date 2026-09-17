@@ -1,0 +1,44 @@
+{
+  "timestamp": "2026-07-21T18:00:00Z",
+  "wave": "WAVE-008",
+  "issue": "T27-EPIC-001",
+  "agents": ["t27-creator", "t27-verifier", "t27-experience"],
+  "root_cause": "After Wave 007, clade-tablecloth still used /tmp in six unit tests, clade-improve tests used panic! markers, and there was no automated gate preventing /tmp regressions.",
+  "fix_pattern": "Migrate clade-tablecloth tests to tempfile::tempdir(); replace clade-improve test panic! with assert!(matches!(...)); add tmp-zero-gate ring with walkdir-based workspace scan.",
+  "files_changed": [
+    "trios/rings/RUST-14/clade-tablecloth/Cargo.toml",
+    "trios/rings/RUST-14/clade-tablecloth/src/main.rs",
+    "trios/rings/RUST-04/clade-improve/src/main.rs",
+    "trios/rings/RUST-99/tmp-zero-gate/Cargo.toml",
+    "trios/rings/RUST-99/tmp-zero-gate/src/main.rs",
+    "trios/Cargo.toml",
+    "trios/.claude/skills/tmp-zero/SKILL.md",
+    "trios/.claude/skills/panic-hardening/SKILL.md",
+    "trios/.trinity/specs/tmp-zero.md",
+    "trios/.trinity/specs/tablecloth-tmp-zero.md",
+    "trios/.trinity/wave-loop-008.md",
+    ".claude/plans/trios-wave-008-tablecloth-tmp-zero.md"
+  ],
+  "tests_added": [
+    "tmp_zero_gate: source_exts_cover_rust_and_swift",
+    "tmp_zero_gate: is_exempt_accepts_docs",
+    "clade-tablecloth: write_atomic_roundtrips (tempfile migration)",
+    "clade-tablecloth: independent_verify_* (tempfile migration)",
+    "clade-improve: parse_improve_without_description (matches!)",
+    "clade-improve: parse_improve_with_description (matches!)"
+  ],
+  "lessons": [
+    "The last holdouts for a policy are often in older rings; a dedicated gate binary makes the policy self-sustaining.",
+    "Test-only panic! markers should be treated the same as production panic surfaces when the codebase adopts a panic-free style.",
+    "Pre-existing Unicode placeholders ([U+23ED], [U+2190]) in source must be cleaned before seal even if they were not introduced this wave.",
+    "Walkdir-based gates are simple to implement and avoid shell scripts on the critical path (L7 UNITY)."
+  ],
+  "seal_status": {
+    "BUILD_PASS": true,
+    "TEST_PASS": true,
+    "CLIPPY_PASS": true,
+    "TMP_ZERO_PASS": true,
+    "ASCII_PASS": true,
+    "E2E_NOT_RUN_DUE_SERVER_DOWN": true
+  }
+}

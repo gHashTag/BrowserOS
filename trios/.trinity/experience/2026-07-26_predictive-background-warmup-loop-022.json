@@ -1,0 +1,49 @@
+{
+  "title": "Cycle 22: Predictive Background Warmup Scheduling",
+  "date": "2026-07-26",
+  "weak_spots": [
+    "Adaptive warmup ran synchronously on every send, adding probe latency to user-facing TTFT",
+    "No cached winner existed between messages, so consecutive sends reran the same probe race",
+    "Background health polling probed individual models but did not run cross-provider warmup or cache a winner",
+    "ModelsTabView showed only manual warmup state, with no indicator for background cache freshness",
+    "Background probes had no low-power awareness"
+  ],
+  "files_changed": [
+    "rings/SR-00/PredictiveWarmupCache.swift (new) — in-memory cache keyed by (costTier, strictQuotaGating), TTL-aware",
+    "rings/SR-00/PredictiveWarmupScheduler.swift (new) — periodic background scheduler with low-power skip",
+    "rings/SR-00/ModelConfigurationStore.swift — cache injection, predictive toggle persistence, cachedWarmupWinner validation, scheduler lifecycle",
+    "rings/SR-02/ChatViewModel.swift — reuse cached winner before synchronous warmup; fall back to live probes when stale",
+    "BR-OUTPUT/ModelsTabView.swift — predictive toggle, background warmup reason/timestamp, refresh button",
+    "tests/TriOSKitTests/PredictiveWarmupCacheTests.swift (new) — TTL, tier isolation, invalidate",
+    "tests/TriOSKitTests/PredictiveWarmupSchedulerTests.swift (new) — start/stop, force refresh, low-power skip"
+  ],
+  "gates": {
+    "build.sh": "passed",
+    "cargo test --workspace": "passed",
+    "cargo clippy --workspace": "passed",
+    "clade-audit": "0 findings",
+    "clade-seal": "SEAL VALID",
+    "clade-e2e": "passed",
+    "trios.app": "relaunched"
+  },
+  "next_options": [
+    {
+      "name": "Adaptive warmup interval and staleness tuning",
+      "summary": "Expose the predictive warmup interval and TTL in Settings, and auto-shrink TTL when provider health is volatile."
+    },
+    {
+      "name": "Per-conversation model pinning",
+      "summary": "Allow the user to pin a model per chat thread so predictive warmup only suggests within allowed providers."
+    },
+    {
+      "name": "Winner telemetry and feedback loop",
+      "summary": "Record whether a cached winner actually succeeded and use the outcome to tune cache TTL and ranking weights."
+    }
+  ],
+  "notes": [
+    "Predictive warmup is off by default; users must enable it together with adaptive warmup.",
+    "The cache TTL defaults to 45s and the scheduler interval defaults to 300s; these are hardcoded in this cycle and can be made configurable next.",
+    "Chat path still validates breaker/quota state before reusing a cached winner, so stale entries never bypass safety gates.",
+    "Unit tests compile but XCTest is unavailable in this toolchain; they will run when Xcode is installed."
+  ]
+}

@@ -1,0 +1,28 @@
+{
+    "date": "2026-07-27",
+    "title": "Pinned-Model Warmup/Failover Guardrails - Cycle 37 Closure",
+    "ring": "SR-00 / SR-01 / SR-02 / BR-OUTPUT",
+    "agents": "claude",
+    "road": "B",
+    "problem": "Cycle 36 gave every conversation an optional pinned provider, baseURL, and model, but the pin was cosmetic for several automatic switching paths. Predictive/adaptive warmup, pre-send context routing, same-provider model failover, cross-provider failover, and continue-on-larger-model could all silently switch away from the user's chosen tuple.",
+    "root_cause": "ModelConfigurationStore and ChatViewModel had no concept of a conversation-scoped model boundary. Warmup, routing, and failover all operated on the global eligible candidate set and never consulted ConversationSettings.provider/model/baseURL before switching.",
+    "fix": "Introduced ConversationModelConstraint in trios/rings/SR-01/ChatProtocols.swift to wrap a pinned CrossProviderModelCandidate. Threaded the optional constraint through ModelConfigurationStore.warmupCandidates(constrainedTo:), runAdaptiveWarmup(constrainedTo:), resolveContextRoutingDecision(constrainedTo:), selectFirstHealthyCrossProviderModel(constrainedTo:), and selectLargerModelCandidate(estimatedInput:outputTokens:constrainedTo:). Added ChatViewModel.conversationModelConstraint and passed it through sendMessage, runPreflightHealthCheck, and continueStreamOnLargerModel. Predictive warmup and same-provider failover are skipped entirely when a pin is active; cross-provider failover returns nil. ChatPanelView.composerStatusHelp now notes that warmup and failover are constrained to the pin. Also fixed ChatSSETestMocks persisters to conform to ChatPersisterProtocol after the Cycle 36 settings additions.",
+    "files": [
+        "trios/rings/SR-01/ChatProtocols.swift",
+        "trios/rings/SR-00/ModelConfigurationStore.swift",
+        "trios/rings/SR-02/ChatViewModel.swift",
+        "trios/BR-OUTPUT/ChatPanelView.swift",
+        "trios/tests/swift/ChatSSETestMocks.swift",
+        "trios/tests/TriOSKitTests/ModelConfigurationStoreCrossProviderTests.swift",
+        "trios/.claude/plans/trios-cycle37-pinned-model-warmup-failover-guardrails.md",
+        "trios/.claude/plans/trios-cycle37-pinned-model-warmup-failover-guardrails-report.md",
+        "trios/.trinity/experience/2026-07-27_pinned-model-warmup-failover-guardrails-loop-037.json"
+    ],
+    "tests": "TRIOS_SKIP_CHAT_E2E=1 ./build.sh PASS; cargo test -p trios-mesh PASS (101 tests); TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-build PASS; TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-audit PASS (0 hard-gate findings); TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-seal SEAL VALID. swift test unavailable in CommandLineTools-only environment. Chat integration tests skipped because a pre-existing memory database schema version 4 assertion in the e2e harness fails in this environment.",
+    "next_options": [
+        "Conversation-level learned-limit reset - add a menu action to clear the learned context/output ceilings for the current conversation only, without resetting the global StreamingContextLimitLearner history.",
+        "Output-budget progress during streaming - render a live progress indicator inside the streaming assistant message showing consumed output tokens vs. the effective budget/ceiling, with color bands and approaching-limit warnings.",
+        "Pin-aware model health badge - in ModelsTabView, when the current conversation has a pinned model, show a constrained-to-this-conversation badge on the pinned tuple and disable manual warmup/failover actions that would violate the pin."
+    ],
+    "claim": null
+}

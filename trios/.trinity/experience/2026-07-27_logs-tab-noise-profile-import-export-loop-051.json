@@ -1,0 +1,26 @@
+{
+  "date": "2026-07-27",
+  "title": "LOGS Tab Noise Profile Import/Export — Cycle 51",
+  "cycle": 51,
+  "ring": "SR-02 / BR-OUTPUT",
+  "agents": "claude",
+  "road": "B",
+  "problem": "Cycle 50 made noise rules source-scoped, but profiles were trapped on a single machine. Users could not back up, share, or load tuned noise-rule profiles.",
+  "root_cause": "LogNoiseProfileStore only persisted to a single local JSON file; there was no portable envelope, no schema version, and no UI for import/export.",
+  "fix": "Added LogNoiseProfileEnvelope with schemaVersion: Int and exportedAt: Date? for portable JSON. Added LogNoiseImportResult with imported/skipped/unsupported-schema flags. Extended LogNoiseProfileStore with exportRules(_:to:) writing trios-noise-profile-YYYY-MM-DD-HHMMSS.json to ~/Downloads with sorted keys and ISO-8601 dates, and importRules(from:) validating schema version, filtering invalid rules, and returning import metadata. Added Import and Export buttons to NoiseProfileSheet with status feedback; import merges by rule ID (replace existing, prepend new). Added XCTest coverage for envelope round-trip, export validity, merge-by-id, unsupported schema rejection, and invalid-rule skipping. Kept source-scope UI and rule editor untouched. All source files remain ASCII-only.",
+  "files": [
+    "trios/rings/SR-02/LogParser.swift",
+    "trios/BR-OUTPUT/LogsTabView.swift",
+    "trios/tests/TriOSKitTests/LogsTabViewTests.swift",
+    "trios/.trinity/specs/noise-profile-import-export.md",
+    "trios/.claude/plans/trios-cycle51-noise-profile-import-export.md",
+    "trios/.claude/plans/trios-cycle51-noise-profile-import-export-report.md"
+  ],
+  "tests": "cargo run --bin clade-build PASS; cargo run --bin clade-e2e PASS (report .trinity/e2e/report_prod_1785203017.md); TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-audit PASS (0 hard-gate findings across 8 checks); cargo run --bin clade-seal SEAL VALID; cargo test -p trios-mesh PASS (101 tests); open trios.app relaunched, menu-bar logo preserved (PIDs 1164, 23777, 24423).",
+  "issue": "gHashTag/trios#1085",
+  "next_options": [
+    "Per-source built-in presets and auto-suggest — analyze per-source frequency patterns and propose new source-scoped rules automatically, closing the feedback loop between user edits and built-in defaults.",
+    "Encrypted / signed profile sharing — encrypt exported profiles with the TriOS Keychain key and sign them so teams can share trusted runbook filters without exposing internal log content.",
+    "Cloud-synced profiles across TriOS instances — persist the noise profile in the encrypted recovery package or a BrowserOS preference endpoint so filters follow the user across machines."
+  ]
+}

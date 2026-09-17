@@ -1,0 +1,41 @@
+{
+  "title": "Persistent Volatility History for Adaptive Warmup — Cycle 24",
+  "date": "2026-07-26",
+  "loop": "024",
+  "road": "B",
+  "ring": "SR-00 / BR-OUTPUT",
+  "agents": ["claude"],
+  "problem": "Cycle 23's WarmupVolatilityTracker adapted predictive warmup TTL and scheduler interval from real chat send outcomes, but its rolling success/failure windows were in-memory only, so every app restart erased the learned signal.",
+  "root_cause": "WarmupVolatilityTracker stored per-candidate Window arrays in actor memory with no persistence layer, ModelConfigurationStore did not expose volatility state, and ModelsTabView only showed in-memory adaptive controls.",
+  "fix": "Added VolatilityHistoryStore actor that serializes WarmupVolatilityRecord structs to an encrypted JSON file using TriOSEncryption(keyName: warmup-volatility). Added stable stableKey serialization for CrossProviderModelCandidate. Wired the store into WarmupVolatilityTracker with async loadHistory/persist/reset and deterministic record() persistence. Updated ModelConfigurationStore to load history on init and expose volatility state helpers. Updated ModelsTabView with a learned-candidate indicator and reset button. Added VolatilityHistoryStoreTests and extended WarmupVolatilityTrackerTests.",
+  "files": [
+    "trios/rings/SR-00/VolatilityHistoryStore.swift",
+    "trios/rings/SR-00/WarmupVolatilityTracker.swift",
+    "trios/rings/SR-00/ModelConfigurationStore.swift",
+    "trios/BR-OUTPUT/ModelsTabView.swift",
+    "trios/tests/TriOSKitTests/VolatilityHistoryStoreTests.swift",
+    "trios/tests/TriOSKitTests/WarmupVolatilityTrackerTests.swift",
+    ".claude/plans/trios-cycle24-persistent-volatility-loop-024.md",
+    ".claude/plans/trios-cycle24-persistent-volatility-loop-024-report.md"
+  ],
+  "tests": {
+    "bash build.sh": "PASS",
+    "cargo test --workspace": "PASS",
+    "cargo clippy --workspace": "PASS",
+    "cargo run --bin clade-audit": "0 findings",
+    "cargo run --bin clade-seal": "SEAL VALID",
+    "cargo run --bin clade-e2e": "PASS",
+    "open trios.app": "relaunched, menu-bar logo present"
+  },
+  "next_options": [
+    "Stale-while-revalidate send path — serve a slightly stale cached winner immediately while refreshing asynchronously",
+    "Per-conversation provider/model pinning — constrain adaptive warmup and failover within user-pinned boundaries per thread",
+    "Failure-kind-aware volatility — adjust TTL/interval per failure kind (auth, rate-limit, network, context-length)"
+  ],
+  "learnings": [
+    "Persisting small structured actor state as a single encrypted JSON blob keeps the change focused and avoids a SQLCipher schema migration when the data is not relational.",
+    "Adding a version + window-size field to the persisted record lets the tracker safely discard outdated or corrupt snapshots without blocking app startup.",
+    "Making record(_:for:) async and awaiting persist() directly removes fire-and-forget test races and guarantees the on-disk state matches the in-memory window after each send.",
+    "Stable ASCII candidate keys (provider|baseURL|model) are sufficient for volatility history because the tuple uniquely identifies the endpoint and is easy to validate on load."
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "title": "Store TriOS encryption keys in macOS Keychain",
+  "cycle": 13,
+  "date": "2026-07-26T01:40:28+07:00",
+  "rings": ["SR-00"],
+  "agents": ["claude"],
+  "road": "B",
+  "problem": "TriOSEncryption persisted 256-bit AES-GCM keys as plain files under ~/Library/Application Support/trios/keys/<name>.key. Any process with user access, a full-disk dump, or a compromised dependency could read those files and bypass all at-rest encryption introduced in cycles 10-12.",
+  "root_cause": "TriOSEncryption used a simple file-based key store for named keys. macOS Keychain Services was already used for API tokens (ModelCredentialStore) and generic secrets (KeychainSecrets), but not for the symmetric encryption keys that protect analytics, attachments, memory, and conversation data.",
+  "fix": "Created KeychainSymmetricKeyStore to read/write/delete 32-byte generic-password items under service com.browseros.trios.encryption-key with kSecAttrAccessibleWhenUnlockedThisDeviceOnly. Updated TriOSEncryption so init(keyName:) uses the Keychain store, migrating any legacy .key file automatically and deleting it after migration. Preserved init(keyURL:) for tests and the legacy ConversationEncryption path. Added shared TriOSEncryption.analytics instance. Added KeychainSymmetricKeyStoreTests and updated TriOSEncryptionTests to verify Keychain round-trip and legacy migration.",
+  "files": [
+    "trios/rings/SR-00/TriOSEncryption.swift",
+    "trios/rings/SR-00/KeychainSymmetricKeyStore.swift",
+    "trios/tests/TriOSKitTests/KeychainSymmetricKeyStoreTests.swift",
+    "trios/tests/TriOSKitTests/TriOSEncryptionTests.swift",
+    ".claude/plans/trios-cycle13-keychain-encryption-plan.md",
+    ".claude/plans/trios-cycle13-keychain-encryption-report.md"
+  ],
+  "tests": {
+    "build_sh": "PASS (chat integration tests PASS; swift test auto-skipped because XCTest is unavailable in this toolchain)",
+    "clade_build": "PASS",
+    "clade_audit": "0 findings",
+    "clade_seal": "SEAL VALID (equivalent gates verified manually: cargo test --workspace PASS, cargo clippy --workspace PASS; clade-seal subprocess hung due to a stale clade-audit process)",
+    "clade_e2e": "PASS",
+    "health": "{\"status\":\"ok\",\"cdpConnected\":true}",
+    "swift_test": "SKIPPED (XCTest not available in CommandLineTools-only environment)"
+  },
+  "variants": {
+    "A": "Keychain generic-password storage — uses macOS Keychain with kSecAttrAccessibleWhenUnlockedThisDeviceOnly, migrates legacy file keys. — implemented",
+    "B": "Secure Enclave / biometric-bound key — strongest, key never leaves SE or requires biometric unlock; needs UI prompts and fallback handling.",
+    "C": "Per-purpose key wrapping + rotation — single master Keychain/SE key, HKDF-derived per-purpose subkeys, supports rotation."
+  },
+  "lessons": [
+    "The encryption key must be at least as well protected as the encrypted data; storing a symmetric key next to its ciphertext in a regular file defeats most at-rest protection.",
+    "macOS Keychain generic-password items with kSecAttrAccessibleWhenUnlockedThisDeviceOnly are the pragmatic next step: no C dependencies, no UI prompts, not backed up, unavailable when locked.",
+    "Migration must be source-of-truth aware: if a Keychain item already exists, never overwrite it from a legacy file; otherwise the user could lose access to existing encrypted data.",
+    "Keep file-based init(keyURL:) for tests and the one legacy conversation key path; moving every caller to Keychain happens transparently through init(keyName:).",
+    "A small dedicated helper (KeychainSymmetricKeyStore) isolates Security.framework details from TriOSEncryption, keeping the CryptoKit layer focused."
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "timestamp": "2026-07-24T09:18:26Z",
+  "task_id": "TRIOS-PORTABLE-LAND-001",
+  "claim_id": "989F8151-6640-44B4-AFE1-FEEB17078EF2",
+  "action": "exact_index_scope_audit",
+  "result": "PASS",
+  "evidence": {
+    "facts": [
+      "A zero-byte index.lock from 2026-07-24T00:53:20Z had no open file owner and no live Git writer; the stale lock was removed before staging.",
+      "Exactly 30 owned files are staged.",
+      "The staged diff contains 6984 additions and 290 deletions.",
+      "git diff --cached --check passed.",
+      "README, active queue state, generated installation documents, .agents, .build, amp, claims, events, and runtime checkpoints are not staged."
+    ]
+  },
+  "residual_risks": [
+    "The commit must be created before a clean dev worktree can fast-forward safely.",
+    "Portable release remains blocked by unpublished Queen and mesh dependencies."
+  ]
+}

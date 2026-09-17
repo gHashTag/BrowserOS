@@ -1,0 +1,24 @@
+{
+  "timestamp": "2026-07-24T08:50:40Z",
+  "task_id": "TRIOS-PORTABLE-LAND-001",
+  "claim_id": "989F8151-6640-44B4-AFE1-FEEB17078EF2",
+  "action": "failed_active_delete_history_tdd_red",
+  "result": "EXPECTED_RED",
+  "evidence": {
+    "command": "bash tests/swift/run_chat_sse_e2e.sh",
+    "exit_code": 1,
+    "facts": [
+      "The harness compiled 61 Swift files.",
+      "The new controlled stream reached a concrete partial assistant response before deletion.",
+      "Exactly two new assertions failed.",
+      "Failed privacy cleanup left the retained assistant marked as streaming.",
+      "The retained conversation and failure receipt were absent from persisted history.",
+      "All prior scenarios and assertions remained green."
+    ]
+  },
+  "residual_risks": [
+    "Production deletion code has not yet been changed for this regression.",
+    "The successful deletion path must continue discarding the pre-delete snapshot.",
+    "Full build and runtime evidence are historical again."
+  ]
+}

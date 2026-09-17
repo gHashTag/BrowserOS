@@ -1,0 +1,51 @@
+{
+  "title": "Cycle 18: Cross-Provider Failover",
+  "date": "2026-07-26",
+  "weak_spots": [
+    "In-provider model failover could not escape a fully unhealthy provider",
+    "Predictive selection had no key-gated provider eligibility check",
+    "Per-provider/baseURL/model reliability history was not reused across provider boundaries",
+    "Models tab exposed no cross-provider reachability or failover toggle",
+    "Chat retry only switched models, never providers"
+  ],
+  "files_changed": [
+    "rings/SR-00/ModelReliabilityService.swift",
+    "rings/SR-00/ModelConfigurationStore.swift",
+    "rings/SR-01/SSETransport.swift",
+    "rings/SR-02/ChatViewModel.swift",
+    "BR-OUTPUT/ModelsTabView.swift",
+    "tests/TriOSKitTests/ModelReliabilityServiceCrossProviderTests.swift (new)",
+    "tests/TriOSKitTests/ModelConfigurationStoreCrossProviderTests.swift (new)"
+  ],
+  "gates": {
+    "build.sh": "passed",
+    "clade-build": "passed",
+    "cargo test --workspace": "passed",
+    "cargo clippy --workspace": "passed",
+    "clade-audit": "0 findings",
+    "clade-seal": "SEAL VALID",
+    "clade-e2e": "passed",
+    "trios.app": "relaunched",
+    "swift test": "skipped (XCTest not available in CommandLineTools toolchain)"
+  },
+  "next_options": [
+    {
+      "name": "Adaptive parallel provider warmup",
+      "summary": "Send tiny probe requests to all eligible providers in parallel and route the live chat to whichever returns the lowest TTFT, not just the highest composite score."
+    },
+    {
+      "name": "Provider-specific circuit breaker and budget awareness",
+      "summary": "Add per-provider failure counters and account-balance gates so failover avoids providers that are rate-limited, out of quota, or recently auth-failed."
+    },
+    {
+      "name": "User-defined provider preference order",
+      "summary": "Expose a drag-to-rank provider list in the Models tab so cross-provider ranking can blend learned reliability with explicit user priority."
+    }
+  ],
+  "notes": [
+    "Cross-provider ranking reuses the Cycle 17 composite reliability × latency score, preserving per-endpoint history keys.",
+    "Failover is one-shot per chat send: on success the new provider stays active; on failure the original selection is restored.",
+    "Models tab toggle, manual probe button, and provider reachability rows give users visibility and control.",
+    "New XCTest coverage targets ranking, eligibility, health probes, restore, and toggle persistence; full execution requires an Xcode toolchain."
+  ]
+}

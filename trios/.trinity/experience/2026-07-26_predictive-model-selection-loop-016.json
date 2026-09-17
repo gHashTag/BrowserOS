@@ -1,0 +1,47 @@
+{
+  "title": "Cycle 16: Predictive Model Pre-selection",
+  "date": "2026-07-26",
+  "weak_spots": [
+    "Static default model ignored the new reliability scorecard on launch and provider switch",
+    "No cost-aware filtering for 'cheap' model selection",
+    "No opt-in/opt-out UI for predictive selection",
+    "No transparency when a model was auto-chosen",
+    "clade-build LEAN_BR_OUTPUT whitelist drifted from build.sh"
+  ],
+  "files_changed": [
+    "rings/SR-00/ModelCostService.swift (new)",
+    "rings/SR-00/ModelReliabilityService.swift",
+    "rings/SR-00/ModelConfigurationStore.swift",
+    "BR-OUTPUT/ModelsTabView.swift",
+    "tests/TriOSKitTests/ModelCostServiceTests.swift (new)",
+    "tests/TriOSKitTests/ModelReliabilityServiceTests.swift",
+    "rings/RUST-01/clade-build/src/main.rs",
+    "rings/SR-00/TriOSEncryption.swift",
+    "tests/swift/run_chat_sse_e2e.sh"
+  ],
+  "gates": {
+    "build.sh": "passed",
+    "clade-build": "passed",
+    "clade-e2e": "passed",
+    "clade-audit": "0 findings",
+    "clade-seal": "SEAL VALID",
+    "trios.app": "relaunched"
+  },
+  "next_options": [
+    {
+      "name": "Latency-aware routing",
+      "summary": "Record observed request latency in ModelOutcome and include EMA latency in the ranking score (Longshot pattern)."
+    },
+    {
+      "name": "Cross-provider failover",
+      "summary": "Allow fallback chain and predictive selection to cross providers when the current provider is entirely unhealthy (Universal LLM client pattern)."
+    },
+    {
+      "name": "Circuit-breaker cooldowns",
+      "summary": "Replace binary unhealthyModels set with per-model cooldown timers and half-open recovery probes (llm-fallback-router pattern)."
+    }
+  ],
+  "notes": [
+    "Added TRIOS_E2E_DISABLE_KEYCHAIN=1 to stop keychain password dialogs from unsigned e2e test binaries."
+  ]
+}

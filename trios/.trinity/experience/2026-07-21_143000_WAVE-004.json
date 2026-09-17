@@ -1,0 +1,59 @@
+{
+  "id": "WAVE-004",
+  "date": "2026-07-21",
+  "ring": "trios",
+  "phase": "verify",
+  "road": "B",
+  "agents_involved": [
+    "t27-creator",
+    "t27-verifier",
+    "t27-experience"
+  ],
+  "issue": "Recurring /loop macro: Wave 4 research and implementation of portable root resolution and runtime state hardening.",
+  "problem": "Every Rust ring and ProjectPaths.swift hardcoded /Users/playra/BrowserOS-full/trios as TRIOS_ROOT fallback, blocking multi-machine/CI deployment and leaking developer identity. Runtime state (e2e logs, rollback snapshots, dev sandboxes) lived in /tmp.",
+  "fix": "Centralized root resolution in trios-config::project_dir() with TRIOS_ROOT override and current_dir() fallback. Added trios-config dependency to all rings that lacked it and replaced local project_dir() helpers. Moved clade-e2e logs/screenshots to .trinity/e2e/ and clade-improve rollback/dev to .trinity/rollback/ and .trinity/dev/. ASCII-cleaned all touched Rust source and Cargo.toml descriptions. Updated .gitignore for runtime artifacts and untracked akashic-log.jsonl.",
+  "files_changed": [
+    "trios/rings/RUST-00/trios-config/src/lib.rs",
+    "trios/rings/RUST-01/clade-build/{Cargo.toml,src/main.rs}",
+    "trios/rings/RUST-02/clade-e2e/src/main.rs",
+    "trios/rings/RUST-03/clade-rollback/{Cargo.toml,src/main.rs}",
+    "trios/rings/RUST-04/clade-improve/src/{main.rs,pipeline.rs,sandbox.rs,variant.rs}",
+    "trios/rings/RUST-06/clade-dashboard/{Cargo.toml,src/main.rs}",
+    "trios/rings/RUST-07/clade-experience/{Cargo.toml,src/main.rs}",
+    "trios/rings/RUST-08/clade-promote/{Cargo.toml,src/main.rs}",
+    "trios/rings/RUST-09/clade-launchd/{Cargo.toml,src/main.rs}",
+    "trios/rings/RUST-10/clade-worktree/{Cargo.toml,src/main.rs}",
+    "trios/rings/RUST-12/clade-audit/{Cargo.toml,src/main.rs}",
+    "trios/rings/RUST-14/clade-tablecloth/{Cargo.toml,src/main.rs}",
+    "trios/BR-OUTPUT/ProjectPaths.swift",
+    "trios/.trinity/specs/portable-root-resolution.md",
+    "trios/.trinity/wave-loop-004.md",
+    "trios/.gitignore"
+  ],
+  "tests_added": "Existing workspace tests; no new tests added in this wave. cargo test --workspace passed 332 tests.",
+  "verification": "./build.sh passed; cargo test --workspace passed; cargo clippy --workspace --all-targets --all-features produced only pre-existing trios-mesh expect_used warnings; grep /Users/playra/ returned zero matches in rings/ and BR-OUTPUT/; ASCII scan of changed files clean.",
+  "pattern": "Centralize environment-derived paths in a RUST-00 config crate, propagate the dependency to all rings, and mechanically replace local helpers. Move /tmp runtime state into project-relative .trinity/ subdirs.",
+  "anti_pattern": "Do not leave hardcoded developer home paths as fallbacks; do not use /tmp for persistent runtime state in production code.",
+  "tags": [
+    "portable-paths",
+    "TRIOS_ROOT",
+    "trios-config",
+    "current_dir",
+    "tmp-migration",
+    "ascii-only",
+    "L3-PURITY",
+    "L7-UNITY"
+  ],
+  "commit": "cc85eaf15",
+  "branch": "feat/zai-provider",
+  "skills_saved": [
+    "trios/.claude/skills/ascii-lint/SKILL.md",
+    "trios/.claude/skills/portable-paths/SKILL.md"
+  ],
+  "next_wave_options": [
+    "mesh-panic-hardening",
+    "tmp-zero",
+    "seal-automation"
+  ],
+  "closeout_report": "trios/.trinity/wave-loop-004.md"
+}

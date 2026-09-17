@@ -1,0 +1,37 @@
+{
+  "date": "2026-07-24",
+  "title": "LOGS Tab Live Tail — Cycle 42",
+  "ring": "SR-02 / BR-OUTPUT",
+  "agent": "claude",
+  "road": "B",
+  "problem": "Cycle 41 made the LOGS tab a structured log viewer, but auto-refresh still re-read every log file and rebuilt the whole source array every 5 seconds. That reset scroll position, wasted disk I/O, and did not provide true tail behavior. There was no offset tracking, no live/pause semantics, no jump-to-latest, and no handling for partial trailing lines or rotation/truncation.",
+  "root_cause": "LogParser parsed full files on every refresh and stored no per-source read offset. LogsTabView used a generic auto-refresh task that called loadAll, replacing the entire sources array. ScrollView had no programmatic anchor, so the view could not follow new lines.",
+  "fix": "Added LogParserKind enum (eventLog, pinoJSON, plainText) and lastReadOffset: UInt64 to LogSource. Implemented LogParser.incrementalRefresh(sources:maxLinesPerSource:) using FileHandle byte-offset reads, file-size change detection, rotation/truncation fallback to full re-read, trailing-line buffering with offset rewind, rolling cap enforcement, and consecutive deduplication across refresh boundaries. Updated LogsTabView with a Live toggle and status dot, a 5-second liveTask, a Jump to latest button, and ScrollViewReader scrolling to a bottom anchor id. Preserved selectedSourceID and filters across refreshes while appending only new lines. Extended LogsTabViewTests with incremental-refresh edge-case coverage.",
+  "files": [
+    "trios/rings/SR-02/LogParser.swift",
+    "trios/BR-OUTPUT/LogsTabView.swift",
+    "trios/tests/TriOSKitTests/LogsTabViewTests.swift",
+    "trios/.trinity/specs/logs-tab-live-tail.md",
+    "trios/.claude/plans/trios-cycle42-logs-tab-live-tail.md",
+    "trios/.claude/plans/trios-cycle42-logs-tab-live-tail-report.md",
+    "trios/.trinity/experience/2026-07-24_logs-tab-live-tail-loop-042.json"
+  ],
+  "tests": {
+    "build_sh": "PASS",
+    "cargo_test_workspace": "101 passed",
+    "cargo_clippy": "PASS",
+    "clade_audit": "0 findings",
+    "clade_seal": "SEAL VALID",
+    "clade_e2e": "PASS",
+    "swift_test": "UNAVAILABLE (CommandLineTools-only environment)"
+  },
+  "episode": ".trinity/experience/2026-07-24_logs-tab-live-tail-loop-042.json",
+  "plan": ".claude/plans/trios-cycle42-logs-tab-live-tail.md",
+  "report": ".claude/plans/trios-cycle42-logs-tab-live-tail-report.md",
+  "next_options": [
+    "Scroll-aware auto-follow — pause live scroll when the user scrolls up, resume only when already near the bottom or via Jump to latest",
+    "Structured query and export — add a tiny search DSL (level:warn source:cron-log) and export filtered results to JSONL/CSV",
+    "Cross-source correlated timeline — merge all sources by timestamp or correlation_id into a single chronological trace view"
+  ],
+  "claim": "claim-LOGS-TAB-LIVE-TAIL-042"
+}

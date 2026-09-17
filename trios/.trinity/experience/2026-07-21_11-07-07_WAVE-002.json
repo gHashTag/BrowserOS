@@ -1,0 +1,48 @@
+{
+  "task_id": "WAVE-002",
+  "issue_url": "#T27-EPIC-001",
+  "domain": "Safety/Hardening",
+  "agent_chain": [
+    "t27-creator",
+    "t27-verifier"
+  ],
+  "root_cause": "BR-OUTPUT Swift files violated L3 PURITY with non-ASCII characters; QueenStatusViewModel used /bin/zsh -c for health probes creating CWE-78 shell injection surface; singleton lock lived in world-writable /tmp; registry.json referenced a missing agent file.",
+  "fix_pattern": "Batch-replace non-ASCII chars in BR-OUTPUT with ASCII equivalents per ascii-cleanup.md. Add run/runAsync tokenized Process helpers to QueenStatusViewModel and migrate all health probes. Move singleton lock/PID to .trinity/run/ with restricted perms. Remove agent-H from registry.json.",
+  "files_changed": [
+    "trios/BR-OUTPUT/BrowserOSChatViewModel.swift",
+    "trios/BR-OUTPUT/ChatLogic.swift",
+    "trios/BR-OUTPUT/ChatPanelView.swift",
+    "trios/BR-OUTPUT/GitButlerViewModel.swift",
+    "trios/BR-OUTPUT/LLMClient.swift",
+    "trios/BR-OUTPUT/MessageBubbleView.swift",
+    "trios/BR-OUTPUT/MeshTabView.swift",
+    "trios/BR-OUTPUT/ProjectPaths.swift",
+    "trios/BR-OUTPUT/QueenStatusBadge.swift",
+    "trios/BR-OUTPUT/QueenStatusViewModel.swift",
+    "trios/BR-OUTPUT/QueenTabView.swift",
+    "trios/BR-OUTPUT/RecursionGuard.swift",
+    "trios/BR-OUTPUT/RichTextRenderer.swift",
+    "trios/BR-OUTPUT/TerminalTabView.swift",
+    "trios/BR-OUTPUT/TriosMCPClient.swift",
+    "trios/BR-OUTPUT/WindowManager.swift",
+    "trios/.claude/agents/registry.json",
+    "trios/.trinity/specs/ascii-cleanup.md",
+    "trios/.trinity/specs/singleton-lock-paths.md",
+    "trios/.trinity/specs/queen-shell-free.md",
+    "trios/.trinity/specs/agent-registry-sync.md",
+    "trios/.trinity/wave-loop-002.md"
+  ],
+  "tests_added": [
+    "ASCII scan over BR-OUTPUT/*.swift",
+    "grep for shellAsync/shell( in QueenStatusViewModel",
+    "registry.json validation script"
+  ],
+  "lessons": [
+    "ASCII-only policy is enforceable with a single Python scan; batch replacement preserves semantics if done carefully.",
+    "Shell-free Process helpers dramatically reduce attack surface but require careful async actor crossing in @MainActor Swift.",
+    "Singleton lock path must be user-private; /tmp is unsafe for process identity.",
+    "Registry drift (missing agent-H) is a latent L1 TRACEABILITY bug; add CI validation."
+  ],
+  "seal_status": "BUILD_PASS, TEST_PASS, CLIPPY_PASS, E2E_NOT_RUN_DUE_SERVER_DOWN",
+  "timestamp": "2026-07-21T11:07:07Z"
+}

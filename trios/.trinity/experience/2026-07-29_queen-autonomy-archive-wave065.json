@@ -1,0 +1,70 @@
+{
+  "wave": "WAVE-065",
+  "date": "2026-07-29",
+  "domain": "Queen autonomy, economics, archive, voice",
+  "status": "PARTIAL",
+  "summary": "Closed all three WAVE-064 options, archived settled work, gave every task a visible status, and rewrote the Queen's reports as prose that explains her reasoning.",
+  "defects_found": [
+    {
+      "id": "W1",
+      "title": "Settled tasks never left the working view",
+      "fix": "DelegatedTaskState.isArchivable plus registry.open / .archived and a collapsible Archive section capped at 50.",
+      "lesson": "failed is terminal but deliberately not archivable: a failure nobody has looked at is still work, and filing it away silently is how it never gets looked at."
+    },
+    {
+      "id": "W2",
+      "title": "No cost signal",
+      "fix": "SSE .usage accumulated in QueenWorkerTranscript, recorded additively per task, surfaced live in the banner.",
+      "lesson": "Additive because a rejected bee is re-briefed in the same chat and its second attempt is not free."
+    },
+    {
+      "id": "W3",
+      "title": "Stalled bees held slots forever",
+      "fix": "reapStalledWorkers on every wake, only for tasks with no live stream."
+    },
+    {
+      "id": "W5",
+      "title": "Reports read like a status table",
+      "fix": "QueenReviewDigest rewritten as prose with one explanatory analogy per report."
+    },
+    {
+      "id": "W7",
+      "title": "The Queen reported measurements that were never taken",
+      "cause": "committedFiles nil and 0 were treated identically, and token counts printed 0 when the provider emitted no usage at all.",
+      "fix": "nil now reads 'I have not tallied its branch yet'; zero-valued metrics are omitted rather than printed.",
+      "lesson": "Printing 0 for an absent measurement turns a gap in instrumentation into an accusation about the worker. This is the same class of error as reporting a build green because no FAIL line was printed."
+    },
+    {
+      "id": "W8",
+      "title": "The wake could describe a task whose commit had not run",
+      "cause": "transition to awaitingReview happened before QueenBranchCommitter finished.",
+      "fix": "Commit and tally first, transition second."
+    }
+  ],
+  "verification": {
+    "chat_e2e": "144 ok, 0 not ok",
+    "delegate_probe": "delegate -> work -> commit -> auto-accept observed; queen.auto_accept logged with files:1",
+    "visual": "Swarm strip, Archive section, status pills, and the worker-chat task banner all confirmed on screen; conversational digest read back in the Queen chat"
+  },
+  "not_done": [
+    "No commit: the working tree still carries unrelated in-flight work from earlier sessions.",
+    "Cost is in tokens, not currency - no per-provider price table yet.",
+    "The OTLP exporter is written and wired but was not exercised against a live collector."
+  ],
+  "files": [
+    "rings/SR-00/QueenDelegation.swift",
+    "rings/SR-00/QueenReviewDigest.swift",
+    "rings/SR-00/QueenWorkerTranscript.swift",
+    "rings/SR-01/TriosOTLPExporter.swift",
+    "rings/SR-01/TriosLogBus.swift",
+    "rings/SR-02/QueenDelegationRegistry.swift",
+    "rings/SR-02/QueenWorkerRunner.swift",
+    "rings/SR-02/QueenReviewScheduler.swift",
+    "rings/SR-02/QueenBranchCommitter.swift",
+    "rings/SR-02/ChatViewModel.swift",
+    "BR-OUTPUT/QueenTaskStatusView.swift",
+    "BR-OUTPUT/FullscreenChatWorkspace.swift",
+    "build.sh",
+    "Makefile"
+  ]
+}

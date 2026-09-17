@@ -1,0 +1,24 @@
+{
+  "timestamp": "2026-07-24T09:52:17Z",
+  "task_id": "TRIOS-PORTABLE-LAND-001",
+  "claim_id": "989F8151-6640-44B4-AFE1-FEEB17078EF2",
+  "action": "official_single_command_installer_research",
+  "result": "PASS",
+  "evidence": {
+    "command": "Independent read-only review of current Apple, Bun, Homebrew, and Git primary documentation",
+    "exit_code": 0,
+    "artifact": "single-command installer design inputs",
+    "facts": [
+      "Apple Command Line Tools installation requires a user-confirmed system dialog.",
+      "bunx can execute an exact version of a published package.",
+      "bun ci is the frozen-lockfile installation path.",
+      "Homebrew currently does not provide the repository-pinned Bun 1.3.6 release.",
+      "Git can initialize only the recorded mesh submodule path without following a floating remote branch.",
+      "Immutable commit IDs provide reproducibility and signed tags or commits add publisher authenticity."
+    ]
+  },
+  "residual_risks": [
+    "The chosen bootstrap still requires Bun, Git, network access, and existing repository authentication.",
+    "Queen and mesh revisions must be published before the installer can complete."
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "date": "2026-07-27",
+  "title": "LOGS Tab Per-Source Noise Profiles — Cycle 50",
+  "cycle": 50,
+  "ring": "SR-02 / BR-OUTPUT",
+  "agents": "claude",
+  "road": "B",
+  "problem": "Cycle 49 made noise rules user-editable, but every rule was global. The same event/message can be noise in one source (e.g. browseros-companion.log) and signal in another (e.g. queen.log).",
+  "root_cause": "LogNoiseRule had no metadata scoping; LogNoiseFilter matched any line regardless of source, and the UI offered no source picker.",
+  "fix": "Added optional sourceIDs: [String]? to LogNoiseRule (nil/empty = global) and applies(toSourceID:) helper. Updated LogNoiseFilter.matches to reject non-matching source before content checks. Updated LogNoisePatternProposer.propose to accept an optional sourceID and pre-fill sourceIDs: [sourceID] for the contextual 'Hide events like this' action. Extended NoiseProfileSheet with availableSources:, source-scope chips, a toggle menu to switch between 'All sources' and selected sources, and source scope in the preview card. Wired source scoping through LogsTabView so right-clicking a row proposes a source-scoped rule by default. Added XCTest coverage for scoped filtering, global fallback, applies helper, proposer source prefill, legacy JSON decoding, and filterNoise. Replaced non-ASCII UI glyphs with ASCII equivalents to keep L3 Purity clean. Created GitHub issue gHashTag/trios#1084 for traceability.",
+  "files": [
+    "trios/rings/SR-02/LogParser.swift",
+    "trios/BR-OUTPUT/LogsTabView.swift",
+    "trios/tests/TriOSKitTests/LogsTabViewTests.swift",
+    "trios/.trinity/specs/per-source-noise-profiles.md",
+    "trios/.claude/plans/trios-cycle50-per-source-noise-profiles.md",
+    "trios/.claude/plans/trios-cycle50-per-source-noise-profiles-report.md"
+  ],
+  "tests": "cargo run --bin clade-build PASS; cargo run --bin clade-e2e PASS (report .trinity/e2e/report_prod_1785169019.md); TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-audit PASS (0 hard-gate findings across 8 checks); cargo run --bin clade-seal SEAL VALID; cargo test -p trios-mesh PASS (101 tests); open trios.app relaunched, menu-bar logo preserved (PID 1164). T27 Verifier final verdict: CLEAN — L1-L7 all PASS.",
+  "issue": "gHashTag/trios#1084",
+  "next_options": [
+    "Noise profile import/export and schema versioning — add JSON Import/Export buttons to NoiseProfileSheet so users can share source-scoped profiles and runbooks can ship defaults; include a schema version field for safe migration.",
+    "Per-source built-in presets and auto-suggest — analyze per-source frequency patterns and propose new source-scoped rules automatically, closing the feedback loop between user edits and built-in defaults.",
+    "Upstream / server-side noise reduction — configure BrowserOS companion and Queen cron to emit high-frequency events at debug/sampled intervals, reducing disk I/O and archive churn before the LOGS tab ever sees them."
+  ]
+}

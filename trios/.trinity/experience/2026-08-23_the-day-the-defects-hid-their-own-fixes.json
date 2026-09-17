@@ -1,0 +1,58 @@
+{
+  "id": "2026-08-23_the-day-the-defects-hid-their-own-fixes",
+  "date": "2026-08-23",
+  "ring": "SR-00, SR-02, BR-OUTPUT, build.sh, skills",
+  "branch": "feat/queen-supervisor",
+  "title": "The day two defects hid their own fixes, and the release lane stood still behind a dialog nobody could see",
+
+  "severity": "high",
+  "mnl_stage": "L",
+  "agent": "Queen supervisor (30-minute cron loop)",
+
+  "problem": "The Queen could not see work filed after an epic's hundredth timeline event, dismissed every fix whose defect it could read, and - in the release lane - could do nothing at all, because a macOS keychain dialog had been waiting on screen since a rebuild. Each of the first two defects blocked the issue that described it.",
+
+  "findings": [
+    "The epic timeline was read one page deep. Events arrive oldest-first, so the page that falls off holds the NEWEST cross-references. #1090 held 104 events; the highest issue visible was #1228, and three open issues did not exist as far as choosing was concerned while the journal said 'Nothing to choose from 19 candidates' for hours.",
+    "'looks already done' called work finished when every identifier its criteria named was present in the boundary files. For a FIX, those identifiers exist because the defect exists - #1288's criteria name fetchPullRequest because that function loses the status - so eight of seventeen candidates were dismissed before anyone could touch them. Gated now on evidence that postdates the issue: a boundary file with no commits since the issue was filed cannot hold its fix.",
+    "Both defects hid their own fixes. The issue asking the Queen to see past page one lay past page one; the issue describing the already-done heuristic named an identifier that made the heuristic dismiss it. Neither could be delegated; both had to be fixed by hand.",
+    "A keychain that times out on EVERY operation is a dialog, not a keychain. pgrep -x SecurityAgent named it in one command after two rounds of guessing. Three discriminators settle it: the shell reads the same service's attributes in 24 ms, the OTHER variant's app reads the same service successfully in the same minute, and the timing starts at a rebuild - a new ad-hoc signature no longer matches the ACL. Everything the release lane could not do traced there: dispatch, local-auth, conversation encryption, reconciliation.",
+    "The dev lane is the control that proves the code sound: same persistence code, file-based credentials instead of the keychain, ZERO plaintext fallbacks and zero plaintext reads across its whole log, while the release lane wrote 18 fallbacks and could re-encrypt none of them.",
+    "Housekeeping that only runs after thirty quiet minutes never runs. The archive sweep lives inside a report loop that sleeps first; four relaunches in an hour - all mine - meant no record was ever stamped, and the reconciliation went on calling settled work 'the work exists and nobody is looking at it'. One sweep at start fixed it: fourteen archive lines, stamps 48 to 62, and the next pass read 'zero disagree in a way that needs looking at' where the briefing had reported eight per tick.",
+    "A briefing whose criteria name files outside its boundary cannot be passed. I wrote two in one day. #1287 asked for a logic suite and permitted only ChatViewModel, so the bee put its suite inside ChatViewModel; #1288 asked for the poller, a drill and a suite and permitted only the client, so four of five criteria were unreachable and an exact change came back 1/5.",
+    "The bee out-did the brief twice. #1287 made the caught error a REQUIRED argument of the only emitter, so dropping it stops compiling; #1288 found the next defect while proving its own and named it in its own log line rather than papering over it."
+  ],
+
+  "fix": "Paginate the epic timeline with a stopping rule and a bound. Gate the already-done heuristic on evidence that postdates the issue. Detect a waiting SecurityAgent after a failed warm-up cycle and say whether retrying can help. Archive once at start, before the loop's first sleep. Judge the pull-request guard by the branch's named commit rather than the last turn's file count. Fall back to the vendored QueenUILib halves when the shared checkout loses its build map mid-compile. Keep the caught error in queen.pr.poll_failed and the HTTP status in a decode failure.",
+
+  "prevention": [
+    "When a defect describes the machinery that would find its own issue, do not delegate it - the delegation path is the thing that is broken.",
+    "A refusal you cannot find is usually under a key you did not grep: '/accept' logs queen.accept.blocked, and I called it silent twice.",
+    "open --env applies only at launch. Kill, VERIFY dead with pgrep, then open - a watchdog can restart the app between the two.",
+    "Every file the criteria touch must be inside the boundary. Written into the new queen-briefing skill with both instances.",
+    "Cheap proxies for 'did this land' failed twice: commit messages cite issue numbers in prose, and Closes #N is not reliably written even though L1 requires it. The honest measurement was the date."
+  ],
+
+  "corrections_to_earlier_claims": [
+    "I reported a gate green that was red: 'cmd; echo exit=$?' swallowed make's exit code. Every gate run now reports REAL_EXIT.",
+    "I said prNumber was not recorded. The field is pullRequestNumber and it was recorded all along; I read a name that does not exist and called the None a defect.",
+    "I predicted the reconcile count would fall after dismissing records. It rose, 4 to 6, because the gate reads the archive stamp rather than the state.",
+    "I suspected my own pagination of starving the keychain. Measured: no choose pass had run since that relaunch, so those reads never happened."
+  ],
+
+  "related_episodes": [
+    "2026-08-22_first-real-money-day",
+    "2026-08-22_board-lifecycle-night",
+    "2026-08-21_unmeasured-cause-and-the-bricked-queen-chat"
+  ],
+
+  "tags": [
+    "epic-timeline-pagination",
+    "already-done-heuristic",
+    "keychain-dialog",
+    "archive-sweep",
+    "queen-briefing",
+    "boundary-rule",
+    "unmeasured-cause",
+    "self-hiding-defect"
+  ]
+}

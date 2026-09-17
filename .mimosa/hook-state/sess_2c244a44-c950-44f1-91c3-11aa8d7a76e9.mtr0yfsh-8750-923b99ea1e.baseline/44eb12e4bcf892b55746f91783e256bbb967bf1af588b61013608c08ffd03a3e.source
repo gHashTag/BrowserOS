@@ -1,0 +1,49 @@
+name: trios logic
+
+# The app-level cassette suite (`make cassettes`) launches the .app and needs a
+# window server plus a running agent server, so it cannot run here. The same
+# logic is covered in-process by the chat SSE harness, which is what this runs:
+# ReplayTransport, QueenObserver and SalienceLearner are exercised through their
+# real code paths with no GUI and no provider.
+on:
+  pull_request:
+    paths:
+      - 'trios/rings/**'
+      - 'trios/tests/**'
+      - 'trios/agent-server/apps/server/src/agent/**'
+      - 'trios/Makefile'
+      - 'trios/tests/fixtures/**'
+      - '.github/workflows/trios-logic.yml'
+
+jobs:
+  server-units:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Orphan tool-call repair
+        working-directory: trios/agent-server
+        run: bun test apps/server/src/agent/message-validation.test.ts
+
+  swift-logic:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install SQLCipher
+        run: brew install sqlcipher
+      # The fast gates: seconds each, no build, no GUI, no provider. They were
+      # local-only until now, which meant "when was this last run?" had no
+      # answer off this one machine - and that question is what found a guard
+      # that had never once run to completion.
+      - name: Fast gates (shape, parse, guards, empty sources, keychain doors)
+        working-directory: trios
+        run: |
+          make make-dollars
+          make empty-sources
+          make keychain-doors
+          make finish-mark-order
+          make guard-shapes
+          make parse-tests
+      - name: Chat SSE, cassette replay, observer, salience learner
+        working-directory: trios
+        run: bash tests/swift/run_chat_sse_e2e.sh

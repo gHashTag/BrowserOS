@@ -1,0 +1,63 @@
+{
+  "title": "Fix Local-Auth Test Regressions and Extend Gate to High-Impact Routes",
+  "cycle": 19,
+  "date": "2026-07-25",
+  "ring": "packages/browseros-agent/apps/server + trios/BR-OUTPUT",
+  "agents": ["claude"],
+  "road": "B",
+  "problem": "Cycle 18 gated POST /agents and POST /skills with a new requireLocalAuth middleware, but existing server tests were not updated to supply X-TriOS-Local-Auth, causing 503 failures in agents.test.ts. Additionally, other high-impact routes (POST /a2a/register, POST /a2a/message, PUT /soul, POST /shutdown, POST /chat) remained origin-trust-only.",
+  "root_cause": "The auth gate was added without a default allow-in-tests path and without extending the same pattern to other mutation routes. No Swift helper existed to fetch or inject the token.",
+  "fix": "Updated agents.test.ts to use a default always-allow local-auth validator for existing tests and added explicit missing/invalid/valid token tests. Gated POST /a2a/register, POST /a2a/message, PUT /soul, POST /shutdown, and POST /chat with requireLocalAuth. Wired localAuthService into createA2aRoutes, createSoulRoutes, createShutdownRoute, and createChatRoutes in server.ts. Added fetchLocalAuthToken() and requestWithLocalAuth() helpers to TriosMCPClient.swift for future gated route callers. Updated auth-routes.test.ts to accept 503 for POST /chat without a configured validator.",
+  "files": [
+    "packages/browseros-agent/apps/server/src/api/routes/a2a.ts",
+    "packages/browseros-agent/apps/server/src/api/routes/soul.ts",
+    "packages/browseros-agent/apps/server/src/api/routes/shutdown.ts",
+    "packages/browseros-agent/apps/server/src/api/routes/chat.ts",
+    "packages/browseros-agent/apps/server/src/api/server.ts",
+    "packages/browseros-agent/apps/server/tests/api/routes/agents.test.ts",
+    "packages/browseros-agent/apps/server/tests/api/routes/auth-routes.test.ts",
+    "trios/BR-OUTPUT/TriosMCPClient.swift",
+    "trios/.claude/plans/trios-local-auth-regression-cycle-19-report.md"
+  ],
+  "tests": {
+    "bun_tsc_noEmit": "clean",
+    "bun_test_agents_test": "17 pass, 0 fail",
+    "bun_test_auth_routes_test": "29 pass, 0 fail",
+    "bun_test_api_routes_dir": "69 pass, 0 fail",
+    "cargo_clade_build": "PASS",
+    "cargo_clade_e2e": "PASS",
+    "cargo_clade_seal": "SEAL VALID",
+    "trios_app_relaunch": "ok"
+  },
+  "variants": [
+    {
+      "name": "A - extend local-auth gate + fix tests + Swift helper",
+      "selected": true,
+      "summary": "Apply the same second-factor token to all high-impact creation/mutation routes, fix the resulting test regressions, and add a reusable Swift helper."
+    },
+    {
+      "name": "B - route-scoped capability tokens",
+      "selected": false,
+      "summary": "Issue per-route or per-action signed capabilities instead of one global local token."
+    },
+    {
+      "name": "C - pending-confirmation queue with UI",
+      "selected": false,
+      "summary": "High-impact actions become pending state items; TriOS UI shows approval queue and user must confirm."
+    }
+  ],
+  "next_options": [
+    "Route-scoped capability tokens (Variant B)",
+    "Pending-confirmation queue with UI dialog (Variant C)",
+    "Teach TriOS to call gated routes using the new Swift helper"
+  ],
+  "law_compliance": {
+    "L1_TRACEABILITY": true,
+    "L2_GENERATION": true,
+    "L3_PURITY": true,
+    "L4_TESTABILITY": true,
+    "L5_IDENTITY": true,
+    "L6_CEILING": true,
+    "L7_UNITY": true
+  }
+}

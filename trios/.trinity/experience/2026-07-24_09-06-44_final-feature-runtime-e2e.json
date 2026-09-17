@@ -1,0 +1,29 @@
+{
+  "timestamp": "2026-07-24T09:06:44Z",
+  "task_id": "TRIOS-PORTABLE-LAND-001",
+  "claim_id": "989F8151-6640-44B4-AFE1-FEEB17078EF2",
+  "action": "final_feature_signature_runtime_visual_e2e",
+  "result": "PASS_WITH_KEYCHAIN_AUTHORIZATION_GATE",
+  "evidence": {
+    "commands": [
+      "codesign --verify --deep --strict --verbose=2 trios.app",
+      "open -n /Users/playra/BrowserOS-full/trios/trios.app",
+      "curl --fail http://127.0.0.1:9105/health",
+      "bash e2e/trios_e2e_flow.sh"
+    ],
+    "exit_codes": [0, 0, 0, 0],
+    "facts": [
+      "The exact rebuilt bundle is valid on disk and satisfies its designated requirement.",
+      "The exact rebuilt executable launched as PID 26499.",
+      "Production health returned status ok with cdpConnected true.",
+      "Runtime E2E produced /tmp/trios_e2e/report_1784883869.md and screenshot_1784883869.png.",
+      "Command-1 opened the Chat workspace; /tmp/trios-final-chat-workspace.png shows the title bar, online state, history, planner card, message composer, and provider controls without overlap, black rectangles, or duplicated chrome.",
+      "macOS requested the user's login password because the rebuilt ad-hoc signature accessed the existing memory HMAC key. The autonomous run selected Deny; the app then followed its fail-closed path and started without long-term recall."
+    ]
+  },
+  "residual_risks": [
+    "The user must choose Allow once to validate long-term recall with the rebuilt signature.",
+    "The runtime log includes an expected connection-refused probe to the optional canary port 9205 while production port 9105 remains healthy.",
+    "Portable release dependency publication remains blocked."
+  ]
+}

@@ -1,0 +1,63 @@
+name: Code Quality
+
+on:
+  pull_request:
+    branches:
+      - main
+      - dev
+    paths:
+      - "trios/agent-server/**"
+
+jobs:
+  biome:
+    name: runner / Biome
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: trios/agent-server
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Biome
+        uses: biomejs/setup-biome@v2
+        with:
+          # Pin to the version the repo depends on (package.json @biomejs/biome)
+          # so CI parses the 2.4.8 config; "latest" breaks on config schema drift.
+          version: 2.4.8
+
+      - name: Run Biome
+        run: biome ci .
+
+  typecheck:
+    name: runner / Typecheck
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: trios/agent-server
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun ci
+
+      - name: Prepare wxt
+        run: VITE_PUBLIC_BROWSEROS_API=http://localhost:3000 bun run --cwd apps/agent wxt prepare
+
+      - name: Run codegen
+        run: bun run --cwd apps/agent codegen
+
+      - name: Run Typecheck
+        run: bun run typecheck

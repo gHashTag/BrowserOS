@@ -1,0 +1,43 @@
+{"state":"cached","timestamp":"2026-08-18T12:45:30Z","reason":null,"event":"fetch.success","refreshCount":1,"retry403Count":0}
+{"state":"cached","timestamp":"2026-08-18T12:45:30Z","reason":null,"event":"fetch.success","refreshCount":1,"retry403Count":0}
+{"state":"cached","timestamp":"2026-08-18T12:45:30Z","reason":null,"event":"403.retry","refreshCount":1,"retry403Count":1}
+{"state":"failed","timestamp":"2026-08-18T12:45:30Z","reason":"http_503","event":"failure","refreshCount":1,"retry403Count":1}
+{"state":"unknown","timestamp":"2026-08-18T12:45:30Z","reason":null,"event":"reset","refreshCount":0,"retry403Count":0}
+{"state":"cached","timestamp":"2026-08-18T12:45:30Z","reason":null,"event":"fetch.success","refreshCount":1,"retry403Count":0}
+{"state":"cached","timestamp":"2026-08-18T12:45:30Z","reason":null,"event":"fetch.success","refreshCount":1,"retry403Count":0}
+{"state":"cached","timestamp":"2026-08-18T12:45:30Z","reason":null,"event":"fetch.success","refreshCount":1,"retry403Count":0}
+{"state":"cached","timestamp":"2026-08-18T12:45:30Z","reason":null,"event":"fetch.success","refreshCount":1,"retry403Count":0}
+{"state":"cached","timestamp":"2026-08-18T12:45:30Z","reason":null,"event":"fetch.success","refreshCount":1,"retry403Count":0}
+{"state":"cached","timestamp":"2026-08-18T12:45:30Z","reason":null,"event":"fetch.success","refreshCount":2,"retry403Count":0}
+{"state":"failed","timestamp":"2026-08-18T12:45:30Z","reason":"fetchFailed(statusCode: Optional(503))","event":"failure","refreshCount":0,"retry403Count":0}
+{"state":"cached","timestamp":"2026-08-18T12:45:30Z","reason":null,"event":"fetch.success","refreshCount":1,"retry403Count":0}
+{"timestamp":"2026-08-18T12:45:30Z","event":"fetch.success","reason":null,"state":"cached","retry403Count":0,"refreshCount":1}
+{"timestamp":"2026-08-18T12:45:30Z","event":"refresh.success","reason":null,"state":"cached","retry403Count":0,"refreshCount":1}
+{"timestamp":"2026-08-18T12:45:30Z","event":"family.revoked","reason":null,"state":"failed","retry403Count":0,"refreshCount":0}
+{"timestamp":"2026-08-18T12:45:30Z","event":"fetch.success","reason":null,"state":"cached","retry403Count":0,"refreshCount":1}
+{"timestamp":"2026-08-18T12:45:30Z","event":"fetch.success","reason":null,"state":"cached","retry403Count":0,"refreshCount":1}
+{"timestamp":"2026-08-18T12:45:30Z","event":"reset","reason":null,"state":"unknown","retry403Count":0,"refreshCount":0}
+{"timestamp":"2026-08-18T12:45:30Z","event":"fetch.success","reason":null,"state":"cached","retry403Count":0,"refreshCount":1}
+{"timestamp":"2026-08-18T12:45:30Z","event":"fetch.success","reason":null,"state":"cached","retry403Count":0,"refreshCount":1}
+{"timestamp":"2026-08-18T12:45:30Z","event":"failure","reason":"Error Domain=MockURLProtocol Code=1 \"requestHandler is not set: a request reached the mock after its handler was cleared - http:\/\/127.0.0.1:9999\/auth\/local-token\" UserInfo={_NSURLErrorRelatedURLSessionTaskErrorKey=(\n    \"LocalDataTask <34D2680C-D510-43B2-ACFD-6E83E7BD7961>.<1>\"\n), NSLocalizedDescription=requestHandler is not set: a request reached the mock after its handler was cleared - http:\/\/127.0.0.1:9999\/auth\/local-token, _NSURLErrorFailingURLSessionTaskErrorKey=LocalDataTask <34D2680C-D510-43B2-ACFD-6E83E7BD7961>.<1>}","state":"failed","retry403Count":0,"refreshCount":0}
+{"timestamp":"2026-08-18T12:45:30Z","event":"fetch.success","reason":null,"state":"cached","retry403Count":0,"refreshCount":1}
+{"timestamp":"2026-08-18T12:45:30Z","event":"failure","reason":"Error Domain=MockURLProtocol Code=1 \"requestHandler is not set: a request reached the mock after its handler was cleared - http:\/\/127.0.0.1:9999\/auth\/local-token\" UserInfo={_NSURLErrorRelatedURLSessionTaskErrorKey=(\n    \"LocalDataTask <F15E87FB-C113-4E84-9AE4-88AB6BE67834>.<1>\"\n), NSLocalizedDescription=requestHandler is not set: a request reached the mock after its handler was cleared - http:\/\/127.0.0.1:9999\/auth\/local-token, _NSURLErrorFailingURLSessionTaskErrorKey=LocalDataTask <F15E87FB-C113-4E84-9AE4-88AB6BE67834>.<1>}","state":"failed","retry403Count":0,"refreshCount":0}
+{"state":"cached","timestamp":"2026-08-18T12:45:40Z","event":"403.retry","reason":null,"refreshCount":1,"retry403Count":1}
+{"state":"cached","timestamp":"2026-08-18T12:45:40Z","event":"403.retry","reason":null,"refreshCount":1,"retry403Count":2}
+{"state":"cached","reason":null,"retry403Count":0,"timestamp":"2026-08-18T12:48:54Z","event":"fetch.success","refreshCount":1}
+{"timestamp":"2026-08-18T12:48:54Z","state":"cached","refreshCount":1,"event":"fetch.success","retry403Count":0,"reason":null}
+{"timestamp":"2026-08-18T12:48:54Z","state":"cached","refreshCount":1,"event":"fetch.success","retry403Count":0,"reason":null}
+{"reason":null,"timestamp":"2026-08-18T12:48:54Z","state":"cached","refreshCount":2,"retry403Count":0,"event":"fetch.success"}
+{"refreshCount":0,"retry403Count":0,"timestamp":"2026-08-18T12:48:54Z","reason":"fetchFailed(statusCode: Optional(503))","state":"failed","event":"failure"}
+{"timestamp":"2026-08-18T12:48:54Z","state":"cached","refreshCount":1,"reason":null,"event":"fetch.success","retry403Count":0}
+{"event":"fetch.success","state":"cached","timestamp":"2026-08-18T12:48:54Z","reason":null,"refreshCount":1,"retry403Count":0}
+{"event":"refresh.success","state":"cached","timestamp":"2026-08-18T12:48:54Z","reason":null,"refreshCount":1,"retry403Count":0}
+{"event":"family.revoked","state":"failed","timestamp":"2026-08-18T12:48:54Z","reason":null,"refreshCount":0,"retry403Count":0}
+{"event":"fetch.success","state":"cached","timestamp":"2026-08-18T12:48:54Z","reason":null,"refreshCount":1,"retry403Count":0}
+{"event":"fetch.success","state":"cached","timestamp":"2026-08-18T12:48:54Z","reason":null,"refreshCount":1,"retry403Count":0}
+{"event":"reset","state":"unknown","timestamp":"2026-08-18T12:48:54Z","reason":null,"refreshCount":0,"retry403Count":0}
+{"event":"fetch.success","state":"cached","timestamp":"2026-08-18T12:48:54Z","reason":null,"refreshCount":1,"retry403Count":0}
+{"event":"fetch.success","state":"cached","timestamp":"2026-08-18T12:48:54Z","reason":null,"refreshCount":1,"retry403Count":0}
+{"event":"failure","state":"failed","timestamp":"2026-08-18T12:48:54Z","reason":"Error Domain=MockURLProtocol Code=1 \"requestHandler is not set: a request reached the mock after its handler was cleared - http:\/\/127.0.0.1:9999\/auth\/local-token\" UserInfo={_NSURLErrorRelatedURLSessionTaskErrorKey=(\n    \"LocalDataTask <4E07121E-B5BD-4AE9-985E-62AA117EED9E>.<1>\"\n), NSLocalizedDescription=requestHandler is not set: a request reached the mock after its handler was cleared - http:\/\/127.0.0.1:9999\/auth\/local-token, _NSURLErrorFailingURLSessionTaskErrorKey=LocalDataTask <4E07121E-B5BD-4AE9-985E-62AA117EED9E>.<1>}","refreshCount":0,"retry403Count":0}
+{"event":"fetch.success","state":"cached","timestamp":"2026-08-18T12:48:54Z","reason":null,"refreshCount":1,"retry403Count":0}
+{"event":"failure","state":"failed","timestamp":"2026-08-18T12:48:54Z","reason":"Error Domain=MockURLProtocol Code=1 \"requestHandler is not set: a request reached the mock after its handler was cleared - http:\/\/127.0.0.1:9999\/auth\/local-token\" UserInfo={_NSURLErrorRelatedURLSessionTaskErrorKey=(\n    \"LocalDataTask <27B96870-206F-49D2-92D5-EFDA5007689A>.<1>\"\n), NSLocalizedDescription=requestHandler is not set: a request reached the mock after its handler was cleared - http:\/\/127.0.0.1:9999\/auth\/local-token, _NSURLErrorFailingURLSessionTaskErrorKey=LocalDataTask <27B96870-206F-49D2-92D5-EFDA5007689A>.<1>}","refreshCount":0,"retry403Count":0}

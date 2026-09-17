@@ -1,0 +1,20 @@
+{
+  "task_id": "RICH-MESSAGE-001",
+  "claim_id": "056C933C-B484-4B09-8653-6BA69D1C1327",
+  "timestamp": "2026-07-22T09:18:23Z",
+  "action": "build_verify_learn",
+  "result": "clean",
+  "problem": "The chat renderer flattened GFM table rows into a paragraph, printed thematic breaks literally, and generated new block UUIDs during every SwiftUI render.",
+  "solution": "A pure MarkdownBlockParser now produces stable source-position blocks for tables, headings, code, lists, quotes, thematic breaks, and newline-preserving paragraphs. RichMessageView renders tables with a native horizontally scrollable Grid and keeps ordinary prose width-constrained.",
+  "verification": {
+    "parser_tests": "PASS",
+    "swift_build": "PASS",
+    "compiled_swift_files": 60,
+    "code_signature": "PASS",
+    "live_health": {"status": "ok", "cdpConnected": true},
+    "ascii_audit": "PASS",
+    "visual_capture": "BLOCKED_BY_MACOS_SCREEN_RECORDING_PERMISSION"
+  },
+  "lesson": "Chat Markdown must be parsed into stable semantic blocks before SwiftUI layout. Inline attributed text is appropriate inside a block, but it is not a document parser and cannot preserve GFM table structure."
+}
+

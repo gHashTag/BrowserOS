@@ -1,0 +1,27 @@
+{
+  "date": "2026-07-27",
+  "title": "Budget-Aware Draft Composer — Cycle 35 Closure",
+  "ring": "SR-00 / SR-02 / BR-OUTPUT",
+  "agents": "claude",
+  "road": "B",
+  "problem": "Cycle 34 gave each conversation its own pinned requestedOutputTokens and contextWindowMargin, but the composer still showed context impact only after the user pressed Send. A long draft could silently exceed the pinned margin, triggering unexpected history trimming or a tooLargeEvenEmpty error at send time.",
+  "root_cause": "ChatViewModel only published contextUtilizationPercent after resolveContextRoutingDecision ran during sendMessage. There was no cheap, synchronous estimate of the draft's impact against the current model's advertised window and the effective conversation margin.",
+  "fix": "Made ModelContextService.advertisedProfile public and nonisolated so the UI can read the advertised profile synchronously. Added DraftContextStatus and a static ChatRequestSizer.draftContextUtilization helper that estimates history + draft + systemPrompt against maxContextTokens * margin. Added reactive draftContextStatus, draftContextUtilizationPercent, and isDraftContextLimitExceeded accessors to ChatViewModel. Added a compact composerDraftContextStatus indicator in ChatPanelView with green/yellow/red bands and a help tooltip showing estimated tokens vs usable window. Disabled the send button when the draft alone exceeds the usable context window.",
+  "files": [
+    "trios/rings/SR-00/ModelContextService.swift",
+    "trios/rings/SR-00/ChatRequestSizer.swift",
+    "trios/rings/SR-02/ChatViewModel.swift",
+    "trios/BR-OUTPUT/ChatPanelView.swift",
+    "trios/tests/TriOSKitTests/ChatRequestSizerTests.swift",
+    "trios/.claude/plans/trios-cycle35-budget-aware-draft-composer.md",
+    "trios/.claude/plans/trios-cycle35-budget-aware-draft-composer-report.md",
+    "trios/.trinity/experience/2026-07-27_budget-aware-draft-composer-loop-035.json"
+  ],
+  "tests": "TRIOS_SKIP_CHAT_E2E=1 ./build.sh PASS; cargo test -p trios-mesh PASS (101 tests); TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-build PASS; TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-audit PASS (0 hard-gate findings); TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-seal SEAL VALID. swift test unavailable in CommandLineTools-only environment. trios.app should be relaunched from the user terminal with `open trios.app` because the agent shell lacks Aqua/GUI access.",
+  "next_options": [
+    "Per-conversation model/provider pinning — extend ConversationSettings with optional provider/baseURL/model so each thread remembers which model to use, and apply it on conversation switch without polluting the global default.",
+    "Conversation-level learned-limit reset — add an action to clear learned context/output ceilings for the current conversation only, without resetting the global StreamingContextLimitLearner history.",
+    "Output-budget progress during streaming — render a live progress indicator inside the streaming assistant message showing consumed output tokens vs. the effective budget/ceiling with color bands and approaching-limit warnings."
+  ],
+  "claim": null
+}

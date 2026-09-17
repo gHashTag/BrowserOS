@@ -1,0 +1,66 @@
+{
+  "wave": "WAVE-064",
+  "date": "2026-07-29",
+  "domain": "Queen supervisor surface",
+  "status": "PARTIAL",
+  "summary": "Made the Queen's supervisor role legible: typed system notices, a live swarm strip, a review wake, and a fix for the orphaned tool call that permanently poisoned a conversation.",
+  "defects_found": [
+    {
+      "id": "W1",
+      "title": "AI_MissingToolResultsError poisons a conversation forever",
+      "cause": "An aborted turn persists a tool call with no result. The AI SDK validates the pairing in convertToLanguageModelPrompt, so every later send on that conversation throws before the request leaves.",
+      "fix": "repairOrphanToolCalls inside filterValidMessages rewrites any tool part not in output-available/output-error to output-error with an explicit interrupted note.",
+      "lesson": "Synthesize the missing result; do not drop the call. Dropping both leaves the model with no record of what it tried and it repeats the same call forever."
+    },
+    {
+      "id": "W3",
+      "title": "Every system message rendered as a red error badge",
+      "cause": "MessageBubbleView had a single systemErrorBadge for all role == .system messages.",
+      "fix": "SystemNoticeKind plus an ASCII marker classifier; Queen notices now carry [ok]/[i]/[!]/[x].",
+      "lesson": "Inline markers beat a new ChatMessage field when history is already persisted: a rendering change must not require a history migration."
+    },
+    {
+      "id": "W4",
+      "title": "Registry state and stream state could disagree silently",
+      "cause": "A task reads running in the registry after its stream died.",
+      "fix": "QueenDashboardView takes the runner's live conversation set and shows 'no stream' in orange instead of a green dot.",
+      "lesson": "A status derived from one source of truth lies whenever a second source exists. Show the disagreement."
+    },
+    {
+      "id": "W5",
+      "title": "Nothing woke the Queen",
+      "fix": "QueenReviewScheduler: 30-minute timer plus NSWorkspace.didWakeNotification catch-up, silent when idle.",
+      "lesson": "A heartbeat that fires regardless of state gets muted, and a muted supervisor reports to nobody. Return nil when there is nothing to say."
+    }
+  ],
+  "verification": {
+    "server_tests": "bun test message-validation.test.ts - 8 pass, 0 fail",
+    "chat_e2e": "144 ok, 0 not ok",
+    "delegate_probe": "delegate -> work -> commit -> accept, plus queen.review.posted waiting:1 and queen.review.idle both observed",
+    "visual": "SWARM strip renders with awaitingReview + Review button; notices show green check / blue info instead of red warnings"
+  },
+  "not_done": [
+    "No commit: the working tree carries a large amount of unrelated in-flight work from earlier sessions, so staging this wave alone was not safe without the user's direction.",
+    "The persistent copy button on failure notices is built but was not observed on a live failure - no failure occurred during verification."
+  ],
+  "files": [
+    "agent-server/apps/server/src/agent/message-validation.ts",
+    "agent-server/apps/server/src/agent/message-validation.test.ts",
+    "rings/SR-00/SystemNotice.swift",
+    "rings/SR-00/QueenReviewDigest.swift",
+    "rings/SR-02/QueenReviewScheduler.swift",
+    "BR-OUTPUT/QueenDashboardView.swift",
+    "BR-OUTPUT/MessageBubbleView.swift",
+    "BR-OUTPUT/FullscreenChatWorkspace.swift",
+    "rings/SR-02/ChatViewModel.swift",
+    "main.swift",
+    "build.sh",
+    "Makefile"
+  ],
+  "literature": [
+    "AI SDK troubleshooting: Missing Tool Results Error - synthesize, do not strip",
+    "RudderStack multi-agent event schema - one request one trace, per-worker agent_session_id",
+    "Claude Managed Agents dashboard - parent/child session linkage makes a supervisor view readable",
+    "Why Observability Matters More Than Orchestration - pull-based supervision beats streaming"
+  ]
+}

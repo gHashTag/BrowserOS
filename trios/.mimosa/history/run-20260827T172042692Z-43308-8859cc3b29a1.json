@@ -1,0 +1,41 @@
+{
+  "schemaVersion": "mimosa-finding-history/v1",
+  "runId": "20260827T172042692Z-43308-8859cc3b29a1",
+  "runStatus": "inconclusive",
+  "errors": [
+    "bash-discovery:.worktrees/prod/queen-5003/trios/agent-server/apps/agent/entrypoints/app/ai-settings/ProviderTemplatesSection.tsx: bash_discovery_incomplete: project enumeration exceeded 5000 reviewable files",
+    "baseline:.worktrees/prod/queen-5003/trios/agent-server/apps/agent/entrypoints/app/ai-settings/ProviderTemplatesSection.tsx: baseline_partial: baseline exceeded 5000 candidate files"
+  ],
+  "target": ".",
+  "revision": "70578ac47c2e2a8f53edad4015e1e9883d7e7b34",
+  "diffHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+  "rulesVersion": "unavailable",
+  "recordedAt": "2026-08-27T17:20:42.692Z",
+  "timing": {
+    "startedAt": "2026-08-27T17:20:40.793Z",
+    "completedAt": "2026-08-27T17:20:42.692Z",
+    "durationMs": 1899
+  },
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "total": 0,
+    "modelCalls": 0,
+    "measurement": "known-zero"
+  },
+  "findings": {
+    "total": 0,
+    "bySeverity": {},
+    "byStatus": {}
+  },
+  "coverage": {
+    "status": "partial",
+    "reasonCounts": {
+      "bash_discovery_incomplete": 1,
+      "baseline_partial": 1,
+      "project_check_failed": 2
+    }
+  },
+  "evidenceBoundary": "static_only",
+  "immutableReport": ".mimosa/reports/task-review-sess_2c244a44-c950-44f1-91c3-11aa8d7a76e9-20260827T172042692Z-43308-8859cc3b29a1.json"
+}

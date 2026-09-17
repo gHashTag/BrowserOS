@@ -1,0 +1,29 @@
+[38;5;240m╭─[0m [38;5;173mTRIOS[0m [1mCONTINUOUS LOOP[0m  [38;5;245m● UNKNOWN[0m [38;5;240m───────────────────────────────────────────╮[0m
+[38;5;240m│[0m [38;5;245mdrawn from a reading      [0m[38;5;245mjust now    [0m[38;5;245m2026-09-17 09:59:25Z[0m                   [38;5;240m│[0m
+[38;5;240m├──────────────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245miteration                 [0m[1m0[0m                                                  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlast advanced             [0m[1m-[0m           [38;5;245mthe loop state could not be read[0m       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdriver (iterations)       [0m[38;5;167mNONE[0m        [38;5;245mnothing schedules an iteration[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtimers (housekeeping)     [0m[38;5;71m4 launchd[0m   [38;5;245mheal wrote 8m ago[0m                      [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlock                      [0m[1mcycle 0m[0m                                           [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mSWARM   measured just now[0m [38;5;240m──────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbees running              [0m[38;5;71m16[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdispatches finished       [0m[1m750[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtick refusal              [0m[1m16 workers already running (l…[0m                     [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mcandidates skipped        [0m[1m0[0m                                                  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  missing boundary        [0m[38;5;245m-[0m                                                  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  claimed by a fence      [0m[38;5;245m-[0m                                                  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  done but still open     [0m[38;5;245m-[0m                                                  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mavailable to a bee        [0m[38;5;245m-[0m           [38;5;245mneeds a deep cycle[0m                     [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mTREE[0m [38;5;240m───────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbranch                    [0m[1mfeat/queen-supervisor[0m  [38;5;245mahead 1  behind 1[0m           [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245muncommitted source        [0m[38;5;179m9 mod / 244 new[0m  [38;5;245mgenerated files excluded[0m          [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mworktrees                 [0m[1m22[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mvolume used               [0m[38;5;167m99%[0m         [38;5;245mbees die at 0s when this fills[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mgates declared / wired    [0m[38;5;179m25 / 8[0m      [38;5;245m17 run only on a Mac[0m                   [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mANOMALIES   0 blocker  2 high  2 medium[0m [38;5;240m────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;179m![0m the Queen's board says running 16 right now; the dashboard file is 3.4h…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the volume is 99% used; how much of it the loop owns was not measured t…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m●[0m 8 of them appear in a workflow CI will load; 17 run only on a developer…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m●[0m 244 untracked source file(s) and 9 modified one(s) exist only on this d…   [38;5;240m│[0m
+[38;5;240m╰──────────────────────────────────────────────────────────────────────────────╯[0m

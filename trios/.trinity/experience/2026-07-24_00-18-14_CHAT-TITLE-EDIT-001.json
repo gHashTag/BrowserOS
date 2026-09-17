@@ -1,0 +1,32 @@
+{
+  "task_id": "CHAT-TITLE-EDIT-001",
+  "timestamp": "2026-07-23T17:18:14Z",
+  "action": "spec_tdd_code_build_runtime_verify_learn",
+  "result": "clean",
+  "problem": "Task titles in the primary full-screen chat history were read-only, and the legacy rename method changed only in-memory summaries, so names were lost after reloading conversations.",
+  "solution": "Added a normalized persistent title override, an async persister contract, inline editing with double-click and a Rename context action, Return and Escape behavior, explicit save and cancel controls, and accessibility labels and actions.",
+  "verification": {
+    "red_test": "PASS",
+    "chat_sse_scenarios": {
+      "status": "PASS",
+      "count": 4
+    },
+    "rename_persistence_assertions": {
+      "status": "PASS",
+      "count": 6
+    },
+    "trios_build": {
+      "status": "PASS",
+      "compiled_swift_files": 123
+    },
+    "code_signature": "PASS",
+    "runtime_inline_rename": "PASS",
+    "test_title_cleanup": "PASS",
+    "browseros_health": {
+      "status": "ok",
+      "cdpConnected": true
+    },
+    "diff_check": "PASS"
+  },
+  "lesson": "A chat title must be independent metadata rather than rewritten message content. Verify rename through a fresh persister instance, clear title metadata with the conversation, and keep double-click editing from triggering the single-click conversation switch."
+}

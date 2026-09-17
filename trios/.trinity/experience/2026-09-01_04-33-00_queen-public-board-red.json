@@ -1,0 +1,15 @@
+{
+  "timestamp": "2026-09-01T04:33:00Z",
+  "task_id": "QUEEN-PUBLIC-BOARD-001",
+  "claim_id": "B2AD0166-19CB-43C9-AA84-651A9513A751",
+  "action": "Run the sanitized public Kanban projection contract before implementation",
+  "result": "EXPECTED_RED",
+  "evidence": {
+    "command": "bun test apps/server/tests/api/queen-board.test.ts",
+    "exit_code": 1,
+    "fact": "The publicBoardProjection export did not exist yet."
+  },
+  "residual_risks": [
+    "The public route is not mounted and the website cannot consume the realtime board yet."
+  ]
+}

@@ -1,0 +1,61 @@
+{
+  "title": "Cycle 21: Keychain-persisted local auth + reactive 403 refresh",
+  "date": "2026-07-25",
+  "category": "security",
+  "weak_spots": [
+    "In-memory local auth token lost on app restart",
+    "BrowserOS token rotation caused 403 failures without auto-recovery",
+    "Concurrent reconnects could race to refresh the token",
+    "Keychain read failures could block chat entirely"
+  ],
+  "competitors": [
+    "Apple Keychain kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly",
+    "OAuth2 single-flight refresh coordinator / Alamofire RequestRetrier",
+    "A2A security schemes: API key, Bearer, OAuth2 Client Credentials"
+  ],
+  "implemented_variant": "A",
+  "variants": [
+    {
+      "id": "A",
+      "name": "Keychain persistence + reactive 403 refresh",
+      "implemented": true,
+      "summary": "Store token in macOS Keychain; refresh once on 403 in SSE and A2A data paths; single-flight refresh deduplicates concurrent retries."
+    },
+    {
+      "id": "B",
+      "name": "Server-side stable device-paired token",
+      "implemented": false,
+      "summary": "BrowserOS mints a stable device-paired token; TriOS fetches once and only rotates on explicit server header. Needs server changes."
+    },
+    {
+      "id": "C",
+      "name": "Route-scoped capability tokens",
+      "implemented": false,
+      "summary": "Short-lived per-capability tokens (chat:stream, a2a:registry, etc.) for least privilege. Higher complexity."
+    }
+  ],
+  "files_changed": [
+    "rings/SR-01/LocalAuthProvider.swift",
+    "rings/SR-01/SSETransport.swift",
+    "rings/SR-02/A2ARegistryClient.swift",
+    "tests/TriOSKitTests/LocalAuthProviderTests.swift",
+    "tests/TriOSKitTests/SSETransportTests.swift"
+  ],
+  "files_removed": [
+    "rings/SR-01/NetworkRetryPolicy.swift.bak"
+  ],
+  "verification": {
+    "clade_build": "PASS",
+    "clade_audit": "0 findings",
+    "clade_seal": "VALID",
+    "clade_e2e": "PASS",
+    "app_health": "{\"status\":\"ok\",\"cdpConnected\":true}"
+  },
+  "lessons": [
+    "Use a protocol-based token store so tests can swap in an in-memory store and failure scenarios are deterministic.",
+    "Actor-isolated single-flight refreshTask is the simplest Swift concurrency primitive for deduplicating forced token refreshes.",
+    "Always clean up stray .bak/.tmp source files before swift test or clade-audit; they break package discovery.",
+    "Catching domain-specific 403 transport errors in SSETransport and retrying once with forceRefresh=true closes the stale-token loop without server changes."
+  ],
+  "related_cycles": [20, 19, 18]
+}

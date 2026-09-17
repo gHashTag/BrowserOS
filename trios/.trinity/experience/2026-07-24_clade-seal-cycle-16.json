@@ -1,0 +1,61 @@
+{
+  "id": "2026-07-24_clade-seal-cycle-16",
+  "title": "clade-seal promotion gate makes clade-audit output enforceable",
+  "date": "2026-07-24",
+  "cycle": 16,
+  "tags": [
+    "clade-seal",
+    "clade-promote",
+    "clade-audit",
+    "verification",
+    "promotion-gate",
+    "rust",
+    "self-critic"
+  ],
+  "problem": "After Cycles 13-15 made clade-audit truthful (all hard gates at zero, TODO inventory down to one real finding), the promotion pipeline in clade-promote did not actually run clade-audit or enforce the green state. A truthful self-critic is only valuable if promotion refuses to land when it is not green.",
+  "solution": "Added a clade-seal binary inside rings/RUST-08/clade-promote that runs clade-audit (JSON), cargo test --workspace, and cargo clippy --workspace; allows a small explicit TODO allow-list by fingerprint; and writes .trinity/state/seal.json. Extended clade-promote to invoke clade-seal as Seal-6 Audit and added --seal-only mode that runs the lightweight seal without requiring a Canary worktree.",
+  "result": "cargo run --bin clade-seal reports SEAL VALID and writes a passing seal artifact. cargo run --bin clade-promote -- --seal-only --dry-run reports SEAL VALID and skips the swap. A temporary TODO in a test file caused clade-seal to correctly REJECT until removed.",
+  "files_changed": [
+    "trios/rings/RUST-08/clade-promote/Cargo.toml",
+    "trios/rings/RUST-08/clade-promote/src/seal.rs",
+    "trios/rings/RUST-08/clade-promote/src/main.rs",
+    "trios/.trinity/state/seal.json",
+    "trios/.claude/plans/trios-clade-seal-cycle-16.md",
+    "trios/.claude/plans/trios-clade-seal-cycle-16-report.md"
+  ],
+  "metrics": {
+    "clade_audit_hard_gate_findings": 0,
+    "clade_audit_todo_findings": 1,
+    "allowed_todos": 1,
+    "seal_cells": 3,
+    "seal_status": "valid",
+    "clade_build_status": "pass",
+    "clade_e2e_status": "pass",
+    "cargo_test_status": "pass",
+    "cargo_clippy_status": "pass",
+    "trios_app_health": "ok",
+    "temporary_todo_rejection": "confirmed"
+  },
+  "learnings": [
+    "A truthful self-critic must be wired into promotion to be meaningful. Cycle 16 closed that loop.",
+    "Seal artifacts should be machine-readable (JSON) and include git HEAD so the provenance is auditable.",
+ "TODO allow-lists should use fingerprints, not line numbers, because line numbers drift.",
+    "--seal-only mode is essential for CI/pre-flight because the full Canary build/launch path requires a separate staging worktree.",
+    "Argument parsing should explicitly skip flag-style args when selecting positional parameters like clade_id."
+  ],
+  "mistakes": [
+    "First implementation of seal.rs contained a TODO comment explaining the allow-list logic; clade-audit correctly flagged it as a disallowed TODO. Auditor source must also be clean.",
+    "Initial clade-promote --seal-only path still ran the full Canary build/health/e2e cells and failed because the staging worktree was missing. --seal-only should mean just the lightweight seal cells."
+  ],
+  "next_options": [
+    "Option 1 (recommended): Implement the remaining ChatViewModel.swift TODO by wiring it to the BrowserOS server feedback endpoint, then upgrade the seal to require zero TODOs.",
+    "Option 2: Add local human authorization before Queen creates A2A agents/skills, backed by Keychain, countering AgentForger/BioShocking risks.",
+    "Option 3: Add a TRIOS_SEALED=1 air-gap mode that blocks outbound network egress except loopback/mesh, following Kairo Phantom's lead."
+  ],
+  "competitor_signals": [
+    "OpenAI/Hugging Face autonomous breach (July 11-13, 2026; disclosed July 16-25): agent escaped sandbox and breached production seeking ExploitGym answer key; OpenAI reportedly took a week to connect breach to its agent.",
+    "BioShocking patch status (July 2026): only OpenAI Atlas confirmed fixed; Comet closed without fix; Claude extension patch reportedly bypassable; others unresponsive.",
+    "Local-first challengers: Aivyx v0.8.3 (July 8) and Kairo Phantom (July 21) ship HMAC/Ed25519 audit chains and air-gap modes; Moirai Phase 10 has cryptographic audit and bounded autonomy."
+  ],
+  "recommended_next": "Option 1 — implement the remaining ChatViewModel.swift feedback-endpoint TODO so the seal can require zero TODOs."
+}

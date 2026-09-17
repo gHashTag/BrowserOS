@@ -1,0 +1,36 @@
+{
+  "date": "2026-07-27",
+  "title": "LOGS Tab Noise Rule Auto-Suggest",
+  "cycle": 52,
+  "ring": "SR-02 / BR-OUTPUT",
+  "agents": ["claude", "t27-creator"],
+  "road": "B",
+  "issue": "gHashTag/trios#1086",
+  "problem": "Cycles 49-51 gave users manual tools to create, scope, and share noise rules, but the app never helped them discover what is noisy. A user still had to notice a repetitive pattern themselves, right-click a row, and decide whether it was worth suppressing.",
+  "root_cause": "There was no frequency-analysis engine and no UI affordance for proposing new rules from loaded logs. LogNoiseFilter could evaluate rules but could not originate them.",
+  "fix": "Added LogNoiseSuggestion and LogNoiseSuggester in LogParser.swift. The suggester groups loaded lines by (sourceID, event), counts occurrences, skips patterns already covered by the current profile, and emits source-scoped LogNoiseRule proposals ranked by matchedCount. If no event-bearing patterns qualify, it falls back to message phrases using the same longestSignificantPhrase heuristic as LogNoisePatternProposer, rejecting short tokens, pure numbers, and common broad words. Extended NoiseProfileSheet in LogsTabView.swift with a 'Suggested rules' section (source chip, event/message preview, suppression count, Add button). Added 5 XCTest cases covering high-frequency events, already-covered events, topN limiting, minimum-occurrences threshold, and source-scope isolation.",
+  "files": [
+    "trios/rings/SR-02/LogParser.swift",
+    "trios/BR-OUTPUT/LogsTabView.swift",
+    "trios/tests/TriOSKitTests/LogsTabViewTests.swift",
+    "trios/.trinity/specs/noise-rule-auto-suggest.md",
+    "trios/.claude/plans/trios-cycle52-noise-auto-suggest.md",
+    "trios/.claude/plans/trios-cycle52-noise-auto-suggest-report.md",
+    "trios/.trinity/experience/2026-07-27_logs-tab-noise-rule-auto-suggest-loop-052.json"
+  ],
+  "tests": {
+    "clade_build": "PASS",
+    "clade_e2e": "PASS (.trinity/e2e/report_prod_1785204138.md)",
+    "clade_audit": "PASS (0 hard-gate findings across 8 checks)",
+    "clade_seal": "SEAL VALID",
+    "trios_mesh_tests": "PASS (101 tests)",
+    "app_relaunch": "PASS — health ok, menu-bar logo present"
+  },
+  "episode": ".trinity/experience/2026-07-27_logs-tab-noise-rule-auto-suggest-loop-052.json",
+  "plan_report": ".claude/plans/trios-cycle52-noise-auto-suggest-report.md",
+  "next_options": [
+    "Noise rule impact dashboard — show per-rule statistics (lines suppressed today, last match, estimated noise-reduction %) so users can audit and clean up stale rules.",
+    "Encrypted / signed profile sharing — encrypt exported profiles with the TriOS Keychain key and sign them so teams can share trusted runbook filters without exposing internal log content.",
+    "Rule expiration and TTL — allow setting a duration on custom rules (e.g. 'suppress for 24 hours') so temporary incident filters auto-disable instead of becoming permanent noise traps."
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "timestamp": "2026-07-24T08:16:05Z",
+  "task_id": "TRIOS-PORTABLE-LAND-001",
+  "claim_id": "989F8151-6640-44B4-AFE1-FEEB17078EF2",
+  "action": "terminal_streaming_indicator_tdd_red",
+  "result": "EXPECTED_RED",
+  "evidence": {
+    "command": "bash tests/swift/run_chat_sse_e2e.sh",
+    "exit_code": 1,
+    "artifact": "three terminal-outcome assertions before production fix",
+    "facts": [
+      "SSE error left the assistant message marked as streaming.",
+      "Explicit Stop left the assistant message marked as streaming.",
+      "A thrown transport error left an existing partial assistant marked as streaming.",
+      "Exactly the three new terminal-indicator assertions failed."
+    ]
+  },
+  "root_cause": "Terminal branches duplicate partial cleanup and only finish/abort/unterminated EOF clear the assistant flag. Explicit Stop invalidates generation before the late transport event can repair the UI.",
+  "hypothesis": "A single synchronous finalizer invoked before generation invalidation or asynchronous terminal work will make every terminal path converge on isStreaming=false.",
+  "residual_risks": [
+    "Production code is intentionally unchanged at this RED checkpoint.",
+    "Full app build and visual verification must follow GREEN."
+  ]
+}

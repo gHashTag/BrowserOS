@@ -1,0 +1,42 @@
+{
+  "date": "2026-07-27",
+  "title": "Context-Length-Aware Request Routing — Cycle 27",
+  "ring": "SR-00 / SR-02 / BR-OUTPUT",
+  "agent": "claude",
+  "road": "B",
+  "problem": "Cycles 18–26 built cross-provider failover, adaptive/predictive warmup, quota gating, and failure-kind-aware volatility, but all layers still reacted after a context-window failure. Long messages or accumulated history could trigger a 413/context-length error, wasting a request and forcing a retry. There was no pre-send estimate, no routing to larger-context models, no automatic history trimming, and no visible context-utilization indicator.",
+  "root_cause": "ModelConfigurationStore had no catalog of per-model context windows. ChatViewModel.sendMessage sent the full history to whatever model was selected. The only fallback was reactive failover after an error. Tool-use/tool-result pairs and system prompts had no protection during truncation.",
+  "fix": "Added ModelContextService with per-provider advertised context/output windows, conservative unknown-model defaults, margin-aware fits, and larger-context candidate ranking. Added ChatRequestSizer with ContextRoutingDecision, ContextTrimPolicy, cheap utf8.count/4 token estimation, and a trimmer that preserves system prompts and tool pairs. Extended ModelConfigurationStore with contextWindowMargin, resolveContextRoutingDecision, isCandidateAllowed, contextWindowUtilizationPercent, and applyContextRoutedSelection. Wired ChatViewModel.sendMessage to resolve routing before streaming, switching models or trimming history transparently. Added composer context status dot, ModelsTabView context routing section with margin stepper, and per-model utilization badges. Added unit tests for the service, sizer, and store decision engine.",
+  "files": [
+    "trios/rings/SR-00/ModelContextService.swift",
+    "trios/rings/SR-00/ChatRequestSizer.swift",
+    "trios/rings/SR-00/ModelConfigurationStore.swift",
+    "trios/rings/SR-00/TokenUsage.swift",
+    "trios/rings/SR-02/ChatViewModel.swift",
+    "trios/BR-OUTPUT/ChatPanelView.swift",
+    "trios/BR-OUTPUT/ModelsTabView.swift",
+    "trios/tests/TriOSKitTests/ModelContextServiceTests.swift",
+    "trios/tests/TriOSKitTests/ChatRequestSizerTests.swift",
+    "trios/tests/TriOSKitTests/ModelConfigurationStoreCrossProviderTests.swift",
+    ".claude/plans/trios-cycle27-context-length-routing-loop-027.md",
+    ".claude/plans/trios-cycle27-context-length-routing-loop-027-report.md"
+  ],
+  "tests": {
+    "build_sh": "PASS",
+    "cargo_test_workspace": "101 passed",
+    "cargo_clippy": "PASS",
+    "clade_audit": "0 findings",
+    "clade_seal": "SEAL VALID",
+    "clade_e2e": "PASS",
+    "swift_test": "UNAVAILABLE (CommandLineTools-only environment)"
+  },
+  "episode": ".trinity/experience/2026-07-27_context-length-routing-loop-027.json",
+  "plan": ".claude/plans/trios-cycle27-context-length-routing-loop-027.md",
+  "report": ".claude/plans/trios-cycle27-context-length-routing-loop-027-report.md",
+  "next_options": [
+    "Streaming context watchdog — monitor token growth during streaming and offer larger-model continuation or summarization",
+    "Per-conversation context budget + pinning — per-chat turn/token budget and pinned messages the trimmer cannot drop",
+    "Online context-window calibration — learn effective per-(provider, model) context limits from observed 413s and adjust with an EMA"
+  ],
+  "claim": "claim-CONTEXT-ROUTING-027"
+}

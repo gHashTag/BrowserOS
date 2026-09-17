@@ -1,0 +1,24 @@
+{
+  "date": "2026-07-27",
+  "title": "LOGS Tab Noise Suppression + Reader-Side Log Rotation — Cycle 48",
+  "cycle": 48,
+  "ring": "SR-02 / BR-OUTPUT",
+  "agents": "claude",
+  "road": "B",
+  "problem": "Trios logs contained a lot of repetitive, low-signal noise (watchdog_heartbeat, drift_detected, Reclaiming stale task leases) and watched log files could grow unbounded because there was no rotation policy. .trinity/logs/ had 643 files including stale build/rotation archives.",
+  "root_cause": "The LOGS tab UI had no noise filter, so every repetitive heartbeat/lease/drift line rendered as a first-class row. There was no size cap or rotation, so files grew forever on disk.",
+  "fix": "Added LogNoiseFilter in LogParser.swift with hard-coded high-signal patterns, LogParser.filterNoise(_:isOn:), and a Quiet toggle in LogsTabView (default on). Added LogRotationPolicy with 1 MB threshold, keep-last-500-lines truncation, zlib-compressed timestamped archives, 5-archive retention, and an lsof external-writer guard. Wired rotation into LogParser.loadLogSources() for event_log.jsonl, cron.log, queen.log, and every .trinity/logs/*.log file. Manually cleaned stale logs (643 -> 50 files, ~4.94 MB freed) and rotated browseros-companion.log in-place. Extended LogsTabViewTests with noise filter, toggle, unifiedLines suppressNoise, and rotation policy tests.",
+  "files": [
+    "trios/rings/SR-02/LogParser.swift",
+    "trios/BR-OUTPUT/LogsTabView.swift",
+    "trios/tests/TriOSKitTests/LogsTabViewTests.swift",
+    "trios/.claude/plans/trios-cycle48-logs-noise-rotation.md",
+    "trios/.claude/plans/trios-cycle48-logs-noise-rotation-report.md"
+  ],
+  "tests": "TRIOS_SKIP_CHAT_E2E=1 ./build.sh PASS; cargo test -p trios-mesh PASS (101 tests); TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-build PASS; TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-audit PASS (0 hard-gate findings); TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-seal SEAL VALID; TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-e2e PASS; open trios.app relaunched, menu-bar logo preserved. swift test unavailable in CommandLineTools-only environment.",
+  "next_options": [
+    "Server-side log level filtering / sampling — move noise reduction upstream by configuring the BrowserOS companion and Queen cron to log high-frequency events at debug or sampled intervals, reducing disk I/O and archive churn.",
+    "Structured event store with retention policy — replace ad-hoc log files with an indexed SQLite event table keyed by (timestamp, source, level, event) and per-source retention rules for fast historical search and trend charts.",
+    "Per-source noise profile customization — let users edit noise patterns in-app (e.g. 'Hide events like this' on any row) and persist personal profiles in .trinity/state/logs_noise_profile.json, giving power-user control and signal for future server-side sampling."
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "timestamp": "2026-07-24T04:12:19Z",
+  "task_id": "MEMORY-CONTROLS-001",
+  "claim_id": "2621A8A0-22B7-4E85-AA5C-3F2857AFD10C",
+  "action": "signature_launch_health",
+  "result": "PARTIAL",
+  "evidence": {
+    "codesign": "PASS_VALID_ON_DISK_DESIGNATED_REQUIREMENT",
+    "app_launch": "PASS_PID_21569",
+    "browseros_health_9105": "UNAVAILABLE_CONNECTION_REFUSED"
+  },
+  "next_check": "Inspect expected BrowserOS server lifecycle and retry without changing unrelated services."
+}

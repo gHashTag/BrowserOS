@@ -1,0 +1,25 @@
+{
+  "timestamp": "2026-07-25T00:45:00+07:00",
+  "title": "Queen Autonomous Chat and A2A Delegation",
+  "ring": "SR-02",
+  "agents": ["claude"],
+  "road": "B",
+  "request": "Make the assistant able to access context of other chats, autonomously open new chats, and assign tasks to agents.",
+  "problem": "Chat operations and A2A actions were UI-only, living inside ChatViewModel slash-command handlers with no background-side API.",
+  "root_cause": "Long-lived Queen background work had just been moved out of ChatViewModel, but autonomous control methods had not been exposed yet.",
+  "fix_summary": "Added listChats, createChat, postToChat, listAgents, delegateTask, and broadcast to QueenBackgroundService. Routed the corresponding slash commands in ChatViewModel through the singleton. Fixed A2ARegistryClient.listAgents() to unwrap the BrowserOS registry's {agents:[...]} wrapper. Added a standalone integration test.",
+  "files": [
+    "rings/SR-02/QueenBackgroundService.swift",
+    "rings/SR-02/ChatViewModel.swift",
+    "rings/SR-02/A2ARegistryClient.swift",
+    "rings/SR-02/QueenCommandParser.swift",
+    "tests/swift/QueenAutonomousTest.swift",
+    "tests/swift/run_queen_autonomous_test.sh"
+  ],
+  "tests": [
+    "./build.sh PASS",
+    "bash tests/swift/run_queen_autonomous_test.sh PASS",
+    "bash e2e/trios_e2e_flow.sh PASS after relaunch"
+  ],
+  "laws": ["L2 GENERATION via T27-canon source files", "L4 TESTABILITY via build + integration test + e2e"]
+}

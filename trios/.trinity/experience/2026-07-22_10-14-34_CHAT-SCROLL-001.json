@@ -1,0 +1,20 @@
+{
+  "task_id": "CHAT-SCROLL-001",
+  "claim_id": "8617CEA6-FE50-4BDF-8BAC-F6813943D5D0",
+  "timestamp": "2026-07-22T10:14:34Z",
+  "action": "build_verify_learn",
+  "result": "clean",
+  "problem": "Returning to Chat from another TriOS tab restored an arbitrary earlier scroll position, forcing the user to manually find the newest messages.",
+  "solution": "Tab activation now emits an explicit bottom-restoration token. The shared chat view consumes it after layout and scrolls to a permanent final-content anchor placed after messages, BrowserOS output, and loading indicators. Initial appearance uses the same anchor.",
+  "verification": {
+    "policy_tests": "PASS",
+    "swift_build": "PASS",
+    "compiled_swift_files": 74,
+    "code_signature": "PASS",
+    "live_health": {"status": "ok", "cdpConnected": true},
+    "ascii_audit": "PASS",
+    "diff_check": "PASS",
+    "app_relaunch": "PASS"
+  },
+  "lesson": "Scroll restoration should be driven by an explicit navigation event and target a stable terminal anchor. Targeting the last model item misses transient content and relying on view reconstruction is not deterministic in SwiftUI."
+}

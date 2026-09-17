@@ -1,0 +1,26 @@
+{
+  "id": "2026-08-23_keychain-stalls-narrowed-not-named",
+  "date": "2026-08-23",
+  "ring": "SR-00",
+  "branch": "feat/queen-supervisor",
+  "title": "Three falsified causes for the recurring keychain stalls, and the one measurement that would separate the rest",
+  "severity": "medium",
+  "agent": "Queen",
+  "problem": "keychain.read.stalled and keychain.enumeration.stalled still fire after the warm-up and gate fix: one data-read stall and seven listing stalls in a five-hour release window, every one settling OSStatus 0, with in-app query_time 9.5s-33.8s for a query that runs in 16ms cold from any fresh process.",
+  "findings": [
+    "The recurring staller is the autonomy tick's listing: ModelConfigurationStore.list(for:) -> KeychainSecrets.readAllAttributes(service: model-keys, deadline: 8.0). All seven listing stalls are this call. Stalls cluster in the first 23 minutes after launch (+294 to +1393) with one outlier at +12047.",
+    "FALSIFIED: QoS. Written prediction that .utility dispatch would reproduce the slowness; measured utility 77ms first touch, background 117ms, userInitiated 1ms in a fresh process. The app dispatches at .utility but QoS class does not explain 19-34s.",
+    "FALSIFIED: securityd slowness in general. Same query shape (service-scoped, attributes-only, kSecUseAuthenticationUISkip, match-all) from a fresh process: 16ms cold, 0.5ms warm, status 0, 3 items, no SecurityAgent running.",
+    "FALSIFIED: unwarm service. warmup covers all three ownedServices (model-keys, encryption-key, ai.browseros.trios); the github-token stall's service IS warmed.",
+    "PARTIAL: SecurityAgent dialog. localauth.persist.failed osStatus(-4093) fires at +0.1, +316, +1173.9, +7081. The worst burst (11 queue.starved in 94s, stalls at +1261/+1321, one settle with slot_wait=17.6s) sits directly behind the +1173.9 dialog error. But stalls at +294, +591, +977, +1091 have no adjacent -4093, so the dialog explains one cluster, not the pattern.",
+    "The app serializes keychain calls app-side (single readInFlight slot, shared by reads and listings); orphaned calls whose caller gave up still run in securityd, so an orphan and its replacement can overlap server-side. Unproven as the cause; the instrument does not separate securityd-side wait from in-process reply-wait inside query_time.",
+    "queue.starved x44 (global utility pool congestion, slot waits to 17.6s) co-occurs with queen.choose ticks and the -4093 windows; the process is thread-congested in bursts, and SecItemCopyMatching's internal reply wait rides the same pool. This is the surviving hypothesis for the non-dialog stalls, and it is NOT separable from securityd-side serialization by the current settle line."
+  ],
+  "next_measurement": "Split query_time's two worlds: a one-release build where the listing path takes a second clock around nothing else is impossible (the wait is inside the C call), so the discriminating experiment is A/B in-app: dispatch the SAME listing twice per tick, once at .utility and once at .userInitiated, log both query_times. If congestion-in-process is the cause, the userInitiated twin is milliseconds while the utility twin is tens of seconds, with securityd identical. If both are slow, the wait is securityd-side per-client serialization behind orphans, and the fix is refusing to dispatch while an orphan is unsettled (the restack guard extended to cover the orphan window, not just the cooldown cadence). INSTRUMENT BUILT: keychain.listing.twin wired into KeychainSecrets.readAllAttributes (uncommitted), prediction written into the code comment before any build. NOT LAUNCHED: the release build was deliberately withheld - see not_verified.",
+  "not_verified": [
+    "Why in-app query_time reaches 33.8s while the identical query outside is 0.016s - narrowed to two candidates, not named. The twin experiment is wired and awaits a stable release window.",
+    "make check at HEAD, final verdict: logic/suites/guards/vendoring/variant gates GREEN (22 [OK] blocks, dev build clean, 0 warnings, 199/199 files), cassettes RED - trios-test.app crashes AT LAUNCH with DYLD 'Library not loaded: @rpath/libXCTestSwiftSupport.dylib' (three DiagnosticReports 23:27-23:31; three cassettes 'never started', one 'exited after 2s without emitting queen.branch.committed'). The library exists only inside full Xcode, not CLT; the running release and my CLT dev build do NOT reference it - the crashing bundle is the harness's test app inside the neighbour's in-flight XCTest toolchain migration (their uncommitted build.sh edits, their 22:30/22:35 artifacts). My build.sh unblock (|| true on their XCTEST_FRAMEWORKS_DIR lookup, implementing their comment's stated tolerance, left uncommitted in their file) made this pre-existing break REACHABLE; it did not create it.",
+    "make release + relaunch withheld deliberately: the menu-bar rule outranks the experiment while the tree produces launch-crashing bundles for at least one variant mid-migration. The twin instrument stays uncommitted for the same reason - no commit of mine lands on a red cassette gate.",
+    "Disclosure (unchanged): two full-Xcode diagnostic runs at ~22:37-22:41, before the CLT rule was re-read; app targets fully rebuild, no shared stamp expected to persist."
+  ]
+}

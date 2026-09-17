@@ -1,0 +1,34 @@
+{
+  "title": "BrowserOS server route authentication hardening — Cycle 11 weak-spot closure",
+  "date": "2026-07-25",
+  "ring": "packages/browseros-agent/apps/server",
+  "agents": ["claude", "Explore"],
+  "road": "B",
+  "issue": "browseros-ai/BrowserOS#2024",
+  "problem": "BrowserOS exposed several internal HTTP sub-routers without enforcing the existing `requireTrustedAppOrigin()` middleware. The unprotected routes covered agent management (`/agents`), the SOUL registry (`/soul`), monitoring introspection (`/monitoring`), ACL policy (`/acl-rules`), and the Claw orchestrator (`/claw`). Any website or remote script that could reach the loopback port could invoke these administrative endpoints, allowing information disclosure or unauthorized control of the Trinity A2A runtime.",
+  "root_cause": "`packages/browseros-agent/apps/server/src/api/server.ts` mounted each sub-application with `.route('/path', subApp)` but did not prepend `.use('/path/*', requireTrustedAppOrigin())`. The auth middleware was already implemented and used on chat/task routes, so the gap was purely an omission in router composition.",
+  "fix": "Applied `requireTrustedAppOrigin()` to all administrative sub-routers in `server.ts` for `/agents`, `/soul`, `/monitoring`, `/acl-rules`, and `/claw`. Added a focused test file expansion in `tests/api/routes/auth-routes.test.ts` that mounts dummy protected sub-apps and asserts 403 for untrusted remote origins while preserving access for loopback no-Origin requests. Confirmed `bun tsc --noEmit` passes and the targeted auth test suite passes.",
+  "files": [
+    "packages/browseros-agent/apps/server/src/api/server.ts",
+    "packages/browseros-agent/apps/server/tests/api/routes/auth-routes.test.ts"
+  ],
+  "tests": [
+    "bun test tests/api/routes/auth-routes.test.ts PASS (20 pass, 0 fail, 32 expect() calls)",
+    "bun tsc --noEmit PASS",
+    "./build.sh PASS",
+    "cargo run --bin clade-build PASS",
+    "cargo run --bin clade-e2e PASS",
+    "bash e2e/trios_e2e_flow.sh PASS",
+    "cargo test --workspace PASS (all 341 tests)",
+    "cargo clippy --workspace PASS",
+    "open trios.app relaunched; curl http://127.0.0.1:9105/health returns ok"
+  ],
+  "waivers": [
+    "AGENT-V-WAIVER: browseros-ai/BrowserOS#2024 for hand-edited server.ts and auth-routes.test.ts"
+  ],
+  "follow_up": [
+    "Consider adding a central `adminRouter()` wrapper that automatically applies `requireTrustedAppOrigin()` so future sub-routers cannot be mounted without auth.",
+    "Extend the test suite to verify authenticated loopback/extension requests receive 200 from the real sub-routers once DB-free harness helpers are available.",
+    "Run the full server test suite (`bun test`) under a separate issue; several unrelated failures exist in browser-launch-args, build, and monitoring-service tests."
+  ]
+}

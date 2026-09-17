@@ -1,0 +1,39 @@
+{
+  "title": "Queen Direct Chat completion — Cycle 10 weak-spot hardening",
+  "date": "2026-07-25",
+  "ring": "SR-02 / BR-OUTPUT",
+  "agents": ["claude", "t27-creator", "queen-swift"],
+  "road": "B",
+  "issue": "browseros-ai/BrowserOS#2023",
+  "problem": "Trinity Queen Direct Chat was partially implemented but missing safety-budget enforcement, human confirmation for self-evolution proposals, real code edits, repo-agnostic PR creation, hardened network client URL construction, A2A stream reconnect resilience, encrypted current-conversation id, inbound A2A message deduplication, live online-agent observation, and several force-unwrap crash points.",
+  "root_cause": "The Queen proposal applier hardcoded the target repo/branch and applied patches immediately without a budget check or confirmation. AgentNetworkClient force-unwrapped URLs built from raw string interpolation. QueenBackgroundService started a single-shot A2A stream with no reconnect. ConversationPersister stored the current conversation id as plaintext in UserDefaults. A2AMessageRouter routed payloads without validating sender identifiers. QueenStatusViewModel showed only local process status. main.swift contained force-unwraps in panel cycling and accessibility frame reads.",
+  "fix": "Hardened QueenProposalApplier to enforce QueenSelfImprovementService safety budget, require explicit `/apply <uuid> confirm` after a build-passing preview/stage, derive repo and base branch from the local checkout, guard dirty working trees, and generate unique branch names. Extended QueenCommandParser and ChatViewModel to stage proposals and only confirm on second command. Replaced force-unwrap URL construction in AgentNetworkClient with URLComponents and input validation (invalidInput error). Added A2A stream reconnect loop with exponential backoff and budget-exhausted system message in QueenBackgroundService. Encrypted the current conversation id in ConversationPersister using ConversationEncryption with legacy-plaintext migration. Added sender/type validation to A2AMessageRouter. Deduplicated inbound Queen messages in ChatViewModel by reloading the canonical persisted history. Added periodic onlineAgents refresh in QueenStatusViewModel via QueenBackgroundService.listAgents(). Replaced force-unwraps in main.swift cycleToNextMode and getWindowFrame AXValue casts with safe guards and a castAXValue helper.",
+  "files": [
+    "trios/BR-OUTPUT/AgentNetworkClient.swift",
+    "trios/BR-OUTPUT/A2AMessageRouter.swift",
+    "trios/BR-OUTPUT/QueenStatusViewModel.swift",
+    "trios/main.swift",
+    "trios/rings/SR-02/QueenProposalApplier.swift",
+    "trios/rings/SR-02/QueenCommandParser.swift",
+    "trios/rings/SR-02/ChatViewModel.swift",
+    "trios/rings/SR-02/QueenBackgroundService.swift",
+    "trios/rings/SR-02/ConversationPersister.swift"
+  ],
+  "tests": [
+    "./build.sh PASS (1 warning in main.swift AXValue cast, non-blocking)",
+    "cargo run --bin clade-build PASS",
+    "cargo run --bin clade-e2e PASS",
+    "bash e2e/trios_e2e_flow.sh PASS",
+    "cargo test --workspace PASS (all 341 tests)",
+    "cargo clippy --workspace PASS",
+    "open trios.app relaunched; curl http://127.0.0.1:9105/health returns ok"
+  ],
+  "waivers": [
+    "AGENT-V-WAIVER: browseros-ai/BrowserOS#2023 on all hand-edited canon files"
+  ],
+  "follow_up": [
+    "Replace comment-block patch injection with AST-aware edits or structured diffs.",
+    "Add unit tests for QueenProposalApplier shell-out edge cases (dirty tree, existing branch, budget inactive).",
+    "Add Swift unit tests for ConversationPersister id migration and encryption round-trip."
+  ]
+}

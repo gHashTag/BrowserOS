@@ -1,0 +1,54 @@
+{
+  "task_id": "QUEEN-OPERATIONAL-WORKSPACES-001",
+  "claim_id": "8BF1F185-DF2F-4CEE-8225-D3544B35A9C9",
+  "timestamp": "2026-07-23T15:45:27Z",
+  "action": "spec_tdd_code_build_runtime_verify_learn",
+  "result": "clean",
+  "problem": "The 21 canonical Queen destinations outside the six hosted Trios workspaces used inconsistent opaque surfaces, placeholder screens, stale data, and action buttons whose pretty-printed JSON was incompatible with the Queen runtime parser.",
+  "solution": "Centralized the Queen black-glass profile, wrapped every canonical route in one operational workspace with refresh and visible action feedback, added a compact durable action codec with confirmations, replaced Tri Tools and hosted Settings placeholders with working interfaces, added periodic state refresh, repaired the Trios build source list, and fixed compact Issues and Settings layouts.",
+  "verification": {
+    "red_test": "PASS",
+    "queen_tests": {
+      "status": "PASS",
+      "count": 60
+    },
+    "operational_contract_tests": {
+      "status": "PASS",
+      "count": 6
+    },
+    "trios_focused_tests": {
+      "status": "PASS",
+      "count": 4
+    },
+    "trios_build": {
+      "status": "PASS",
+      "compiled_swift_files": 106
+    },
+    "code_signature": "PASS",
+    "runtime_all_27_routes": {
+      "status": "PASS",
+      "artifact": ".trinity/e2e/queen_27_contact_sheet.png"
+    },
+    "runtime_tri_status": {
+      "status": "PASS",
+      "artifact": ".trinity/e2e/queen_tri_tools_status_result.png"
+    },
+    "runtime_settings": {
+      "status": "PASS",
+      "artifact": ".trinity/e2e/queen_settings_working.png"
+    },
+    "runtime_issues": {
+      "status": "PASS",
+      "artifact": ".trinity/e2e/queen_operational_issues.png"
+    },
+    "browseros_health": {
+      "status": "ok",
+      "cdpConnected": true
+    },
+    "runtime_launch": "PASS",
+    "runtime_without_paid_provider_key": "PASS",
+    "pid": 43683,
+    "diff_check": "PASS"
+  },
+  "lesson": "A screen is not operational merely because it has a concrete SwiftUI type. Route coverage must be paired with real data loading, executable or durably queued actions, explicit risk confirmation, visible failure states, and compact-width runtime screenshots."
+}

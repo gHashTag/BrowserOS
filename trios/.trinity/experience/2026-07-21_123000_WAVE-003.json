@@ -1,0 +1,27 @@
+{
+  "id": "WAVE-003",
+  "date": "2026-07-21",
+  "ring": "trios",
+  "phase": "verify",
+  "road": "B",
+  "agents_involved": ["t27-creator", "t27-verifier", "t27-experience", "t27-queen"],
+  "issue": "Recurring /loop 15m macro: research weak spots, literature, plan, implement, report, and save skills for trios.",
+  "problem": "Wave 3 left shell-free terminal dispatch, portable build paths, agent/skill ASCII purity, and skill preservation unfinished.",
+  "root_cause": "Hand-written BR-OUTPUT code still used /bin/zsh -c; clade-build and build.sh hardcoded /Users/playra/BrowserOS-full/trios; agents and skills contained emoji, arrows, and em-dashes.",
+  "fix": "Rewrote TerminalTabView with TerminalCommandSanitizer + tokenized Process(); removed hardcoded path from clade-build and build.sh; moved clade-build logs to .trinity/logs/; ASCII-cleaned all .claude/agents and .claude/skills markdown; updated t27-wave-loop skill and created ascii-lint skill; wrote terminal-shell-free.md and build-cleanup.md specs.",
+  "files_changed": [
+    "BR-OUTPUT/TerminalTabView.swift",
+    "rings/RUST-01/clade-build/src/main.rs",
+    "build.sh",
+    ".trinity/specs/terminal-shell-free.md",
+    ".trinity/specs/build-cleanup.md",
+    ".claude/skills/t27-wave-loop/SKILL.md",
+    ".claude/skills/ascii-lint/SKILL.md",
+    ".claude/agents/*.md",
+    ".claude/skills/*/*.md"
+  ],
+  "verification": "./build.sh passed; cargo test --workspace passed; cargo clippy -p clade-build --all-targets --all-features clean; grep non-ASCII returned zero violations in BR-OUTPUT, build.sh, clade-build, agents, and skills.",
+  "pattern": "Spec-first cleanup: write spec, patch canon code, run build + Rust tests + ASCII scan, commit, save experience, update skills.",
+  "anti_pattern": "Do not leave /bin/zsh -c, hardcoded absolute paths, emoji status markers, or non-ASCII arrows in source/agent/skill files.",
+  "tags": ["shell-free", "tokenized-process", "ascii-only", "portable-paths", "t27-wave-loop", "L3-PURITY", "L7-UNITY"]
+}

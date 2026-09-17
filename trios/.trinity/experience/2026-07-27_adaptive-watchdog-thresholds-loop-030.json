@@ -1,0 +1,36 @@
+{
+  "date": "2026-07-27",
+  "title": "Adaptive Watchdog Thresholds — Cycle 30 Closure",
+  "ring": "SR-00 / SR-01 / SR-02 / BR-OUTPUT",
+  "agents": "claude",
+  "road": "B",
+  "problem": "Cycle 28-29 added a streaming context watchdog that pauses mid-stream and offers continue/summarize/stop actions, but its warning and pause ratios were derived from advertised provider catalogs only. The same model slug can have different effective output/context limits on different base URLs (OpenRouter proxy, self-hosted Ollama, enterprise Anthropic endpoint). Observed finish_reason=length, context-limit pauses, and provider errors were not fed back into the model profile, so the system repeated the same mis-calibration every turn. Output-limit hits also defaulted to stopHere, wasting partial responses.",
+  "root_cause": "ModelContextService trusted static advertised maxContextTokens/maxOutputTokens and had no per-(provider, baseURL, model) calibration. ModelReliabilityService outcomes only stored success/failure/latency, so the learner had no observed token counts or finish reason. SSEEvent.finish carried no finish_reason. ChatViewModel did not capture usage or pause-time estimates. ModelsTabView utilization badges collapsed all endpoints of a provider into one profile and ignored baseURL.",
+  "fix": "Bumped MemoryStore model_outcomes schema to v5 with observed_output_tokens, observed_total_tokens, finish_reason columns and a v4->v5 ALTER TABLE migration. Updated SSEEvent.finish to carry an optional reason and the parser to read finish_reason from data lines. Added StreamingContextLimitLearner actor that records ModelOutcome per tuple, maintains EMA-based learned output/total limits (alpha=0.3, minObservations=3, safetyBuffer=0.95), and only overrides advertised limits after enough evidence. Made ModelContextService.profile(for:provider:baseURL:) async and blended advertised profiles with learned limits; threaded baseURL through largerContextCandidates and largerModelCandidates. Extended ModelConfigurationStore to inject the learner, forward observed tokens/finish reason, expose learnedLimits(for:provider:baseURL:), and compute baseURL-aware context utilization. Extended ChatViewModel StreamLatency and executeStream to capture finishReason, observedOutputTokens, observedTotalTokens from .finish/.usage events and pause-time estimates, passing them to recordSendOutcome. Changed StreamingContextWatchdog output-token default action to continueOnLargerModel. Added learned output/context badges in ModelsTabView. Updated SSEEventParserTests, StreamingContextWatchdogTests, ModelReliabilityServiceTests, ModelContextServiceTests, and added StreamingContextLimitLearnerTests.",
+  "files": [
+    "trios/.trinity/specs/streaming-context-watchdog.md",
+    "trios/rings/SR-00/ModelReliabilityService.swift",
+    "trios/rings/SR-01/MemoryStore.swift",
+    "trios/rings/SR-01/ChatEvents.swift",
+    "trios/rings/SR-00/StreamingContextLimitLearner.swift",
+    "trios/rings/SR-00/ModelContextService.swift",
+    "trios/rings/SR-00/ModelConfigurationStore.swift",
+    "trios/rings/SR-02/ChatViewModel.swift",
+    "trios/rings/SR-00/StreamingContextWatchdog.swift",
+    "trios/BR-OUTPUT/ModelsTabView.swift",
+    "trios/tests/TriOSKitTests/SSEEventParserTests.swift",
+    "trios/tests/TriOSKitTests/StreamingContextWatchdogTests.swift",
+    "trios/tests/TriOSKitTests/StreamingContextLimitLearnerTests.swift",
+    "trios/tests/TriOSKitTests/ModelReliabilityServiceTests.swift",
+    "trios/tests/TriOSKitTests/ModelContextServiceTests.swift",
+    "trios/.claude/plans/trios-cycle30-adaptive-watchdog-thresholds-report.md",
+    "trios/.trinity/experience/2026-07-27_adaptive-watchdog-thresholds-loop-030.json"
+  ],
+  "tests": "TRIOS_SKIP_CHAT_E2E=1 ./build.sh PASS; cargo test -p trios-mesh PASS (101 tests); cargo clippy -p trios-mesh -- -D warnings PASS; TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-audit hard gates 0 findings; TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-seal SEAL VALID; TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-e2e PASS; open trios.app relaunched, menu-bar logo present, clade-e2e confirmed TriOS App PID alive. (swift test unavailable in CommandLineTools-only environment.)",
+  "next_options": [
+    "Learned-limit-driven request sizing and routing — feed learned limits into ChatRequestSizer and resolveContextRoutingDecision so TriOS routes/trims before the observed ceiling, not only the advertised one.",
+    "Streaming token budget UI — live output/context budget progress bar in the composer using advertised + learned limits with color bands and a per-send max-output-token cap.",
+    "Per-conversation provider/model pinning — let the user pin a provider/model/baseURL per chat thread so adaptive warmup, context routing, and failover stay within allowed boundaries."
+  ],
+  "claim": null
+}

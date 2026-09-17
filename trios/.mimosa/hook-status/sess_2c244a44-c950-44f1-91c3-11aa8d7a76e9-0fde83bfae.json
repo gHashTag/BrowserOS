@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "mimosa-hook-status/v1",
+  "recordedAt": "2026-09-01T01:32:00.906Z",
+  "sessionId": "sess_2c244a44-c950-44f1-91c3-11aa8d7a76e9",
+  "event": "PostToolUse",
+  "toolName": "Edit",
+  "file": "tests/swift/run_chat_sse_e2e.sh",
+  "outcome": "clear",
+  "coverage": "complete",
+  "findingCount": 0,
+  "durationMs": 13,
+  "hostState": "hook_complete",
+  "reportHint": ".mimosa/reports/"
+}

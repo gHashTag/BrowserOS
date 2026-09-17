@@ -1,0 +1,60 @@
+{
+  "title": "Admin Token-Family Lifecycle — List, Revoke, and Retention Cleanup",
+  "cycle": 27,
+  "date": "2026-07-25",
+  "ring": "packages/browseros-agent/apps/server",
+  "agents": ["claude"],
+  "road": "B",
+  "problem": "Cycles 24-26 added refresh-token rotation, SQLite persistence, and rate limiting, but operators had no admin surface to inspect active/rotated/revoked token families, revoke a specific family, or prune stale revoked families and audit/rate-limit rows. Old revoked families and audit data would accumulate indefinitely.",
+  "root_cause": "TokenFamilyStore only supported create/read/update for individual families and audit records. LocalAuthService had no list/cleanup operations, and createLocalAuthRoutes exposed only /auth/local-token and /auth/refresh.",
+  "fix": "Extended TokenFamilyStore with listFamilies() and cleanup() backed by SQLite pagination, status filtering, and a transactional retention delete. Added LocalAuthRetentionConfig and service helpers. Added GET /auth/admin/families, POST /auth/admin/families/:familyId/revoke, and POST /auth/admin/cleanup behind requireLocalAuth, with hash redaction for admin responses. Added 5 new tests covering list, revoke, 404, cleanup, and missing-header rejection; fixed the subtle test issue where revoking the admin token's own family invalidates that token for subsequent admin calls.",
+  "files": [
+    "packages/browseros-agent/apps/server/src/api/services/token-family-store.ts",
+    "packages/browseros-agent/apps/server/src/api/services/local-auth-service.ts",
+    "packages/browseros-agent/apps/server/src/api/routes/local-auth.ts",
+    "packages/browseros-agent/apps/server/tests/api/routes/auth-routes.test.ts",
+    ".claude/plans/trios-cycle27-admin-token-lifecycle-plan.md",
+    ".claude/plans/trios-cycle27-admin-token-lifecycle-report.md"
+  ],
+  "tests": {
+    "bun_test_auth_routes_test": "45 pass, 0 fail",
+    "bun_run_test_api": "250 pass, 0 fail",
+    "cargo_clade_build": "PASS",
+    "cargo_clade_audit": "0 hard-gate findings",
+    "cargo_clade_seal": "SEAL VALID",
+    "cargo_clade_e2e": "PASS",
+    "trios_app_relaunch": "ok",
+    "health_check": "{\"status\":\"ok\",\"cdpConnected\":true}"
+  },
+  "variants": [
+    {
+      "name": "A - in-memory admin view",
+      "selected": false,
+      "summary": "Fast but lost on restart and inconsistent with the durable token store."
+    },
+    {
+      "name": "B - SQLite-backed list/revoke/cleanup",
+      "selected": true,
+      "summary": "Durable, consistent with existing TokenFamilyStore, no new dependencies, passes all gates."
+    },
+    {
+      "name": "C - external admin dashboard + Postgres",
+      "selected": false,
+      "summary": "Best for multi-node ops, but adds external dependency and ops burden; deferred."
+    }
+  ],
+  "next_options": [
+    "Expose admin family lifecycle in the TriOS Queen dashboard",
+    "Add automated retention cleanup cron inside clade-monitor",
+    "Export local-auth audit events to the Akashic log"
+  ],
+  "law_compliance": {
+    "L1_TRACEABILITY": true,
+    "L2_GENERATION": true,
+    "L3_PURITY": true,
+    "L4_TESTABILITY": true,
+    "L5_IDENTITY": true,
+    "L6_CEILING": true,
+    "L7_UNITY": true
+  }
+}

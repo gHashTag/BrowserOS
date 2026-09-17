@@ -1,0 +1,28 @@
+{
+  "timestamp": "2026-07-24T08:36:34Z",
+  "task_id": "TRIOS-PORTABLE-LAND-001",
+  "claim_id": "989F8151-6640-44B4-AFE1-FEEB17078EF2",
+  "action": "recover_git_topology_after_external_restructure",
+  "result": "PASS_WITH_FOREIGN_CHANGES_PRESERVED",
+  "evidence": {
+    "facts": [
+      "A parallel TriOS agent renamed /Users/playra/BrowserOS-full to /Users/playra/BrowserOS, moved the tracked trios directory to /Users/playra/trios, and replaced it with a symlink.",
+      "The parallel agent had reached 100 percent completion before recovery began.",
+      "The exact running TriOS process and its orphaned local server were stopped before filesystem relocation.",
+      "The inverse relocation restored /Users/playra/BrowserOS-full/trios as a real tracked directory.",
+      "The external symlink was preserved at /tmp/trios-layout-recovery-20260724-0835/trios-symlink.",
+      "All concurrently created installation documents and the root README edit remain present and unstaged."
+    ],
+    "postcondition": {
+      "repository_root": "/Users/playra/BrowserOS-full",
+      "branch": "feat/zai-provider",
+      "head": "cd87482c2eade8c9b196106d61b5824c62c502c5",
+      "dev": "fd53dc3a46d22d4b8a822aacc24945245629c98e"
+    }
+  },
+  "residual_risks": [
+    "The concurrent installation documents contain unverified portability claims and must remain excluded from the product commit.",
+    "The root README now has a concurrent unstaged edit and must remain excluded.",
+    "Two newly discovered history persistence races still block the merge."
+  ]
+}

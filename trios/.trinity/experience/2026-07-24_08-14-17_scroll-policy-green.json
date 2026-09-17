@@ -1,0 +1,30 @@
+{
+  "timestamp": "2026-07-24T08:14:17Z",
+  "task_id": "TRIOS-PORTABLE-LAND-001",
+  "claim_id": "989F8151-6640-44B4-AFE1-FEEB17078EF2",
+  "action": "scroll_geometry_and_request_contract_tdd_green",
+  "result": "PASS",
+  "evidence": {
+    "command": "bash tests/swift/run_chat_sse_e2e.sh",
+    "exit_code": 0,
+    "artifact": "ChatScrollPolicy, SmoothScrollManager, and ChatPanelView wiring",
+    "facts": [
+      "The harness compiled 61 Swift files.",
+      "All 20 ChatSSEEndToEnd scenarios passed.",
+      "Near-bottom, away-from-bottom, and short-content classifications passed.",
+      "Forced scroll emits a consumable sequence with the requested animation policy.",
+      "ChatPanelView now observes the request inside ScrollViewReader and invokes the bottom anchor.",
+      "Viewport height and final-anchor position are measured independently."
+    ],
+    "primary_sources": [
+      "Apple ScrollViewReader documentation",
+      "Apple GeometryReader and named coordinate-space documentation",
+      "Apple WWDC24 SwiftUI scrolling enhancements"
+    ]
+  },
+  "residual_risks": [
+    "The macOS 14 compatibility path uses GeometryReader preferences instead of the macOS 15 onScrollGeometryChange API.",
+    "Terminal streaming flags remain a separate blocker.",
+    "A full app build and runtime visual check are still required."
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "date": "2026-07-24",
+  "title": "LOGS Tab Search History and Recent Queries — Cycle 46",
+  "ring": "SR-02 / BR-OUTPUT",
+  "agent": "claude",
+  "road": "B",
+  "problem": "Cycle 45 added curated saved searches / quick filters, but ad-hoc structured queries still disappeared between sessions. A user typing level:warn source:cron timeout had to retype it next time, and there was no Enter/commit affordance in the search field.",
+  "root_cause": "LogsTabView kept only the current search string in @State and had no ephemeral history model. The search field did not record queries on commit, and quick filters were the only persisted queries.",
+  "fix": "Added LogRecentSearch struct (id, query, timestamp) and LogRecentSearchStore actor that loads/saves JSON at .trinity/state/logs_search_history.json with a 20-entry cap, LRU deduplication (move-to-front), and empty-query filtering. Added a Recent chip row in LogsTabView between quick filters and the search field, with Apply / Remove / Save-to-quick-filters context-menu actions and a Clear confirmation. Wired history recording on TextField.onSubmit (Enter), when a saved-search chip is tapped, and after 3 seconds of query stability (debounce). Extended LogsTabViewTests with store default state, record/dedupe, cap, remove/clear, and query-application tests.",
+  "files": [
+    "trios/rings/SR-02/LogParser.swift",
+    "trios/BR-OUTPUT/LogsTabView.swift",
+    "trios/tests/TriOSKitTests/LogsTabViewTests.swift",
+    "trios/.trinity/specs/logs-tab-search-history.md",
+    "trios/.claude/plans/trios-cycle46-logs-tab-search-history.md",
+    "trios/.claude/plans/trios-cycle46-logs-tab-search-history-report.md",
+    "trios/.trinity/experience/2026-07-24_logs-tab-search-history-loop-046.json"
+  ],
+  "tests": {
+    "build_sh": "PASS",
+    "cargo_test_workspace": "101 passed",
+    "cargo_clippy": "PASS",
+    "clade_audit": "0 findings",
+    "clade_seal": "SEAL VALID",
+    "clade_e2e": "PASS",
+    "swift_test": "UNAVAILABLE (CommandLineTools-only environment)"
+  },
+  "episode": ".trinity/experience/2026-07-24_logs-tab-search-history-loop-046.json",
+  "plan": ".claude/plans/trios-cycle46-logs-tab-search-history.md",
+  "report": ".claude/plans/trios-cycle46-logs-tab-search-history-report.md",
+  "next_options": [
+    "Time-range filtering — add from:/to: query tokens or a date picker to scope recent searches and exports to an incident window",
+    "Cross-source correlated timeline — merge lines from all sources by correlation_id or timestamp into a single chronological trace view",
+    "True bottom-detection with GeometryReader — replace drag pause heuristic with actual content-offset math so scrolling back to bottom auto-resumes follow"
+  ],
+  "claim": "claim-LOGS-TAB-SEARCH-HISTORY-046"
+}

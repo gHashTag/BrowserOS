@@ -1,0 +1,23 @@
+{
+  "timestamp": "2026-07-24T08:08:29Z",
+  "task_id": "TRIOS-PORTABLE-LAND-001",
+  "claim_id": "989F8151-6640-44B4-AFE1-FEEB17078EF2",
+  "action": "navigation_completed_memory_race_tdd_green",
+  "result": "PASS",
+  "evidence": {
+    "command": "bash tests/swift/run_chat_sse_e2e.sh",
+    "exit_code": 0,
+    "artifact": "working-tree ChatViewModel plus controlled-save regression",
+    "facts": [
+      "The new navigation race scenario passed all three assertions.",
+      "An authoritative completed turn remains durable when the user switches conversations during its started save.",
+      "Explicit memory-clear barriers still pass and remove raced writes.",
+      "All 19 ChatSSEEndToEnd scenarios passed."
+    ]
+  },
+  "fix": "Post-save validity now depends on the conversation-scoped memory-write revision and explicit clear state, not transient navigation state.",
+  "residual_risks": [
+    "Scroll trigger wiring and near-bottom detection remain blocked in independent review.",
+    "Terminal error and cancellation paths still need streaming-indicator regression tests."
+  ]
+}

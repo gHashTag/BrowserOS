@@ -1,0 +1,37 @@
+{
+  "date": "2026-07-24",
+  "title": "LOGS Tab Structured Search and Export — Cycle 44",
+  "ring": "SR-02 / BR-OUTPUT",
+  "agent": "claude",
+  "road": "B",
+  "problem": "Cycle 43 made the LOGS tab live tail scroll-aware, but the search box still only supported raw substring matching over message/event/details. There was no way to filter by source, level, or event name, no visual feedback for active structured filters, and no way to save a useful filtered/deduplicated view to disk for post-mortems or sharing.",
+  "root_cause": "filteredLines(for:) in LogsTabView used a single lowercased string and checked only message, event, and details. LogParser had no query model, no tokenization, no matcher, and no export helper.",
+  "fix": "Added LogQueryToken enum (level, source, event, text) and LogParser.parseQuery(_:) with quoted-word support. Added LogParser.matchesQuery(_:tokens:source:) that combines min-level semantics (level:warn matches warn and above) with source/event substring and free-text matching across message, event, details, timestamp, and metadata values. Added LogParser.exportLines(_:to:) for newline-delimited raw-line export. Updated LogsTabView.filteredLines(for:) to use the new matcher, added a query-token chip row under the search box, added an Export button in the detail header that writes to ~/Downloads with a timestamped filename, and displayed a confirmation label. Extended LogsTabViewTests with query parsing, level/source/event/free-text matching, combined-token logic, and export behavior.",
+  "files": [
+    "trios/rings/SR-02/LogParser.swift",
+    "trios/BR-OUTPUT/LogsTabView.swift",
+    "trios/tests/TriOSKitTests/LogsTabViewTests.swift",
+    "trios/.trinity/specs/logs-tab-structured-search.md",
+    "trios/.claude/plans/trios-cycle44-logs-tab-structured-search.md",
+    "trios/.claude/plans/trios-cycle44-logs-tab-structured-search-report.md",
+    "trios/.trinity/experience/2026-07-24_logs-tab-structured-search-loop-044.json"
+  ],
+  "tests": {
+    "build_sh": "PASS",
+    "cargo_test_workspace": "101 passed",
+    "cargo_clippy": "PASS",
+    "clade_audit": "0 findings",
+    "clade_seal": "SEAL VALID",
+    "clade_e2e": "PASS",
+    "swift_test": "UNAVAILABLE (CommandLineTools-only environment)"
+  },
+  "episode": ".trinity/experience/2026-07-24_logs-tab-structured-search-loop-044.json",
+  "plan": ".claude/plans/trios-cycle44-logs-tab-structured-search.md",
+  "report": ".claude/plans/trios-cycle44-logs-tab-structured-search-report.md",
+  "next_options": [
+    "True bottom-detection with GeometryReader — replace drag pause heuristic with actual content-offset math so scrolling back to bottom auto-resumes follow",
+    "Cross-source correlated timeline — merge all sources by timestamp or correlation_id into a single chronological trace view",
+    "Saved searches / quick filters — persist recent or named queries as one-tap chips above the search box"
+  ],
+  "claim": "claim-LOGS-TAB-STRUCTURED-SEARCH-044"
+}

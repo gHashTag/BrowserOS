@@ -1,0 +1,24 @@
+{
+  "task_id": "CHAT-COPY-ACTION-001",
+  "claim_id": "DF265737-1AFF-438B-BFED-AA1FC585B4E2",
+  "timestamp": "2026-07-22T12:09:13Z",
+  "action": "build_verify_learn",
+  "result": "clean",
+  "problem": "Completed assistant responses rendered MessageActionBar and HoverCopyBar together. Since each contained a copy button, the UI displayed two identical copy icons.",
+  "solution": "Added one presentation policy that selects primary actions, hover-copy fallback, or no actions. MessageBubbleView now renders exactly one selected action surface instead of stacking both bars.",
+  "verification": {
+    "action_policy_tests": "PASS",
+    "swift_build": "PASS",
+    "compiled_swift_files": 75,
+    "compiler_warnings": 0,
+    "code_signature": "PASS",
+    "visual_single_copy": "PASS",
+    "live_health": {
+      "status": "ok",
+      "cdpConnected": true
+    },
+    "runtime_launch": "PASS",
+    "pid": 56317
+  },
+  "lesson": "Mutually exclusive action surfaces should be chosen by one presentation policy. Independent visibility conditions can overlap and duplicate controls even when each component is correct in isolation."
+}

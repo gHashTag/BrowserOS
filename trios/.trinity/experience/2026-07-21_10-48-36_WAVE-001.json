@@ -1,0 +1,34 @@
+{
+  "task_id": "WAVE-001",
+  "issue_url": "#T27-EPIC-001",
+  "domain": "Kernel/Safety",
+  "agent_chain": [
+    "t27-creator",
+    "t27-verifier"
+  ],
+  "root_cause": "trios-mesh was exempt from workspace unwrap_used lint, hiding panic surfaces; CladeGuard rollback removed the binary before copying, and verifyChecksum accepted snapshots with missing checksums.",
+  "fix_pattern": "Add [lints] workspace = true to trios-mesh and cfg_attr test exemption; replace NaN-sensitive partial_cmp unwraps with total order; rewrite CladeGuard applySnapshot to use NSFileCoordinator + replaceItemAt atomic swap; make verifyChecksum fail closed on missing sidecar.",
+  "files_changed": [
+    "trios/rings/RUST-13/trios-mesh/Cargo.toml",
+    "trios/rings/RUST-13/trios-mesh/src/lib.rs",
+    "trios/rings/RUST-13/trios-mesh/src/router.rs",
+    "trios/rings/RUST-13/trios-mesh/src/routing.rs",
+    "trios/rings/RUST-13/trios-mesh/build.rs",
+    "trios/BR-OUTPUT/CladeGuard.swift",
+    "trios/.trinity/specs/trios-mesh-lints.md",
+    "trios/.trinity/specs/clade-guard.md",
+    "trios/.trinity/wave-loop-001.md"
+  ],
+  "tests_added": [
+    "trios-mesh existing test suite (101 tests) continues to pass",
+    "clade-tablecloth flaky throttle test passed on retry"
+  ],
+  "lessons": [
+    "Nested git repos (trios-mesh) must be committed inside the submodule first; parent repo only sees the pointer update.",
+    "Workspace-wide lints can suddenly expose debt in one crate; gate the lint addition with targeted test exemptions plus a plan to clean production expects.",
+    "Atomic file replacement on macOS should use FileManager.replaceItemAt inside an NSFileCoordinator, not remove-then-copy.",
+    "A verifier agent must be spawned per wave to keep L2 GENERATION and L4 TESTABILITY honest."
+  ],
+  "seal_status": "BUILD_PASS, TEST_PASS, CLIPPY_PASS, E2E_NOT_RUN_DUE_SERVER_DOWN",
+  "timestamp": "2026-07-21T10:48:36Z"
+}

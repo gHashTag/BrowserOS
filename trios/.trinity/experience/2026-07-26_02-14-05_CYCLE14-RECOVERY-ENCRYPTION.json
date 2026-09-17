@@ -1,0 +1,38 @@
+{
+  "title": "Cycle 14 — Encrypted Session Recovery Package",
+  "date": "2026-07-26T02:14:05Z",
+  "ring": "SR-00 / SR-01",
+  "agent": "claude",
+  "road": "B",
+  "problem": "SessionRecoveryPackageWriter exported the full TriOS session as a plaintext ZIP archive while the manifest advertised local-aes256-gcm-v1 encryption, leaving conversations, browser context, runtime diagnostics, system logs, and companion logs exposed on disk.",
+  "root_cause": "The writer compressed a plaintext ZIP, computed a SHA-256 manifest over plaintext files, and returned the archive path without ever encrypting. The reader had no decryption path and only understood plaintext ZIPs.",
+  "fix": "Added TriOSEncryption.recovery named Keychain key. Writer now compresses a staging plaintext ZIP, encrypts it with AES-256-GCM, writes the result as .triosrecovery, and deletes the staging ZIP. Reader decrypts .triosrecovery to a staging ZIP before extraction, and still supports legacy plaintext .zip packages. Package naming and README updated to reflect real encryption. Added SessionRecoveryPackageEncryptionTests.",
+  "files_changed": [
+    "trios/rings/SR-00/TriOSEncryption.swift",
+    "trios/rings/SR-00/SessionRecoveryExport.swift",
+    "trios/rings/SR-01/SessionRecoveryPackageWriter.swift",
+    "trios/rings/SR-01/SessionRecoveryPackageReader.swift",
+    "trios/tests/TriOSKitTests/SessionRecoveryPackageEncryptionTests.swift",
+    ".claude/plans/trios-cycle14-recovery-package-encryption-plan.md",
+    ".claude/plans/trios-cycle14-recovery-package-encryption-report.md"
+  ],
+  "verification": {
+    "build_sh": "PASS (with TRIOS_SKIP_CHAT_E2E=1 TRIOS_SKIP_SWIFT_TEST=1)",
+    "clade_build": "PASS",
+    "clade_e2e": "PASS",
+    "clade_audit": "PASS (0 findings)",
+    "clade_seal": "VALID",
+    "functional_check": "PASS (standalone /tmp/trios_recovery_verify/main.swift: encrypted round-trip + legacy .zip import)",
+    "health": "{\"status\":\"ok\",\"cdpConnected\":true}"
+  },
+  "variants": [
+    "A: Encrypt the whole ZIP envelope as .triosrecovery — implemented",
+    "B: Encrypt each file inside the ZIP — granular but requires custom ZIP logic",
+    "C: Replace ZIP with encrypted SQLite/JSON bundle — strongest integrity but breaks tooling"
+  ],
+  "lessons": [
+    "Manifest claims about encryption must be enforced by the code that produces the artifact, or they become a false security signal.",
+    "Whole-archive encryption with a Keychain key keeps the existing ZIP/ditto workflow intact and is the lowest-risk way to harden a diagnostic bundle.",
+    "Backward compatibility with legacy plaintext .zip imports costs very little and protects users who have old recovery packages."
+  ]
+}

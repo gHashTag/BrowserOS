@@ -1,0 +1,26 @@
+{
+  "task_id": "RECURSION-001",
+  "issue_url": "https://github.com/gHashTag/trios/issues/T27-EPIC-001",
+  "domain": "Kernel",
+  "agent_chain": ["t27-queen", "t27-creator", "t27-verifier"],
+  "root_cause": "RecursionGuard.swift existed as hand-written safety code with no T27 provenance, violating L2 GENERATION. The spec was in draft state and the file had no active claim, seal, or waiver.",
+  "fix_pattern": "Canonized the file under the T27 agent pipeline: spec moved to active status, active claim acquired, t27-creator reconciled the implementation with the spec (ProjectPaths-based singleton paths, PATH-resolved ps, T27-CANON header), t27-verifier issued a CLEAN verdict, and a seal file was written.",
+  "files_changed": [
+    "trios/BR-OUTPUT/RecursionGuard.swift",
+    "trios/.trinity/specs/recursion-guard.md",
+    "trios/tests/swift/recursion_guard_test.swift",
+    "trios/.trinity/seals/RecursionGuard.json",
+    "trios/.trinity/state/verdicts/RECURSION-001.json",
+    "trios/.trinity/claims/active/recursion_guard.json"
+  ],
+  "tests_added": [
+    "trios/tests/swift/recursion_guard_test.swift"
+  ],
+  "lessons": [
+    "Always refresh claim heartbeat before verifier runs; an expired claim downgrades a clean implementation to NEEDS_FIX.",
+    "Reconcile spec text with actual ProjectPaths constants before canonization to avoid /tmp vs .trinity/run drift.",
+    "Swift standalone tests for POSIX lock primitives are deterministic; cross-process crash safety stays in the integration test domain (T-3/T-4) and clade-monitor watchdog.",
+    "A T27 seal requires three artifacts: claim file, verdict file, and seal file, plus ownership-index status flip."
+  ],
+  "timestamp": "2026-07-21T15:35:00Z"
+}

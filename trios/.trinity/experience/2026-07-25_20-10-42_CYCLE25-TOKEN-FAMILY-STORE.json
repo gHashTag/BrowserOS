@@ -1,0 +1,65 @@
+{
+    "episode_id": "cycle25-token-family-store",
+    "title": "Cycle 25: persistent server-side token-family store for local-auth",
+    "date": "2026-07-25",
+    "law": [
+        "L1",
+        "L2",
+        "L4"
+    ],
+    "tags": [
+        "local-auth",
+        "token-family",
+        "SQLite",
+        "bun:sqlite",
+        "durability",
+        "atomicity",
+        "BrowserOS",
+        "server"
+    ],
+    "summary": "Moved BrowserOS local-auth token families from an in-memory Map to a durable SQLite store. Refresh-token rotation now runs inside an immediate transaction, so concurrent /auth/refresh requests cannot both win. Only SHA-256 hashes are persisted. TriOS clients recover from server restart via /auth/refresh instead of bootstrap.",
+    "weak_spots": [
+        "Token families were purely in-memory and lost on server restart",
+        "No administrative visibility into active families or rotation history",
+        "LocalAuthService.validate() could auto-issue a new family as a side effect",
+        "No atomic guard against concurrent refresh rotations"
+    ],
+    "competitors": [
+        "OWASP ASVS 5.0 V10 / RFC 9700 — server-side sessions as first-class objects",
+        "Postgres + Redis durable session store pattern",
+        "Atomic refresh rotation via SELECT FOR UPDATE or Redis Lua",
+        "auth-api-node reference implementation"
+    ],
+    "variant_chosen": "B",
+    "variants": {
+        "A": "File-based JSON snapshot of families (simple, non-atomic)",
+        "B": "SQLite-backed family store with WAL + atomic rotation (implemented)",
+        "C": "Postgres-backed store with Redis cache (multi-instance, external deps)"
+    },
+    "files_changed": [
+        "packages/browseros-agent/apps/server/src/api/services/token-family-store.ts",
+        "packages/browseros-agent/apps/server/src/api/services/local-auth-service.ts",
+        "packages/browseros-agent/apps/server/src/api/server.ts",
+        "packages/browseros-agent/apps/server/tests/api/routes/auth-routes.test.ts",
+        ".claude/plans/trios-cycle25-token-family-store-plan.md",
+        ".claude/plans/trios-cycle25-token-family-store-report.md"
+    ],
+    "verification": {
+        "server_tests": "36 pass, 0 fail",
+        "tsc": "clean",
+        "clade_build": "PASS",
+        "clade_audit": "0 findings",
+        "clade_seal": "VALID",
+        "clade_e2e": "PASS",
+        "health": "{\"status\":\"ok\",\"cdpConnected\":true}",
+        "runtime_db_path": "/Users/playra/BrowserOS/trios/.trinity/state/local-auth.sqlite"
+    },
+    "lessons": [
+        "Token-family store must persist hashes only and expose atomic rotation.",
+        "Validation must be read-only; never auto-issue a family inside validation.",
+        "SQLite BEGIN IMMEDIATE serializes rotations; the second attempt sees reuse.",
+        "Clear is_active when revoking a family so getActiveFamily() never returns a revoked family.",
+        "Tests should use :memory: stores explicitly; default file paths are production-only.",
+        "Source-file-relative path math is fragile in monorepos; pass explicit paths derived from the server's configured executionDir and verify the runtime file location after launch."
+    ]
+}

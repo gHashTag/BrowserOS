@@ -1,0 +1,17 @@
+{
+ "renderedAt": "2026-09-17T06:36:21.790Z",
+ "iteration": 0,
+ "lastBeginAt": null,
+ "lastBeginSource": null,
+ "sinceLastBeginMs": null,
+ "sinceLastBegin": "?",
+ "cadenceMs": 900000,
+ "staleFactor": 3,
+ "stale": true,
+ "driver": {
+  "claudeCron": 0,
+  "crontab": 1,
+  "launchd": 4,
+  "at": "2026-09-17T06:36:21.792Z"
+ }
+}

@@ -1,0 +1,23 @@
+{
+  "task_id": "CHAT-COMPOSER-001",
+  "claim_id": "CFA1AA41-A101-45A9-8889-AEC918827F66",
+  "timestamp": "2026-07-22T11:07:42Z",
+  "action": "build_verify_learn",
+  "result": "clean",
+  "problem": "The mini-window composer stacked a persistent multi-chip hotkey bar above the editor. Its flexible layout expanded vertically, obscured the conversation, and left API-key diagnostics dominating the actual input action.",
+  "solution": "Replaced the stack with one adaptive ChatGPT-style composer: bounded auto-growing editor, compact lower toolbar, action menu, inline Local/Online/Offline state, white send button, native HUD blur, and a stronger black wash in compact mode. The hotkey reference moved to an on-demand sheet.",
+  "verification": {
+    "composer_style_tests": "PASS",
+    "workspace_layout_regression": "PASS",
+    "swift_build": "PASS",
+    "compiled_swift_files": 71,
+    "code_signature": "PASS",
+    "live_health": {"status": "ok", "cdpConnected": true},
+    "ascii_audit": "PASS",
+    "diff_check": "PASS",
+    "runtime_launch": "PASS",
+    "visual_capture": "/private/tmp/trios-composer.png",
+    "pid": 86658
+  },
+  "lesson": "A compact composer should be one bounded action surface. Persistent shortcut education belongs behind progressive disclosure, while connectivity and provider state should remain concise and local to the toolbar."
+}

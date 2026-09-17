@@ -1,0 +1,50 @@
+{
+  "id": "VARIANT-B-002",
+  "date": "2026-07-25",
+  "domain": "BrowserOS server / Swift / Build",
+  "agent_chain": ["queen-browseros", "t27-creator", "agent-A", "claude"],
+  "road": "B",
+  "issue_url": "",
+  "root_cause": "Weak-spot audit found four critical/medium issues: pg-migrate.ts used DEFAULT gen_random_uuid() without guaranteeing pgcrypto; Application.start() and createHttpServer() treated OAuth/Klavis/A2A as hard startup dependencies; CORS was globally permissive and loopback-looking origins could bypass socket verification; Swift retry exhaustion leaked raw URLError and A2A SSE reconnection gave up silently; clade-build did not build QueenUILib and compiled broken untracked BR-OUTPUT prototypes.",
+  "fix_pattern": "Removed pgcrypto-dependent default from agent_tasks and generate UUIDs in JS. Wrapped initCoreServices() and non-port createHttpServer() errors in warning-and-continue try/catch blocks; isolated OAuth/Klavis/A2A construction in per-feature guards. Replaced permissive CORS with an explicit allowlist and gated credentials. Tightened requireTrustedAppOrigin so spoofed loopback Origin headers from remote sockets are rejected. Added NetworkRetrier.execute(task:) overload mapping exhausted URLError to A2AError.transport; made A2ARegistryClient.messageStream() yield a synthetic error A2AMessage before finishing on reconnect exhaustion. Added Bun tests for DB retry/migration/auth and Swift tests for partial SSE chunks + typed retry exhaustion. Fixed clade-build to build QueenUILib first and compile only the lean BR-OUTPUT whitelist matching build.sh.",
+  "files_changed": [
+    "packages/browseros-agent/apps/server/src/lib/db/pg-migrate.ts",
+    "packages/browseros-agent/apps/server/src/main.ts",
+    "packages/browseros-agent/apps/server/src/api/server.ts",
+    "packages/browseros-agent/apps/server/src/api/utils/cors.ts",
+    "packages/browseros-agent/apps/server/src/api/utils/request-auth.ts",
+    "packages/browseros-agent/apps/server/src/lib/db/retry.test.ts",
+    "packages/browseros-agent/apps/server/src/lib/db/pg-migrate.test.ts",
+    "packages/browseros-agent/apps/server/src/api/utils/request-auth.test.ts",
+    "trios/rings/SR-01/NetworkRetryPolicy.swift",
+    "trios/rings/SR-01/SSETransport.swift",
+    "trios/rings/SR-02/A2ARegistryClient.swift",
+    "trios/tests/TriOSKitTests/NetworkRetryPolicyTests.swift",
+    "trios/tests/TriOSKitTests/SSETransportTests.swift",
+    "trios/rings/RUST-01/clade-build/src/main.rs",
+    "trios/BR-OUTPUT/AgentNetworkClient.swift"
+  ],
+  "tests_added": [
+    "packages/browseros-agent/apps/server/src/lib/db/retry.test.ts",
+    "packages/browseros-agent/apps/server/src/lib/db/pg-migrate.test.ts",
+    "packages/browseros-agent/apps/server/src/api/utils/request-auth.test.ts",
+    "trios/tests/TriOSKitTests/NetworkRetryPolicyTests.swift",
+    "trios/tests/TriOSKitTests/SSETransportTests.swift"
+  ],
+  "lessons": [
+    "PostgreSQL schema defaults must not assume extensions are installed; either create the extension explicitly or generate IDs in application code.",
+    "Optional server features (OAuth, Klavis, A2A, OpenClaw) must each have their own guard so a misconfiguration in one does not crash the whole process.",
+    "CORS origin: true is dangerous with credentials; maintain an explicit allowlist and gate Access-Control-Allow-Credentials.",
+    "Loopback-looking Origin headers from remote sockets are a real bypass class; always verify the actual TCP socket.",
+    "Swift network actors should wrap exhausted retry errors into domain errors before they reach UI code.",
+    "A build tool that compiles the app must mirror the canonical build exactly, including dependency order and source whitelist, or untracked prototypes break CI."
+  ],
+  "verification": {
+    "server_typecheck": "PASS",
+    "server_tests": "8 pass, 0 fail",
+    "build_sh": "PASS",
+    "clade_build": "PASS",
+    "clade_e2e": "PASS",
+    "menu_bar_logo": "present"
+  }
+}

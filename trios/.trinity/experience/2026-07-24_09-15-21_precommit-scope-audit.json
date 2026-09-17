@@ -1,0 +1,22 @@
+{
+  "timestamp": "2026-07-24T09:15:21Z",
+  "task_id": "TRIOS-PORTABLE-LAND-001",
+  "claim_id": "989F8151-6640-44B4-AFE1-FEEB17078EF2",
+  "action": "precommit_scope_and_portability_audit",
+  "result": "PASS_WITH_PORTABLE_RELEASE_GATE",
+  "evidence": {
+    "facts": [
+      "The owned landing scope contains exactly 30 files, including the portable installation design.",
+      "git diff --check reported no whitespace errors in the owned scope.",
+      "All newly added Swift, spec, and plan files passed the ASCII scan.",
+      "Secret keyword matches were reviewed; they are policy text, Keychain APIs, redaction logic, or the intentional redacted test fixture.",
+      "Foreign root README and generated installation artifacts remain outside the owned scope.",
+      "Local dev and origin/dev both point to fd53dc3a46d22d4b8a822aacc24945245629c98e and are direct ancestors of the feature branch."
+    ]
+  },
+  "residual_risks": [
+    "The 30-file scope must be staged explicitly and re-audited from the index.",
+    "The local full-stack fast-forward will include the branch's existing 160 commits plus the scoped closeout commit.",
+    "Portable release remains blocked by unpublished Queen and mesh dependency state."
+  ]
+}

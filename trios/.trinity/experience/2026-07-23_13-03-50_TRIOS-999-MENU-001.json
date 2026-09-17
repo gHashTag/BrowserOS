@@ -1,0 +1,45 @@
+{
+  "task_id": "TRIOS-999-MENU-001",
+  "claim_id": "2C3A9AEF-00B0-4D6E-A081-6C42364114A3",
+  "timestamp": "2026-07-23T13:03:50Z",
+  "action": "spec_tdd_route_build_verify_learn",
+  "result": "clean",
+  "problem": "Trios rendered its own primary tab strip above the canonical Queen interface, leaving users with two competing navigation systems and keeping Trios workspaces outside the 27-petal 999 menu.",
+  "solution": "Added a public hosted-route contract to QueenUILib, mapped six Trios workspaces to semantically matching RAZUM and MATERIYA petals, routed those views inside the canonical Queen shell, removed the redundant Trios tab strip, and made the brand and back controls return to the triangle.",
+  "verification": {
+    "red_green_host_route_test": "PASS",
+    "route_map_test": "PASS",
+    "queen_tests": {
+      "status": "PASS",
+      "count": 47
+    },
+    "trios_build": "PASS",
+    "code_signature": "PASS",
+    "relative_queen_library": "PASS",
+    "legacy_tab_strip_removed": "PASS",
+    "hosted_routes": {
+      "chat": 0,
+      "models": 1,
+      "git": 14,
+      "terminal": 13,
+      "mesh": 16,
+      "settings": 17
+    },
+    "remaining_canonical_petals": 21,
+    "compact_triangle": "PASS",
+    "compact_chat": "PASS",
+    "fullscreen_triangle": "PASS",
+    "fullscreen_chat": "PASS",
+    "fullscreen_models": "PASS",
+    "fullscreen_git": "PASS",
+    "browseros_health": {
+      "status": "ok",
+      "cdpConnected": true
+    },
+    "runtime_launch": "PASS",
+    "pid": 15035,
+    "diff_check": "PASS",
+    "ascii_check": "PASS"
+  },
+  "lesson": "When a product already has a strong spatial navigation metaphor, host features should enter through that metaphor instead of adding a second global tab bar. A small public route contract preserves the upstream Queen interface while allowing Trios to own selected petals without copying or forking the menu."
+}

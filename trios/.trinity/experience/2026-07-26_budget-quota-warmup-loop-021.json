@@ -1,0 +1,52 @@
+{
+  "title": "Cycle 21: Budget / Quota-Aware Adaptive Warmup Gating",
+  "date": "2026-07-26",
+  "weak_spots": [
+    "HTTP 402 Insufficient Balance was mapped to .unknown and did not trip the circuit breaker as an economic failure",
+    "Rate-limit / quota response headers were ignored by health probes",
+    "Adaptive warmup scoring used reliability x latency only, so a fast but depleted provider could win",
+    "No per-(provider, baseURL) quota snapshot store existed",
+    "ModelsTabView did not surface economic signals to the user",
+    "Circuit breaker .balance and .auth failures used the same cooldown as transient errors"
+  ],
+  "files_changed": [
+    "rings/SR-00/ModelHealthService.swift — ProviderQuotaStatus enum, ModelHealthResult.quota, header parsing, 402 mapping",
+    "rings/SR-00/ProviderQuotaService.swift (new) — per-endpoint quota snapshot actor",
+    "rings/SR-00/ModelWarmupService.swift — quota multiplier scoring, strictQuotaGating parameter",
+    "rings/SR-00/ProviderCircuitBreaker.swift — balance cooldown floor baseCooldown * 4",
+    "rings/SR-00/ModelConfigurationStore.swift — quota service injection, strict gating toggle, status helper",
+    "BR-OUTPUT/ModelsTabView.swift — strict quota gating toggle, quota badges in adaptive warmup section",
+    "tests/TriOSKitTests/ModelHealthServiceTests.swift — header parsing, 402, 429 quota tests",
+    "tests/TriOSKitTests/ProviderQuotaServiceTests.swift (new)",
+    "tests/TriOSKitTests/ModelWarmupServiceTests.swift — strict gating and deprioritization tests",
+    "tests/TriOSKitTests/ProviderCircuitBreakerTests.swift — balance cooldown floor test"
+  ],
+  "gates": {
+    "build.sh": "passed",
+    "cargo test --workspace": "passed",
+    "cargo clippy --workspace": "passed",
+    "clade-audit": "0 findings",
+    "clade-seal": "SEAL VALID",
+    "clade-e2e": "passed",
+    "trios.app": "relaunched"
+  },
+  "next_options": [
+    {
+      "name": "Predictive background warmup scheduling",
+      "summary": "Run adaptive warmup proactively every 30-60s and cache the winning endpoint so send path never pays the probe cost."
+    },
+    {
+      "name": "User-defined provider preference order",
+      "summary": "Allow drag-to-rank providers in ModelsTabView and blend explicit priority into warmup scoring."
+    },
+    {
+      "name": "Real-time spend dashboard",
+      "summary": "Capture usage headers from responses, estimate per-provider spend, and show a running balance/cost badge."
+    }
+  ],
+  "notes": [
+    "Strict quota gating toggle is off by default so existing behavior is preserved; when enabled, depleted endpoints are excluded from warmup selection unless they are the current selection.",
+    "Quotas are tracked per endpoint, not per model, because provider-wide balance/rate-limit signals apply to the whole base URL.",
+    "Unit tests were added but could not be executed in the current toolchain because XCTest is unavailable; they will run when Xcode is installed."
+  ]
+}

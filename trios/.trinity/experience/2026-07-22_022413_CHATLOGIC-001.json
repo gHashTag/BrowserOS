@@ -1,0 +1,23 @@
+{
+  "task_id": "CHATLOGIC-001",
+  "issue_url": "https://github.com/gHashTag/trios/issues/T27-EPIC-001",
+  "domain": "Language",
+  "agent_chain": ["t27-queen", "t27-creator", "t27-verifier"],
+  "root_cause": "ChatLogic.swift was hand-written parsing/intent code with no T27 spec or provenance, violating L2 GENERATION.",
+  "fix_pattern": "Created chat-logic.md spec with six invariants, acquired claim CHATLOGIC-001, canonized the file with a T27-CANON header, verified existing unit tests still pass, and wrote a CLEAN verdict plus seal.",
+  "files_changed": [
+    "trios/.trinity/specs/chat-logic.md",
+    "trios/BR-OUTPUT/ChatLogic.swift",
+    "trios/.trinity/claims/active/chat_logic.json",
+    "trios/.trinity/state/verdicts/CHATLOGIC-001.json",
+    "trios/.trinity/seals/ChatLogic.json",
+    "trios/.trinity/state/ownership-index.json"
+  ],
+  "tests_added": [],
+  "lessons": [
+    "Pure Foundation enums with no UI surface are ideal early T27 pilot candidates because unit tests can run with swiftc directly.",
+    "When the implementation already matches the spec, canonization is just header provenance + verifier seal — do not rewrite working code.",
+    "Always verify that the active claim has a fresh heartbeat before the verifier step; stale claims block clean verdicts."
+  ],
+  "timestamp": "2026-07-22T02:24:13Z"
+}

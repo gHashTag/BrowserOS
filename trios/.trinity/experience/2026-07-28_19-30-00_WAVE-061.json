@@ -1,0 +1,71 @@
+{
+  "wave": "WAVE-061",
+  "date": "2026-07-28",
+  "domain": "chat TODO/plan subsystem hardening after dynamic steps",
+  "summary": "Audited the dynamic-step plan change from WAVE-060 and fixed three weak spots it introduced, two of them self-inflicted, plus the missing test coverage.",
+  "findings": [
+    {
+      "id": "W1",
+      "finding": "shouldDisplayPlan was dead code. It was added so a trivial turn renders no checklist, but nothing called it - the promised behaviour never happened in the UI.",
+      "fix": "ChatPanelView.queenActivityFeed now gates on it; logic moved to the tested PlanDisplayPolicy."
+    },
+    {
+      "id": "W2",
+      "finding": "Plan length was unbounded once steps appended per tool call, so a long run could bury the active row and inflate the persisted record.",
+      "fix": "PlanOverflow folds the oldest COMPLETED steps into a counted 'Earlier steps' summary. Pending, running, cancelled and failed steps are never folded - they are still actionable."
+    },
+    {
+      "id": "W3",
+      "finding": "Write amplification: every step transition wrote the plan to the SQLCipher-encrypted database. Steps changed about twice per turn before, once per tool call after.",
+      "fix": "PlanPersistPolicy coalesces intermediate writes on a 2s interval and always writes terminal states immediately. Measured: 20 rapid steps produce 2 writes instead of 20."
+    },
+    {
+      "id": "W4",
+      "finding": "The stateful planner had no tests; WAVE-060 only covered the pure deriver.",
+      "fix": "tests/swift/todo_planner_state_test.swift, 17 checks over overflow, persistence and display gating."
+    }
+  ],
+  "competitor_research": [
+    "LangChain agent streams: detail streams only when a UI asks for it - cheap summary and expensive detail are different channels.",
+    "Deep Agents subagent snapshots: a step should stay a cheap record; volume belongs behind a disclosure.",
+    "assistant-ui multi-agent: nested tool-call threads are the accepted answer to list length.",
+    "AgentScope PlanNotebook: revise_current_plan is first-class, so plans must tolerate mid-run edits rather than assuming append-only."
+  ],
+  "lessons": [
+    {
+      "lesson": "Adding an API and not wiring it is indistinguishable from not doing the work. shouldDisplayPlan shipped as dead code in the same session it was announced as a feature.",
+      "how_to_apply": "After adding a public affordance, grep for call sites outside its own file before claiming the behaviour exists."
+    },
+    {
+      "lesson": "Making a list dynamic silently changes its cost profile. Per-tool-call appends turned a twice-per-turn encrypted write into a per-tool-call one.",
+      "how_to_apply": "When a data structure goes from fixed to unbounded, re-check both its display bound and its persistence frequency in the same change."
+    },
+    {
+      "lesson": "Folding overflow must distinguish completed from actionable. Hiding a pending or failed step would misrepresent the plan's state.",
+      "how_to_apply": "PlanStepState.isActionable encodes this; only non-actionable steps fold."
+    }
+  ],
+  "artifacts": {
+    "plan": ".trinity/wave-loop-061.md",
+    "new_sources": ["rings/SR-00/TODOPlanState.swift"],
+    "modified_sources": [
+      "rings/SR-02/TODOPlanner.swift",
+      "BR-OUTPUT/ChatPanelView.swift",
+      "rings/RUST-02/clade-e2e/src/main.rs"
+    ],
+    "new_tests": ["tests/swift/todo_planner_state_test.swift"],
+    "reference": ".trinity/ZAI-ENDPOINT-FACTS.md"
+  },
+  "verification": {
+    "build_sh": "0 app-source errors, trios_app built, chat e2e 0 failures",
+    "clade_e2e": "9/9 Swift logic suites passed",
+    "new_assertions": 17,
+    "dead_code_check": "shouldDisplayPlan now has 1 call site outside its own file",
+    "duplicate_policy_check": "0 inline duplicates of the persist/overflow logic remain in TODOPlanner"
+  },
+  "known_gaps": [
+    "Nested sub-steps for delegated work are not implemented (P1).",
+    "Mid-run plan revision (reorder/rewrite pending steps) is not implemented (P1).",
+    "The chat scroll/footer glitch the user reported is not addressed in this wave."
+  ]
+}

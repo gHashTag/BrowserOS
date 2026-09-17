@@ -1,0 +1,22 @@
+{
+  "timestamp": "2026-07-24T10:27:16Z",
+  "task_id": "TRIOS-PORTABLE-LAND-001",
+  "claim_id": "989F8151-6640-44B4-AFE1-FEEB17078EF2",
+  "action": "one_command_installer_design_gate_recheck",
+  "result": "BLOCKED",
+  "evidence": {
+    "command": "Read current instructions, claim, queue, handoff, dirty tree and branch refs",
+    "exit_code": 0,
+    "artifact": "def368fc98eec80a6c6617d32b06df1690f883ac",
+    "facts": [
+      "No source-location response has arrived.",
+      "The design approval gate remains active.",
+      "Local branch refs and unrelated dirty-tree boundaries are unchanged.",
+      "No product or installer mutation was performed."
+    ]
+  },
+  "residual_risks": [
+    "The installer layout remains undecided.",
+    "Queen and mesh release inputs remain unpublished."
+  ]
+}

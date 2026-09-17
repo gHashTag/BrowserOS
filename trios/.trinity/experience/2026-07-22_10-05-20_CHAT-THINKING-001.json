@@ -1,0 +1,20 @@
+{
+  "task_id": "CHAT-THINKING-001",
+  "claim_id": "B96973FA-E331-42B2-9954-ED0396910DCC",
+  "timestamp": "2026-07-22T10:05:20Z",
+  "action": "build_verify_learn",
+  "result": "clean",
+  "problem": "Assistant messages displayed a standalone Thinking status immediately above one or more reasoning accordions that already displayed Thinking, creating a redundant sequence.",
+  "solution": "The standalone reasoning header was removed. Reasoning content remains available through its existing collapsible cards, while response loading without reasoning continues through the centered chat indicator.",
+  "verification": {
+    "policy_tests": "PASS",
+    "swift_build": "PASS",
+    "compiled_swift_files": 71,
+    "code_signature": "PASS",
+    "live_health": {"status": "ok", "cdpConnected": true},
+    "ascii_audit": "PASS",
+    "diff_check": "PASS",
+    "app_relaunch": "PASS"
+  },
+  "lesson": "A structured disclosure component should own both status and detail labeling. Adding a second status header above it creates hierarchy noise without communicating new state."
+}

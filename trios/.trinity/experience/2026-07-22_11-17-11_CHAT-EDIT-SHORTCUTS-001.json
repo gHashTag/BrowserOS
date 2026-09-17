@@ -1,0 +1,22 @@
+{
+  "task_id": "CHAT-EDIT-SHORTCUTS-001",
+  "claim_id": "800EAB94-A084-4C21-88B8-2B5A28B2EE8E",
+  "timestamp": "2026-07-22T11:17:11Z",
+  "action": "build_verify_learn",
+  "result": "clean",
+  "problem": "TriOS installed only a status-bar menu and never created the standard application Edit menu. AppKit therefore had no key-equivalent path for Command-V, C, X, A, or Z, and forwarding the events to NSTextView.keyDown was not a reliable substitute.",
+  "solution": "Installed a standard nil-target Edit menu for responder-chain routing and added an explicit chat-text-view fallback for copy, paste, cut, select all, undo, and redo. Programmatic clear and history replacements now emit text-change notifications so the SwiftUI binding stays synchronized.",
+  "verification": {
+    "shortcut_policy_tests": "PASS",
+    "swift_build": "PASS",
+    "compiled_swift_files": 72,
+    "compiler_warnings": 0,
+    "code_signature": "PASS",
+    "live_health": {"status": "ok", "cdpConnected": true},
+    "ascii_audit": "PASS",
+    "diff_check": "PASS",
+    "runtime_launch": "PASS",
+    "pid": 8045
+  },
+  "lesson": "Native macOS editing shortcuts belong to the application menu and responder chain. A custom text view may add a narrow fallback, but it should not replace the standard Edit menu or intercept unrelated input-method events."
+}

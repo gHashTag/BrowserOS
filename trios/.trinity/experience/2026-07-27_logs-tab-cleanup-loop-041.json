@@ -1,0 +1,24 @@
+{
+  "date": "2026-07-27",
+  "title": "LOGS Tab Cleanup — deduplication, structured parsing, better UX",
+  "cycle": 41,
+  "ring": "SR-02 / BR-OUTPUT",
+  "agents": "claude",
+  "road": "B",
+  "problem": "The LOGS tab (Cmd+3) had become a dumping ground: stale next-loop variant cards, unstructured raw log dumps, naive substring severity coloring, and thousands of duplicate drift_detected / pino error lines.",
+  "root_cause": "LogsTabView.swift was a single hardcoded view that read full log files synchronously, only rendered the last 120 lines, and colored lines by simple keyword presence. There was no parser per log format and no deduplication.",
+  "fix": "Rewrote LogsTabView.swift with an insights bar, source cards, source filter bar, severity/search filter bar, dedup toggle, and a clean log-detail panel. Added LogParser.swift in rings/SR-02 with LogLevel, ParsedLogLine, LogSource, and format-aware parsers for JSONL event logs, pino JSON service logs, and plain-text cron/queen logs. Collapsed consecutive identical messages into a single row with a xN badge. Capped each source at 500 lines for UI performance. Added LogsTabViewTests.swift covering parsing, deduplication, level inference, timestamps, and cap behavior.",
+  "files": [
+    "trios/BR-OUTPUT/LogsTabView.swift",
+    "trios/rings/SR-02/LogParser.swift",
+    "trios/tests/TriOSKitTests/LogsTabViewTests.swift",
+    "trios/.claude/plans/trios-cycle41-logs-tab-cleanup.md",
+    "trios/.claude/plans/trios-cycle41-logs-tab-cleanup-report.md"
+  ],
+  "tests": "TRIOS_SKIP_CHAT_E2E=1 ./build.sh PASS; cargo test -p trios-mesh PASS (101 tests); TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-build PASS; TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-audit PASS (0 hard-gate findings); TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-seal SEAL VALID; TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-e2e PASS; open trios.app relaunched. swift test unavailable in CommandLineTools-only environment.",
+  "next_options": [
+    "Streaming / tail behavior — append new lines without rebuilding the whole LazyVStack for very active logs.",
+    "Structured export / query language — add a small DSL (e.g. level:warn source:cron-log) and export filtered results.",
+    "Cross-source correlation timeline — merge all sources by correlation_id or timestamp into a single chronological trace view."
+  ]
+}

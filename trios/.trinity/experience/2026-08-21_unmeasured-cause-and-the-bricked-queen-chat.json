@@ -1,0 +1,66 @@
+{
+  "id": "2026-08-21_unmeasured-cause-and-the-bricked-queen-chat",
+  "date": "2026-08-21",
+  "ring": "SR-00, SR-02",
+  "branch": "feat/queen-supervisor",
+  "title": "Eight messages that named a cause nobody measured, and the guard that bricked the Queen's own chat",
+  "severity": "high",
+  "mnl_stage": "L",
+  "agent": "Queen",
+
+  "problem": "The delegation chain reported a busy, healthy swarm while the board had not moved in five hours, and the Queen had been unable to write a single line of her own transcript for a month. Neither was visible from any message the system printed, because the messages named causes the code had no way to observe.",
+
+  "root_cause": "One defect class, eight instances. A function knows a fact (a value is empty, a list is short, a fetch returned nothing) and the message states a REASON for that fact which was never measured. Two of the eight were guards that outlived their purpose: the conversation write-refusal protected the bytes, kept refusing after the bytes were safely quarantined, and so bricked the slot; the Keychain cooldown existed to stop callers piling up and instead latched for the life of the process.",
+
+  "findings": [
+    "ChatConversation.trinityQueenId is E621E1F8-C36C-495A-93FC-0C247A3E6E5F, and it is one of the sixteen conversations made undecryptable by the 25-27 July key overwrite. ConversationPersister.save refused every write to it: 92 refusals in one five-hour window, each a delegation note or review verdict dropped in silence.",
+    "queen.choose.already_running printed 'a worker already has it' for every state in `spokenFor` - queued, running, awaitingReview, rejected, accepted, merged. The release registry held zero running tasks (17 cancelled, 12 failed, 11 accepted, 5 awaitingReview, 3 merged), so all 8 such lines per tick were false.",
+    "The board was 100% exhausted: 68 ticks, 68 `queen.choose.exhausted`. 12 of 23 candidates blocked by two awaitingReview tasks aged 37h and 39h.",
+    "~/.trios/config.json holds both provider keys with zero-length values - it reads as configured to anyone who opens it and supplies nothing to any consumer. The Keychain has been the only working release source and nobody knew.",
+    "The release binary was built at 09:11 while the last two commits landed at 09:23 and 09:26, so the 'refuses to orphan working bees' fix existed in git and in no running process.",
+    "`make check` was red on arrival for reasons predating this round: make-dollars flagged $(HOME) and $(FORCE), two correct Make variables missing from MAKE_DOLLAR_VARS, which failed check-selftest's clean-fixture half."
+  ],
+
+  "fix": "ConversationPersister.save now gates the refusal on quarantineHolds(id) - a byte-for-byte comparison between what is in the slot right now and what is under the quarantine key - and reclaims the slot when the bytes are provably elsewhere. QueenDelegationPolicy.spokenForReport(states:) returns the bucket and sentence for a spoken-for candidate, so the tick cannot claim a worker where DelegatedTaskState says there is none. MAKE_DOLLAR_VARS gained HOME and FORCE.",
+
+  "files_changed": [
+    "rings/SR-02/ConversationPersister.swift",
+    "rings/SR-00/QueenDelegation.swift",
+    "rings/SR-02/ChatViewModel.swift",
+    "tests/swift/queen_delegation_test.swift",
+    "tests/swift/ChatSSEEndToEndTest.swift",
+    "Makefile"
+  ],
+
+  "prevention": [
+    "Before committing any warn/error/refusal string, answer in one line: which statement in this function established that? If the answer is 'it is usually that', measure it or say less.",
+    "Keep the state, not the boolean. A Set<Int> of issue numbers cannot report why; a [Int: [State]] makes the false sentence impossible to write.",
+    "When a guard produces a bad outcome, ask what it protects and whether that thing is already safe by other means. Gate on the condition measured now, not on a flag recording that it was once true.",
+    "Distinguish empty from absent. This project has hit the same distinction four times: nil vs 0 file count, nonexistent branch vs branch with no commits, empty config value vs missing key, unreadable conversation vs empty one.",
+    "Run `make check` at the START of a round. Twice it was red on arrival, and the second time cost a debugging pass on an innocent change.",
+    "Compare the binary's mtime against the newest commit before believing any live observation."
+  ],
+
+  "corrections_to_earlier_claims": [
+    "I wrote in a commit message that DEV reads its key from ~/.trios/config.json. It does not - it reads ~/.trios-dev/secrets/. The generalisation from dev to release was made without opening the file.",
+    "I reported 'the swarm is stopped' eleven times. That was true of release and false of dev the whole time. When a symptom is environmental, check whether it is variant-specific before generalising."
+  ],
+
+  "related_episodes": [
+    "2026-07-29_queen-autonomy-archive-wave065",
+    "2026-07-29_queen-supervisor-surface-wave064"
+  ],
+
+  "tags": [
+    "unmeasured-cause",
+    "diagnostics",
+    "keychain",
+    "credentials",
+    "conversation-encryption",
+    "quarantine",
+    "delegation",
+    "queen",
+    "make-check",
+    "empty-vs-absent"
+  ]
+}

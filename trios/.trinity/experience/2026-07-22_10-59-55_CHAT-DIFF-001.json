@@ -1,0 +1,23 @@
+{
+  "task_id": "CHAT-DIFF-001",
+  "claim_id": "29FA79F6-13A2-47C4-94F4-257860F8DF4E",
+  "timestamp": "2026-07-22T10:59:55Z",
+  "action": "build_verify_learn",
+  "result": "clean",
+  "problem": "Code-edit tool details rendered patches and before/after payloads as undifferentiated gray monospaced text, making changes difficult to review.",
+  "solution": "Added bounded unified-diff parsing, apply-patch detection, structured old/new extraction, line-number tracking, and a shared Claude-style SwiftUI diff surface with green additions, red deletions, accented hunks, copy support, raw-detail fallback, and local plus BrowserOS tool-card integration.",
+  "verification": {
+    "diff_parser_tests": "PASS",
+    "structured_detail_regression": "PASS",
+    "visual_tone_contract": "PASS",
+    "swift_build": "PASS",
+    "compiled_swift_files": 70,
+    "code_signature": "PASS",
+    "live_health": {"status": "ok", "cdpConnected": true},
+    "ascii_audit": "PASS",
+    "diff_check": "PASS",
+    "runtime_launch": "PASS",
+    "pid": 71068
+  },
+  "lesson": "A coding-agent diff needs semantic parsing before coloring. Credible envelope detection prevents ordinary code from being misclassified, while a bounded LCS makes common before/after edit payloads reviewable without risking unbounded memory."
+}

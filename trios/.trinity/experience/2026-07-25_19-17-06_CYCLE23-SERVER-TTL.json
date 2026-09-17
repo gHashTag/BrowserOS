@@ -1,0 +1,67 @@
+{
+  "title": "Cycle 23: Server-side local-auth TTL + client hardening",
+  "date": "2026-07-25",
+  "category": "security",
+  "weak_spots": [
+    "Cycle 22 proactive refresh used a client-only 5-minute heuristic with no server visibility into actual token lifetime",
+    "A server-side token rotation left TriOS holding an expired token until the next 403 forced a reactive refresh",
+    "No distinct status code distinguished 'token missing/invalid' from 'token expired', complicating retry policies",
+    "Queen dashboard showed token state but not the server-issued TTL or precise countdown",
+    "Middleware validation only knew the current token value, not whether the token had reached its expiry boundary"
+  ],
+  "competitors": [
+    "SwiftAI Boilerplate AsyncStream AuthState + proactive 60s-before-expiry refresh",
+    "TokenEater AppErrorState enum + menu-bar recovery banner + silent keychain reads",
+    "omi AuthSessionCoordinator single-flight refresh + definitive death classifier",
+    "Ory token lifecycle management + refresh-token rotation + family invalidation",
+    "onelake-explorer-macos Sign In Again menu-bar action",
+    "OAuth2 token endpoint issued_at/expires_in standard",
+    "Hono auth patterns: access tokens ~15 min, refresh tokens ~7 days, /auth/refresh rotation"
+  ],
+  "implemented_variant": "B",
+  "variants": [
+    {
+      "id": "A",
+      "name": "Keep client-only heuristic refresh",
+      "implemented": false,
+      "summary": "Refresh every 5 minutes regardless of server TTL. Simple but causes unnecessary fetch load and still allows expired-token windows."
+    },
+    {
+      "id": "B",
+      "name": "Server-side TTL metadata + precise client refresh",
+      "implemented": true,
+      "summary": "BrowserOS LocalAuthService issues tokens with issuedAt, expiresAt, expiresInSeconds, ttlSeconds; /auth/local-token returns full metadata; middleware rejects expired tokens with 401; TriOS LocalAuthProvider parses TTL and refreshes 60 seconds before expiry; Queen dashboard shows TTL metadata."
+    },
+    {
+      "id": "C",
+      "name": "Refresh-token rotation + family invalidation",
+      "implemented": false,
+      "summary": "Issue a short-lived access token and a longer-lived refresh token; /auth/refresh rotates both and tracks token families. Strongest revocation story but requires session storage and rotation logic."
+    }
+  ],
+  "files_changed": [
+    "packages/browseros-agent/apps/server/src/api/services/local-auth-service.ts",
+    "packages/browseros-agent/apps/server/src/api/routes/local-auth.ts",
+    "packages/browseros-agent/apps/server/src/api/utils/require-local-auth.ts",
+    "packages/browseros-agent/apps/server/tests/api/routes/auth-routes.test.ts",
+    "trios/rings/SR-01/LocalAuthProvider.swift",
+    "trios/rings/SR-01/LocalAuthMonitor.swift",
+    "trios/rings/SR-01/LocalAuthUIManager.swift"
+  ],
+  "verification": {
+    "clade_build": "PASS",
+    "clade_audit": "0 findings",
+    "clade_seal": "VALID",
+    "clade_e2e": "PASS",
+    "server_tests": "bun test apps/server/tests/api/routes/auth-routes.test.ts 29 pass",
+    "app_health": "{\"status\":\"ok\",\"cdpConnected\":true}"
+  },
+  "lessons": [
+    "Server-side TTL metadata eliminates guesswork: the client should refresh based on the issuer's expiry, not a local heuristic.",
+    "A distinct 401 for expired tokens lets middleware and client telemetry classify failures precisely without leaking the secret.",
+    "Parsing ISO8601 with a fixed TimeZone(secondsFromGMT: 0) on the client avoids timezone drift against server timestamps.",
+    "Actor-isolated LocalAuthProvider + single-flight refreshTask naturally deduplicates forced refreshes triggered by concurrent 403 retries.",
+    "Monitor metadata should stay token-free; include issuedAt/expiresAt/ttlSeconds for dashboards, never the token value."
+  ],
+  "related_cycles": [22, 21, 20, 19, 18]
+}

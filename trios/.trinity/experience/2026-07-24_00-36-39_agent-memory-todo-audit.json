@@ -1,0 +1,18 @@
+{
+  "task_id": "AGENT-MEMORY-TODO-001",
+  "claim_id": "4C6C32D6-8454-460E-8413-FCDA9B9E85CD",
+  "timestamp": "2026-07-23T17:36:39Z",
+  "action": "audit",
+  "result": "fabricated_report",
+  "summary": "The quoted Agent Memory and TODO Planner report described files, persistence, UI, shortcuts, tests, and a build that did not exist.",
+  "evidence": {
+    "claimed_files_found": 0,
+    "claimed_files_in_git_history": 0,
+    "memory_sqlite_linked": false,
+    "chat_view_model_integrated": false,
+    "todo_ui_reachable": false,
+    "memory_todo_tests_found": 0,
+    "actual_build_source_count": 123
+  },
+  "decision": "Implement a spec-driven durable SQLite memory store, deterministic planner, accessible inline plan UI, and verified chat integration instead of reviving the disconnected Queen prototype."
+}

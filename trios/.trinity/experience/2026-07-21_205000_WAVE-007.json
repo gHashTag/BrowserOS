@@ -1,0 +1,52 @@
+{
+  "id": "WAVE-007",
+  "date": "2026-07-21",
+  "ring": "RUST-05",
+  "phase": "verify",
+  "road": "B",
+  "agents_involved": [
+    "t27-creator",
+    "t27-verifier",
+    "t27-experience"
+  ],
+  "issue": "Recurring /loop macro: Wave 7 research and implementation of clade-monitor signal safety and tmp-zero completion.",
+  "problem": "clade-monitor registered SIGTERM/SIGINT via raw unsafe { libc::signal(...) }, which is async-signal-unsafe for application logic. It also wrote atomic-write test fixtures to /tmp and lacked a test-only clippy exemption for expect/unwrap.",
+  "fix": "Replaced raw signal registration with signal-hook::flag::register on an Arc<AtomicBool> plus a watcher thread that propagates the flag to the existing RUNNING static. Added signal-hook dependency. Migrated atomic-write and missing-binary tests to tempfile::tempdir(). Added crate-level test exemption. ASCII-cleaned all touched lines and pre-existing non-ASCII characters in clade-monitor.",
+  "files_changed": [
+    "trios/rings/RUST-05/clade-monitor/Cargo.toml",
+    "trios/rings/RUST-05/clade-monitor/src/main.rs",
+    "trios/.trinity/specs/monitor-signal-hardening.md",
+    "trios/.trinity/wave-loop-007.md",
+    "trios/.claude/skills/panic-hardening/SKILL.md",
+    "trios/.claude/skills/tmp-zero/SKILL.md"
+  ],
+  "tests_added": "No new tests; signal behavior covered by existing daemon semantics, tmp-zero tests migrated.",
+  "verification": "cargo test -p clade-monitor --all-features passed 38 tests; cargo test --workspace --all-features passed; cargo clippy --workspace --all-targets --all-features clean; ./build.sh OK; grep for /tmp in rings/RUST-*/src/main.rs returned zero matches; ASCII scan of changed files clean.",
+  "pattern": "Replace raw libc::signal callbacks with signal-hook atomic flags and a watcher thread; use tempfile for test scratch directories; add test-only clippy exemption before it is needed.",
+  "anti_pattern": "Do not register signal handlers with raw libc::signal for application logic; do not write test fixtures to /tmp; do not skip ASCII scan of the whole changed file.",
+  "tags": [
+    "signal-safety",
+    "signal-hook",
+    "clade-monitor",
+    "tmp-zero",
+    "tempfile",
+    "unsafe-reduction",
+    "test-exemption",
+    "ascii-only",
+    "L1-TRACEABILITY",
+    "L3-PURITY",
+    "L7-UNITY"
+  ],
+  "commit": "9b9c0bed0",
+  "branch": "feat/zai-provider",
+  "skills_saved": [
+    "trios/.claude/skills/panic-hardening/SKILL.md",
+    "trios/.claude/skills/tmp-zero/SKILL.md"
+  ],
+  "next_wave_options": [
+    "seal-automation",
+    "meshd-revival",
+    "cap-std-adoption"
+  ],
+  "closeout_report": "trios/.trinity/wave-loop-007.md"
+}

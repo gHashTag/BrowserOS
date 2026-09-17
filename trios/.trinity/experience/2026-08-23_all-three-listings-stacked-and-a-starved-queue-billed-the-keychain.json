@@ -1,0 +1,55 @@
+{
+  "id": "2026-08-23_all-three-listings-stacked-and-a-starved-queue-billed-the-keychain",
+  "date": "2026-08-23",
+  "ring": "SR-00",
+  "branch": "feat/queen-supervisor",
+  "title": "All three at once: the wiring proved by seam, the listings found stacking beside the reads, and a starved GCD queue billed to the Keychain",
+  "severity": "high",
+  "agent": "Queen",
+  "problem": "Three open threads from previous rounds: the restack guard had no wiring proof, the 286-second securityd block was unidentified, and keychain.queue.starved had never been examined. All three were taken in one round.",
+  "findings": [
+    "WHERE THE BLOCK WAS. keychain.queue.starved fired zero times during the 286s stall. That signal measures how long a dispatched block waits for a GCD slot, so its absence says scheduling was prompt and the wait was inside SecItemCopyMatching. A signal that did not fire is evidence when you know what would have made it fire.",
+    "WHAT QUEUED BEHIND IT. Four keychain.enumeration.stalled at +68.3s, +137.2s, +206.2s and +274.9s - spacing 68.9 / 69.0 / 68.7, the same cooldown cadence as the five reads, on the same service, interleaved with them. Listings and reads were one pile-up through two code paths. The guard written earlier today covered only the reads.",
+    "A STALL THAT WAS NOT ONE. Across 59 starvation events: median slot wait 0.41s, max 7.05s, five longer than the caller's entire two-second deadline. For those five SecItemCopyMatching was never reached, and the timeout path still said 'did not answer in 2s' and armed sixty seconds of refusals.",
+    "keychain.enumeration.stalled had never been examined by any round, despite being in the signal list since it was written.",
+    "make check has two locks on the same resource with opposite policies: the cassette step WAITS for /tmp/trios_harness.lock, check-selftest FAILS on it. That is why a concurrent run sometimes hangs for fifty minutes and sometimes goes red in seconds."
+  ],
+  "fix": "The enumeration path now uses the same KeychainReadStacking decision under its own key, so a stalled listing does not refuse keyed reads of that service. A read whose block waited longer than the whole deadline reports keychain.read.starved_out and arms no cooldown. keychain_restack_wiring_test seeds outstandingReads directly - the field is module-internal for that purpose and says so in its own doc comment - and drives the refusal, the settle, the abandonment that must not latch, and the key separation. wasStarvedOut is a pure decision with four checks.",
+  "files_changed": [
+    "rings/SR-00/KeychainReadStacking.swift",
+    "rings/SR-00/KeychainSecrets.swift",
+    "tests/swift/keychain_read_stacking_test.swift",
+    "tests/swift/keychain_restack_wiring_test.swift",
+    "rings/RUST-02/clade-e2e/src/main.rs",
+    "tools/forensics.py",
+    ".claude/skills/unmeasured-cause/SKILL.md"
+  ],
+  "prevention": [
+    "When you find a defect in one path, grep for the SHAPE rather than the symbol. The enumeration path was a near-copy of the read path and contains the word 'read' nowhere.",
+    "A signal that did not fire is evidence, but only when you can say what would have made it fire. Otherwise absence is just absence.",
+    "A guard against inventing causes can invent one. wasStarvedOut returns false for a nil slot wait because a block that never started recorded nothing, and the tempting reading - 'it must have been starved' - is the same defect wearing the fix's clothes.",
+    "Do not ship a branch and its proof in different rounds. Two of the three new signals had a decision suite and a wiring suite; the third had neither until it was pointed out, in a round about exactly this."
+  ],
+  "proof_status": {
+    "keychain.read.not_restacked": "decision proved (11 checks), wiring proved (8 checks, seeded state), NOT observed live",
+    "keychain.enumeration.not_restacked": "decision proved (shares the same function), wiring proved under its own key, NOT observed live",
+    "keychain.read.starved_out": "decision proved (4 checks), wiring NOT proved, NOT observed live",
+    "why_none_are_live": "The launch window after the release build was healthy - 3 stalls, 3 settles, 0 starvation, 0 enumeration stalls - so none of the three conditions occurred. All three need securityd to be slow or the queue to be saturated in that minute, which a round cannot arrange."
+  },
+  "corrections_to_earlier_claims": [
+    "Previous rounds treated the 286-second block as unexplained. It is still unexplained as to CAUSE, but its LOCATION is now established: inside the Security call, not in GCD scheduling, on the evidence of queue.starved firing zero times in the window.",
+    "I recommended in the previous round that the restack guard was the fix for the pile-up. It was half the fix: the listings were stacking on the same cadence and were not covered."
+  ],
+  "related_episodes": [
+    "2026-08-23_an-untriggerable-branch-has-not-been-checked",
+    "2026-08-23_the-cooldown-paced-the-pileup-it-was-meant-to-prevent"
+  ],
+  "tags": [
+    "unmeasured-cause",
+    "keychain",
+    "enumeration",
+    "gcd-starvation",
+    "test-seam",
+    "not-proven-live"
+  ]
+}

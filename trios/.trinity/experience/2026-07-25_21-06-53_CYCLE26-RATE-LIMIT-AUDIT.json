@@ -1,0 +1,68 @@
+{
+    "episode_id": "cycle26-rate-limit-audit",
+    "title": "Cycle 26: SQLite-backed rate limiting + route audit for local-auth endpoints",
+    "date": "2026-07-25",
+    "law": [
+        "L1",
+        "L2",
+        "L4"
+    ],
+    "tags": [
+        "local-auth",
+        "rate-limiting",
+        "route-audit",
+        "SQLite",
+        "bun:sqlite",
+        "sliding-window",
+        "BrowserOS",
+        "server",
+        "OWASP"
+    ],
+    "summary": "Added durable sliding-window rate limiting and structured route audit events to BrowserOS local-auth endpoints. The limiter reuses the existing SQLite token-family store, so counters survive restarts without adding dependencies. Rate-limit violations return 429 with Retry-After; auth routes now record token issuance, refresh attempts, reuse, and not-found events with the caller socket address.",
+    "weak_spots": [
+        "No rate limiting on GET /auth/local-token",
+        "No rate limiting on POST /auth/refresh",
+        "No route-level audit events for token issuance or refresh usage",
+        "No socket-address tracking on auth endpoints",
+        "Generic 403 for every local-auth failure with no differential signal"
+    ],
+    "competitors": [
+        "OWASP ASVS 5.0 V6.1.1 / V6.3.1 — rate limiting on auth endpoints",
+        "OWASP Bot Management Cheat Sheet — sliding-window, per-IP buckets, generic 429",
+        "@hono-rate-limiter/hono-rate-limiter — in-memory/Redis limiters for Hono"
+    ],
+    "variant_chosen": "B",
+    "variants": {
+        "A": "In-memory per-IP rate limiter (fast, counts reset on restart)",
+        "B": "SQLite-backed sliding-window rate limiter + durable route audit (implemented)",
+        "C": "Redis-backed distributed rate limiter (multi-instance, external deps)"
+    },
+    "files_changed": [
+        "packages/browseros-agent/apps/server/src/api/services/token-family-store.ts",
+        "packages/browseros-agent/apps/server/src/api/services/local-auth-service.ts",
+        "packages/browseros-agent/apps/server/src/api/routes/local-auth.ts",
+        "packages/browseros-agent/apps/server/tests/api/routes/auth-routes.test.ts",
+        "packages/browseros-agent/apps/server/tests/api/routes/agents.test.ts",
+        ".claude/plans/trios-cycle26-local-auth-rate-limit-plan.md",
+        ".claude/plans/trios-cycle26-local-auth-rate-limit-report.md"
+    ],
+    "verification": {
+        "auth_route_tests": "40 pass, 0 fail",
+        "api_group_tests": "245 pass, 0 fail",
+        "full_server_tests": "1119 pass, 1 skip, 3 fail (unrelated pre-existing failures)",
+        "tsc": "clean",
+        "clade_build": "PASS",
+        "clade_audit": "0 findings",
+        "clade_seal": "VALID",
+        "clade_e2e": "PASS",
+        "health": "{\"status\":\"ok\",\"cdpConnected\":true}"
+    },
+    "lessons": [
+        "Sliding-window rate limiting is the right algorithm for auth endpoints because it prevents burst abuse at window boundaries.",
+        "Reusing the existing SQLite store for rate-limit counters keeps the dependency graph unchanged and makes counters durable across restarts.",
+        "Single-row upserts per IP are simpler and sufficient for a single-server loopback surface; no need for a separate window table.",
+        "Route-level audit events should be recorded near the HTTP boundary, separate from family-lifecycle audit, to preserve operator signals.",
+        "Tests that construct stores with default paths can silently write to the production database; always use :memory: in unit tests.",
+        "When auth requirements change, agent-route tests that POST without the required header are the first to break; keep test helpers explicit."
+    ]
+}

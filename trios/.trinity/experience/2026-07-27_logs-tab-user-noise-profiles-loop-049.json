@@ -1,0 +1,24 @@
+{
+  "date": "2026-07-27",
+  "title": "LOGS Tab User-Configurable Noise Profiles — Cycle 49",
+  "cycle": 49,
+  "ring": "SR-02 / BR-OUTPUT",
+  "agents": "claude",
+  "road": "B",
+  "problem": "Cycle 48's Quiet toggle used a hard-coded LogNoiseFilter. Users could not see which patterns were suppressed, disable individual patterns, or add their own. This lack of transparency and control was the main UX gap versus Datadog/Loki/Splunk.",
+  "root_cause": "Noise rules were a private static tuple array inside LogNoiseFilter with no persistence layer and no UI affordance for discovery or editing.",
+  "fix": "Introduced LogNoiseRule (Codable/Equatable/Identifiable/Sendable) and LogNoiseProfile (customRules merged with built-in defaults). Added LogNoiseProfileStore actor persisting to .trinity/state/logs_noise_profile.json. Refactored LogNoiseFilter to evaluate a profile. Added LogNoisePatternProposer that derives a rule from a ParsedLogLine (event > message phrase > raw substring), rejecting overly broad tokens. Wired the profile into LogsTabView state and into LogParser.filterNoise/unifiedLines. Added a 'Rules' button next to the Quiet toggle, a context menu on every log row ('Hide events like this'), and a NoiseProfileSheet with inline rule editor, preview card showing match count, and manual add-rule form. Extended LogsTabViewTests with custom-rule, store, proposer, and profile-filter tests.",
+  "files": [
+    "trios/rings/SR-02/LogParser.swift",
+    "trios/BR-OUTPUT/LogsTabView.swift",
+    "trios/tests/TriOSKitTests/LogsTabViewTests.swift",
+    "trios/.claude/plans/trios-cycle49-user-noise-profiles.md",
+    "trios/.claude/plans/trios-cycle49-user-noise-profiles-report.md"
+  ],
+  "tests": "./build.sh PASS (one retry hit an unrelated ChatViewModel.swift modification race); cargo run --bin clade-build PASS; cargo run --bin clade-e2e PASS; TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-audit PASS (0 findings across 8 checks); cargo run --bin clade-seal SEAL VALID; cargo test -p trios-mesh PASS (101 tests); open trios.app relaunched, menu-bar logo preserved.",
+  "next_options": [
+    "Noise rule telemetry and suggestions — aggregate which custom rules users create most often and periodically propose new built-in defaults, closing the feedback loop between user behavior and default filter quality.",
+    "Per-source noise profiles — add sourceID/LogParserKind scoping to LogNoiseRule and a source picker in the sheet, because companion logs and queen logs have different definitions of noise.",
+    "Import/export and sharing — add Import/Export buttons to the sheet so users can share profiles or load a runbook-generated filter set, with a JSON schema version field."
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "timestamp": "2026-07-24T09:20:49Z",
+  "task_id": "TRIOS-PORTABLE-LAND-001",
+  "claim_id": "989F8151-6640-44B4-AFE1-FEEB17078EF2",
+  "action": "scoped_feature_closeout_commit",
+  "result": "PASS",
+  "evidence": {
+    "commit": "def368fc98eec80a6c6617d32b06df1690f883ac",
+    "facts": [
+      "The commit contains exactly the 30 audited files.",
+      "Pre-commit and conventional commit-message hooks passed.",
+      "The feature branch is now 161 commits ahead of dev.",
+      "dev remains a direct ancestor, so --ff-only is valid.",
+      "Foreign dirty files remain unstaged in the original worktree."
+    ]
+  },
+  "residual_risks": [
+    "Local dev has not yet moved to the feature tip.",
+    "Merged-dev verification remains required.",
+    "No push was requested or performed."
+  ]
+}

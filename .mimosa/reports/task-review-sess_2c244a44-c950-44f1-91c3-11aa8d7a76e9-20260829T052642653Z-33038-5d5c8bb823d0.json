@@ -1,0 +1,219 @@
+{
+  "schema_version": "mimosa-task-review/v2",
+  "run_id": "20260829T052642653Z-33038-5d5c8bb823d0",
+  "run_status": "inconclusive",
+  "errors": [
+    {
+      "stage": "bash-discovery",
+      "target": "trios/.worktrees/prod/queen-5002/trios/agent-server/apps/agent/entrypoints/app/ai-settings/ProviderTemplatesSection.tsx",
+      "reason": "bash_discovery_incomplete: project enumeration exceeded 5000 reviewable files"
+    },
+    {
+      "stage": "baseline",
+      "target": "trios/.worktrees/prod/queen-5002/trios/agent-server/apps/agent/entrypoints/app/ai-settings/ProviderTemplatesSection.tsx",
+      "reason": "baseline_partial: baseline exceeded 5000 candidate files"
+    },
+    {
+      "stage": "scan",
+      "target": "trios/build.sh",
+      "reason": "scanner_failed: spawnSync /Users/playra/.nvm/versions/node/v22.22.0/bin/node ETIMEDOUT"
+    },
+    {
+      "stage": "scan",
+      "target": "trios/agent-server/apps/server/src/main.ts",
+      "reason": "scanner_failed: spawnSync /Users/playra/.nvm/versions/node/v22.22.0/bin/node ETIMEDOUT"
+    }
+  ],
+  "coverage": {
+    "schema_version": "mimosa-hook-coverage/v1",
+    "status": "partial",
+    "scope": "hook_observed_diff",
+    "baseline": {
+      "complete": false,
+      "captured_files": 5000,
+      "candidate_limit": 5000,
+      "truncated": true,
+      "enumeration_error_count": 0,
+      "snapshot_error_count": 0,
+      "compensated_target_count": 2
+    },
+    "change_tracking": {
+      "touched_observed": 0,
+      "touched_retained": 0,
+      "truncated": false,
+      "bash_mutation": true,
+      "bash_discovered": 2,
+      "bash_discovery_limit": 80,
+      "bash_discovery_truncated": false
+    },
+    "candidates": {
+      "eligible_files": 2,
+      "selected_files": 2,
+      "limit": 20,
+      "truncated": false
+    },
+    "scanning": {
+      "required_files": 2,
+      "scanned_files": 0,
+      "skipped_files": 0,
+      "failed_files": 2,
+      "project_checks_required": 0,
+      "project_checks_completed": 0
+    },
+    "notification": {
+      "eligible_findings": 0,
+      "detailed_findings": 0,
+      "detail_limit": 3,
+      "truncated": false
+    },
+    "reason_counts": {
+      "bash_discovery_incomplete": 1,
+      "baseline_partial": 1,
+      "scanner_failed": 2,
+      "project_check_failed": 4
+    },
+    "reasons": [
+      {
+        "code": "bash_discovery_incomplete",
+        "stage": "bash-discovery",
+        "target": "trios/.worktrees/prod/queen-5002/trios/agent-server/apps/agent/entrypoints/app/ai-settings/ProviderTemplatesSection.tsx",
+        "detail": "project enumeration exceeded 5000 reviewable files",
+        "affects_completion": true
+      },
+      {
+        "code": "baseline_partial",
+        "stage": "baseline",
+        "target": "trios/.worktrees/prod/queen-5002/trios/agent-server/apps/agent/entrypoints/app/ai-settings/ProviderTemplatesSection.tsx",
+        "detail": "baseline exceeded 5000 candidate files",
+        "affects_completion": true
+      },
+      {
+        "code": "scanner_failed",
+        "stage": "scan",
+        "target": "trios/build.sh",
+        "detail": "spawnSync /Users/playra/.nvm/versions/node/v22.22.0/bin/node ETIMEDOUT",
+        "affects_completion": true
+      },
+      {
+        "code": "scanner_failed",
+        "stage": "scan",
+        "target": "trios/agent-server/apps/server/src/main.ts",
+        "detail": "spawnSync /Users/playra/.nvm/versions/node/v22.22.0/bin/node ETIMEDOUT",
+        "affects_completion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "bash-discovery",
+        "target": "trios/.worktrees/prod/queen-5002/trios/agent-server/apps/agent/entrypoints/app/ai-settings/ProviderTemplatesSection.tsx",
+        "detail": "bash_discovery_incomplete: project enumeration exceeded 5000 reviewable files",
+        "affects_completion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "baseline",
+        "target": "trios/.worktrees/prod/queen-5002/trios/agent-server/apps/agent/entrypoints/app/ai-settings/ProviderTemplatesSection.tsx",
+        "detail": "baseline_partial: baseline exceeded 5000 candidate files",
+        "affects_completion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "scan",
+        "target": "trios/build.sh",
+        "detail": "scanner_failed: spawnSync /Users/playra/.nvm/versions/node/v22.22.0/bin/node ETIMEDOUT",
+        "affects_completion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "scan",
+        "target": "trios/agent-server/apps/server/src/main.ts",
+        "detail": "scanner_failed: spawnSync /Users/playra/.nvm/versions/node/v22.22.0/bin/node ETIMEDOUT",
+        "affects_completion": true
+      }
+    ],
+    "reasons_truncated": false
+  },
+  "generated_at": "2026-08-29T05:26:42.653Z",
+  "session_id": "sess_2c244a44-c950-44f1-91c3-11aa8d7a76e9",
+  "target": ".",
+  "revision": "c41852c3cf0b43801eccafce083c8aef75e2a633",
+  "rules_version": "unavailable",
+  "diff_hash": "f2d3be60e398396d362af407d08be93ca306d6f1fa65a721a45bad8c33a1d1a4",
+  "diff": {
+    "algorithm": "sha256",
+    "changed_file_count": 2,
+    "changed_files": [
+      {
+        "file": "trios/agent-server/apps/server/src/main.ts",
+        "ranges": [
+          {
+            "start": 17,
+            "end": 350
+          }
+        ],
+        "before_hash": "01f564ea61af2c1c7c5a98ef883a361e647ce0feb110b006ce5c278774436595",
+        "after_hash": "09187457804b4e5b9cbfecc529ea38a7c29154a0aa5626d15bd6af93441ed09f"
+      },
+      {
+        "file": "trios/build.sh",
+        "ranges": [
+          {
+            "start": 909,
+            "end": 940
+          }
+        ],
+        "before_hash": "f4b7e3a9d9b56b2f02064b3c71b7bf54f7af3c49c23cdf7aca4af5d89950cfbd",
+        "after_hash": "bed666477b74d3deb666ae1438eef3bbbad832ac907374bcbddfc3879420da1e"
+      }
+    ]
+  },
+  "timing": {
+    "started_at": "2026-08-29T05:26:39.252Z",
+    "completed_at": "2026-08-29T05:26:42.653Z",
+    "duration_ms": 3401,
+    "measurement": "hook_wall_clock"
+  },
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "total": 0,
+    "model_calls": 0,
+    "measurement": "known-zero"
+  },
+  "telemetry": {
+    "schemaVersion": "mimosa-gate-telemetry/v1",
+    "profile": "gate",
+    "operation": "Stop",
+    "outcome": "partial/INCONCLUSIVE",
+    "latencyMs": 3401,
+    "peakMemoryBytes": 130514944,
+    "memoryMeasurement": "max-observed-process-rss",
+    "scannedFiles": 0,
+    "cache": {
+      "hits": 0,
+      "misses": 0,
+      "measurement": "not-applicable"
+    },
+    "denyCount": 0,
+    "tokens": {
+      "input": 0,
+      "output": 0,
+      "total": 0,
+      "modelCalls": 0,
+      "measurement": "known-zero"
+    }
+  },
+  "finding_count": 0,
+  "rewake_finding_count": 0,
+  "evidence_boundary": {
+    "scan": "candidate",
+    "static_fix_verification": "observed_static_only",
+    "runtime_verification": "not_performed"
+  },
+  "finding_events": [],
+  "findings": [],
+  "artifacts": {
+    "immutable_report": ".mimosa/reports/task-review-sess_2c244a44-c950-44f1-91c3-11aa8d7a76e9-20260829T052642653Z-33038-5d5c8bb823d0.json",
+    "latest_report": ".mimosa/reports/task-review-sess_2c244a44-c950-44f1-91c3-11aa8d7a76e9.json",
+    "history_summary": ".mimosa/history/run-20260829T052642653Z-33038-5d5c8bb823d0.json"
+  }
+}

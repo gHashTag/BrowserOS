@@ -1,0 +1,26 @@
+{
+  "date": "2026-07-27",
+  "title": "Pre-send Routing by Output Budget — Cycle 33 Closure",
+  "ring": "SR-00 / SR-02",
+  "agents": "claude",
+  "road": "B",
+  "problem": "Cycle 32 added a user-configurable per-send output-token budget clamped to the current model's effective (learned/advertised) output ceiling, but the router still made pre-send decisions based primarily on context-window fit. When the user requested an output budget larger than the current model's ceiling, TriOS silently clamped the budget instead of proactively switching to a healthy candidate model that could honor the full budget.",
+  "root_cause": "resolveContextRoutingDecision only considered whether the estimated input + clamped output fit the current model's context window. It never compared the raw user-requested output budget against the current model's maxOutputTokens, and there was no candidate filter that prioritized output ceiling over context window. ChatViewModel's routing label was generic ('routed to X') so users could not see why a switch happened.",
+  "fix": "Added an output-budget routing phase to resolveContextRoutingDecision: when the current model's context window fits but the raw requested output budget exceeds its effective maxOutputTokens, the router now calls contextService.largerOutputCandidates(...) to find candidates whose effective output ceiling >= the requested budget and that still fit the estimated input within the safety margin. Candidates are sorted by output ceiling descending, then context window descending, then stable provider/model order. If no candidate qualifies, the decision falls back to .useCurrent and the existing clamping applies. Added explicit lastContextRoutingReason strings ('routed to X for output budget ...' and 'routed to X for context window ...') so ChatViewModel and ModelsTabView can display the cause. Updated ChatViewModel's .routeTo branch to use the store's recorded reason for the routing label. Extended ChatRequestSizerTests with effectiveOutputCeiling exposure and isOutputBudgetSaturated coverage, and added ModelConfigurationStoreCrossProviderTests proving output-budget routing switches provider/model and that an empty candidate list keeps the current model.",
+  "files": [
+    "trios/rings/SR-00/ModelContextService.swift",
+    "trios/rings/SR-00/ModelConfigurationStore.swift",
+    "trios/rings/SR-02/ChatViewModel.swift",
+    "trios/tests/TriOSKitTests/ChatRequestSizerTests.swift",
+    "trios/tests/TriOSKitTests/ModelConfigurationStoreCrossProviderTests.swift",
+    "trios/.claude/plans/trios-cycle33-pre-send-routing-by-output-budget-report.md",
+    "trios/.trinity/experience/2026-07-27_pre-send-routing-by-output-budget-loop-033.json"
+  ],
+  "tests": "TRIOS_SKIP_CHAT_E2E=1 ./build.sh PASS; cargo test -p trios-mesh PASS (101 tests); TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-build PASS; TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-audit PASS (0 hard-gate findings); TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-seal SEAL VALID; TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-e2e FAIL only because BrowserOS Server 127.0.0.1:9105/health is down (external dependency, CDP/Postgres not available). trios.app could not be relaunched from the agent shell session (no Aqua/GUI access); the previously running process was stopped by the rebuild and the user should relaunch with `open trios.app` to restore the menu-bar logo. (swift test unavailable in CommandLineTools-only environment.)",
+  "next_options": [
+    "Per-conversation output budget pinning — let each conversation thread remember its own requestedOutputTokens and context-window margin, overriding the global default only for that thread.",
+    "Live output-budget progress bar — add a streaming indicator showing consumed output tokens vs. the effective budget/ceiling with color bands, and surface approaching-limit warnings before the watchdog pauses.",
+    "Output-budget-aware model badges — in ModelsTabView, mark models whose effective maxOutputTokens can satisfy the current requested output budget with a 'satisfies budget' badge so users know which models honor their chosen cap."
+  ],
+  "claim": null
+}

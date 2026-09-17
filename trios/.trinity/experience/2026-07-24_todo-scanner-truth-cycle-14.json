@@ -1,0 +1,53 @@
+{
+  "id": "2026-07-24_todo-scanner-truth-cycle-14",
+  "title": "TODO scanner hardening makes clade-audit actionable",
+  "date": "2026-07-24",
+  "cycle": 14,
+  "tags": [
+    "clade-audit",
+    "self-critic",
+    "rust",
+    "regex",
+    "TODO",
+    "false-positives",
+    "verification"
+  ],
+  "problem": "After Cycle 13 made the hard gates truthful (Swift build, security, shell safety, error handling, dead code, retain cycles at zero), the TODO/FIXME inventory scanner was still emitting ~633 findings. The vast majority were false positives from substring keyword matching inside identifiers (Debug -> BUG, warning -> WARN, TODOItem -> TODO), matches inside markdown prose/tables, and scanning of planning docs, agent templates, and archived experiments.",
+  "solution": "Rewrote the TODO scanner in rings/RUST-12/clade-audit/src/main.rs with three hardening slices: (1) should_skip_todo_path() excludes non-runtime docs/archives/agent/skill templates; (2) code_todo_match() requires comment markers and word boundaries for Swift/Rust files; (3) markdown_todo_match() only matches headings or task checkboxes. Also routed todo_check() through scannable_content() so the auditor's own source is skipped and Rust test modules are truncated.",
+  "result": "TODO inventory dropped from ~633 to exactly 1 real finding (ChatViewModel.swift:474). Build, cargo test, cargo clippy, clade-e2e, and trios.app health all pass.",
+  "files_changed": [
+    "rings/RUST-12/clade-audit/src/main.rs",
+    ".claude/plans/trios-todo-scanner-truth-cycle-14.md",
+    ".claude/plans/trios-todo-scanner-truth-cycle-14-report.md"
+  ],
+  "metrics": {
+    "todo_findings_before": 633,
+    "todo_findings_after": 1,
+    "false_positives_removed": 632,
+    "hard_gate_findings": 0,
+    "build_status": "pass",
+    "e2e_status": "pass"
+  },
+  "learnings": [
+    "Substring keyword regexes on source code are almost always false-positive factories. Always anchor to comment markers and require word boundaries.",
+    "Markdown TODO checks must distinguish prose from explicit task items (- [ ] TODO:) and headings. Tables and inline lists otherwise drown the signal.",
+    "Reusing the existing scannable_content() helper kept the auditor from flagging its own test fixtures and test modules — a single point of reuse fixed an entire category of noise.",
+    "The noisiest gate often dominates the user experience of a self-critic dashboard. Cleaning it up is high leverage because it restores trust in the whole audit output."
+  ],
+  "mistakes": [
+    "First iteration still left matches in clade-audit's own source because todo_check() was not using scannable_content(). Always run the audit after changing the auditor and inspect self-matches.",
+    "Initial markdown matcher was too permissive and kept a handful of false positives in trios-mesh/smoke/*.md and INSTALL_TODO.md. Path exclusions fixed the tail, but a stricter content-type matcher would have removed them naturally."
+  ],
+  "next_options": [
+    "Option 1: Mechanical @Published default pass to clear the 43 Concurrency warnings.",
+    "Option 2 (recommended): Build clade-seal ring that enforces the truthful gates as a promotion precondition.",
+    "Option 3: Add local human authorization before Queen creates A2A agents/skills, directly addressing the AgentForger/BioShocking competitor risks."
+  ],
+  "competitor_signals": [
+    "OpenAI AgentForger (July 23 2026): one tampered chatgpt.com/agents/studio/new link could spawn a rogue autonomous agent under the victim's identity, reuse enterprise connectors, and run every 5 minutes.",
+    "BioShocking (July 2026): a malicious web page convinced multiple AI browsers (OpenAI Atlas, Perplexity Comet, Anthropic Claude extension, Fellou, Genspark, Sigma) to drop guardrails and exfiltrate GitHub SSH credentials.",
+    "Perplexity Comet Trail of Bits red-team (Feb 2026): four prompt-injection paths exfiltrated Gmail via fake CAPTCHA, fragments, and policy-update pages.",
+    "Dia Browser CVE-2025-13132 and XPIA research: UI-layer spoofing and XSS via agentic browser surfaces."
+  ],
+  "recommended_next": "Option 2 — create clade-seal promotion gate based on the now-truthful audit output."
+}

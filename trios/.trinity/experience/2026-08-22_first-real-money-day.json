@@ -1,0 +1,52 @@
+{
+  "id": "2026-08-22_first-real-money-day",
+  "date": "2026-08-22",
+  "ring": "SR-00, SR-02, agent-server",
+  "branch": "feat/queen-supervisor",
+  "title": "The first day tokens were real: the spend pipeline came alive and immediately found its own holes",
+  "severity": "high",
+  "mnl_stage": "L",
+  "agent": "Queen supervisor (night cycle)",
+
+  "problem": "Usage emission went live and every layer downstream met real numbers for the first time: queen.worker.expensive fired for the first time in its existence, the $10/day SwarmBudget could finally trip, and within hours the measurements exposed holes that zeros had hidden for months.",
+
+  "findings": [
+    "The budget gate covered only NEW dispatches: the review sweep's send-back restarted workers past it, burning $7.60 of the first real-money day through an ungated path. A gate that exists somewhere was quoted as if it covered every path.",
+    "chat-probe printed 'key: MISSING' while the running app held the key - the probe never read TRIOS_<PROVIDER>_API_KEY from the environment at all, only as a JSON key inside config files whose values are the documented zero-length trap.",
+    "keychain.read.settled overturned the never-returns theory within a day of existing: every orphaned securityd call settled with OSStatus 0, in 9.8 to 215.6 seconds. Slow, never broken. The late-settle cache (one-shot per key, clears the cooldown) turned those tails into served answers - keychain.read.served_late fired on every subsequent launch.",
+    "Command-surface topology, measured by refusals: bare /cancel on awaitingReview is illegal (the shape is /review reject THEN /cancel); FAILED records are invisible to every command because task(forIssue:) hides terminal states - the legal (.failed,.cancelled) transition had no driver until /dismiss was built for exactly that.",
+    "The preservation pattern haunted itself: parked commits on a cancelled-with-reason record raised urgent unrecordedWork one pass later, because the checker could not see that the cancel reason and archive stamp ARE the record of the looking. recordArchived now gates unrecordedWork alongside branchMissing/commitMissing.",
+    "The SDK clash with the shared trinity checkout recurred and got its automated repair: a 2s typecheck probe in build.sh catches the exact cannot-load-module signature, wipes and rebuilds QueenUILib with the current toolchain - the manual repair, automated, engaging only on its own signature.",
+    "Two self-inflicted false gates in one night: editing a source file while my own make check compiled it, and running make check from the wrong cwd (instant 'No rule to make target' that tail-reads as a completed gate). Both are now written into agent-safe-build: anchor the cd, and a gate that finished in under a minute did not run."
+  ],
+
+  "fix": "Send-back budget gate (defers on an exhausted day, same shape as the slot deferral; operator rejects stay ungated). Probe env-first key resolution plus usage-frame printing, making a probe run the wire proof. Late-settle cache serving stalled calls' answers. /dismiss command driving failed->cancelled for looked-at failures with a mandatory reason. recordArchived gating for unrecordedWork. QueenUILib toolchain probe with auto-repair in build.sh. make spend budget line with EXHAUSTED marker.",
+
+  "prevention": [
+    "When citing a protection, name the exact call sites it stands on and grep for the paths it does not cover - the gate being real says nothing about its coverage.",
+    "Measure the clock before declaring silence; measure a settlement before declaring never-returns; measure which record a lookup resolves before scripting a command against it.",
+    "New telemetry pays for itself within hours: expensive, settled, served_late and the EXHAUSTED marker each converted a standing guess into a measurement on their first day.",
+    "The wire proofs of the day, quotable: 'usage: 18308 in / 45 out tokens (usage SSE frame received)'; '#74 is red only on administrative check(s) (cla)'; 'Dismissed a failed record of gHashTag/trios#1132'; four archive stamps in one sweep pass and silence after."
+  ],
+
+  "corrections_to_earlier_claims": [
+    "I reported 'the orphaned keychain calls never return'. Measured wrong the moment settlement logging existed: they return, successfully, up to 215.6 seconds late.",
+    "Two false alarms of app death were misread wall clocks, both within one night."
+  ],
+
+  "related_episodes": [
+    "2026-08-21_release-wave-encryption-heals-itself",
+    "2026-08-21_unmeasured-cause-and-the-bricked-queen-chat"
+  ],
+
+  "tags": [
+    "spend-pipeline",
+    "swarm-budget",
+    "keychain-settle",
+    "dismiss-command",
+    "reconcile",
+    "sdk-clash-auto-repair",
+    "unmeasured-cause",
+    "first-real-money-day"
+  ]
+}

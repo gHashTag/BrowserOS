@@ -1,0 +1,23 @@
+{
+  "task_id": "CHAT-TIMELINE-001",
+  "claim_id": "85C0490B-1652-49BA-8BCC-CC2058C238C6",
+  "timestamp": "2026-07-22T10:34:32Z",
+  "action": "build_verify_learn",
+  "result": "clean",
+  "problem": "Assistant rendering flattened text and tool calls into separate collections and always displayed complete message content before every tool card, losing the event order seen during streaming.",
+  "solution": "Text chunks and tool starts now create persistent timeline segments. Rendering resolves tool references in place, so preamble, reasoning, tools, results, and final text remain chronological. Legacy messages without references use reasoning, tools, then final answer. Production builds also ignore untracked and unintegrated BR-OUTPUT prototypes instead of allowing drafts to break the app.",
+  "verification": {
+    "timeline_tests": "PASS",
+    "segment_codec": "PASS",
+    "swift_build": "PASS",
+    "compiled_swift_files": 68,
+    "code_signature": "PASS",
+    "live_health": {"status": "ok", "cdpConnected": true},
+    "ascii_audit": "PASS",
+    "diff_check": "PASS",
+    "build_script_syntax": "PASS",
+    "app_relaunch": "PASS",
+    "visual_capture": "/private/tmp/trios-assistant-timeline.png"
+  },
+  "lesson": "A streamed assistant turn is an ordered event log, not a text field plus side collections. Persisting lightweight references preserves chronology while allowing tool cards to update their results in place. Production discovery must not compile arbitrary unregistered prototypes."
+}

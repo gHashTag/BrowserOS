@@ -1,0 +1,75 @@
+{
+  "wave": "WAVE-066",
+  "date": "2026-07-29",
+  "domain": "Queen capability surface and pre-mortem supervision",
+  "status": "PARTIAL",
+  "summary": "Skills became a managed resource with their own tab, cost became money, worker traces nest under the Queen's, and an observer reads a bee while it is still running.",
+  "defects_found": [
+    {
+      "id": "W1",
+      "title": "The Queen could reach 4 of 26 skills",
+      "cause": "knownSkills was a hardcoded Set in QueenStatusViewModel; a SKILL.md did nothing until someone edited Swift.",
+      "fix": "SkillCatalog reads .claude/skills, .trinity/skills and ~/.claude/skills; the parser hands any unrecognised slash command to SkillStore, which refuses it if no such skill exists.",
+      "lesson": "A registry that must be edited in code to grow is not a registry. The parser cannot know what exists at runtime, so it should pass the name on rather than gatekeep from a literal."
+    },
+    {
+      "id": "W2",
+      "title": "No way to see or limit what she can run",
+      "fix": "SkillsTabView at Cmd+4: per-skill toggle, search, source filter, run with output, reveal in Finder. Disabled state persists to .trinity/state/queen_skills.json and is enforced for the Queen too."
+    },
+    {
+      "id": "W3",
+      "title": "Cost only in tokens",
+      "fix": "ModelPricing longest-prefix table, estimatedCostUSD on the task, SwarmBudget daily ceiling that declines to START new work rather than killing running work.",
+      "lesson": "An unpriced model must report nil, not an average. Inventing a figure is how a cheap run gets cancelled as expensive."
+    },
+    {
+      "id": "W4",
+      "title": "Flat traces",
+      "fix": "Stable traceId per issue and spanId per worker conversation, hashed from ids already in the record so nothing extra has to stay in sync."
+    },
+    {
+      "id": "W5",
+      "title": "Supervision was entirely post-mortem",
+      "fix": "QueenObserver evaluates the live transcript for looping, spinning, out-of-bounds writes and overspending; each concern is announced once per task.",
+      "lesson": "Written as a pure function over the transcript, not a second agent: these patterns are mechanical, and a mechanical check cannot hallucinate the way the thing it watches can."
+    },
+    {
+      "id": "W6",
+      "title": "Skill descriptions were garbage for files without frontmatter",
+      "cause": "The fallback took the first non-heading line, which for two skills was a bullet from the middle of a list.",
+      "fix": "Prefer the document's own H1 - the author's summary - over whatever happened to be at the top."
+    }
+  ],
+  "verification": {
+    "chat_e2e": "144 ok, 0 not ok",
+    "visual": "Skills tab lists 26 skills with descriptions and source badges; toggling /ascii-lint off moved the counter to 25 of 26, dimmed the row, and persisted to disk; /skills in the Queen chat listed all 26 with the disabled one marked off",
+    "banner": "spend now reads '1 tool' rather than '0 tokens, 1 tools'"
+  },
+  "not_done": [
+    "No commit: the working tree still carries unrelated in-flight work from earlier sessions.",
+    "The observer's concerns were not triggered on a live worker - no bee looped or went out of bounds during verification.",
+    "The OTLP exporter and its nested trace ids were not exercised against a live collector.",
+    "Skill arguments and per-skill timeouts are not editable in the tab."
+  ],
+  "files": [
+    "rings/SR-00/SkillCatalog.swift",
+    "rings/SR-00/ModelPricing.swift",
+    "rings/SR-00/QueenObserver.swift",
+    "rings/SR-00/QueenDelegation.swift",
+    "rings/SR-00/QueenReviewDigest.swift",
+    "rings/SR-00/Trinity999TabMap.swift",
+    "rings/SR-01/SkillStore.swift",
+    "rings/SR-01/TriosOTLPExporter.swift",
+    "rings/SR-02/QueenCommandParser.swift",
+    "rings/SR-02/QueenDelegationRegistry.swift",
+    "rings/SR-02/QueenWorkerRunner.swift",
+    "rings/SR-02/QueenReviewScheduler.swift",
+    "rings/SR-02/ChatViewModel.swift",
+    "BR-OUTPUT/SkillsTabView.swift",
+    "BR-OUTPUT/QueenTaskStatusView.swift",
+    "BR-OUTPUT/QueenTabView.swift",
+    "BR-OUTPUT/QueenStatusViewModel.swift",
+    "build.sh"
+  ]
+}

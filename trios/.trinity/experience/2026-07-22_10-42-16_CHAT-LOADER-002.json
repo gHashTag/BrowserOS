@@ -1,0 +1,21 @@
+{
+  "task_id": "CHAT-LOADER-002",
+  "claim_id": "9B1D0223-6D68-4D84-896A-52F246AB46EF",
+  "timestamp": "2026-07-22T10:42:16Z",
+  "action": "build_verify_learn",
+  "result": "clean",
+  "problem": "An empty streaming assistant message rendered an inline typing indicator while ChatPanelView simultaneously rendered the centered response indicator, producing two identical loading states for one response.",
+  "solution": "Made the chat-level indicator the single loading surface, removed the assistant-bubble indicator, and suppressed empty streaming assistant bubbles until timeline content arrives.",
+  "verification": {
+    "loading_layout_test": "PASS",
+    "swift_build": "PASS",
+    "compiled_swift_files": 68,
+    "code_signature": "PASS",
+    "live_health": {"status": "ok", "cdpConnected": true},
+    "ascii_audit": "PASS",
+    "diff_check": "PASS",
+    "app_relaunch": "PASS",
+    "pid": 89293
+  },
+  "lesson": "A response needs one progress owner. Empty streaming message models should not create a second visual state when the conversation already owns loading feedback."
+}

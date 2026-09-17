@@ -1,0 +1,34 @@
+{
+  "timestamp": "2026-07-24T07:59:09Z",
+  "task_id": "TRIOS-PORTABLE-LAND-001",
+  "claim_id": "989F8151-6640-44B4-AFE1-FEEB17078EF2",
+  "action": "premerge_runtime_and_visual_e2e",
+  "result": "PASS_WITH_CONCERNS",
+  "evidence": {
+    "commands": [
+      "open /Users/playra/BrowserOS-full/trios/trios.app",
+      "curl --fail --silent --show-error http://127.0.0.1:9105/health",
+      "bash e2e/trios_e2e_flow.sh"
+    ],
+    "exit_codes": [0, 0, 0],
+    "artifact": "/Users/playra/BrowserOS-full/trios/trios.app",
+    "process_id": 58983,
+    "report": "/tmp/trios_e2e/report_1784879898.md",
+    "screenshot": "/tmp/trios_e2e/screenshot_1784879898.png",
+    "facts": [
+      "The exact freshly rebuilt application bundle launched.",
+      "No SecurityAgent prompt was present.",
+      "Health returned status ok with cdpConnected true.",
+      "The screenshot shows a coherent Chat window, Online state, BrowserOS connected state, task history, planner card, and message composer without visible overlap or black rendering defects."
+    ],
+    "warnings": [
+      "The last-five-minute system log contains an NSURLErrorDomain connection-refused event for an optional local endpoint.",
+      "A desktop notification partially covers the top-right screenshot region but is outside the TriOS window."
+    ]
+  },
+  "residual_risks": [
+    "The optional local endpoint behind the connection-refused event was not identified.",
+    "The legacy E2E script reports health failures in Markdown instead of failing the process.",
+    "Clean-machine source installation remains unreproducible with published dependencies."
+  ]
+}

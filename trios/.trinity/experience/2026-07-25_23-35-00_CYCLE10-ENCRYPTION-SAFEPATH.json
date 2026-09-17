@@ -1,0 +1,65 @@
+{
+  "title": "Runtime Data-at-Rest Encryption + SafeFilePath Hardening",
+  "cycle": 10,
+  "date": "2026-07-25",
+  "ring": "trios/rings/SR-00 + SR-01 + SR-02 + BR-OUTPUT",
+  "agents": ["claude"],
+  "road": "B",
+  "problem": "After Cycle 9, Hotkey analytics JSON was still plaintext on disk and dropped chat images were persisted without SafeFilePath validation or encryption. ConversationEncryption was a hard-coded singleton with no reusable helper, and clade-audit's build gate used an incomplete swiftc -typecheck that missed the QueenUILib dependency and untracked BR-OUTPUT prototypes.",
+  "root_cause": "No shared AES-256-GCM primitive existed for runtime stores. HotkeyAnalytics flushed usage_*.json plaintext. ChatAttachmentImporter wrote directly to Application Support without validating the destination. The audit scanner treated E2E 'error:' logs as build failures and did not skip .worktrees or honor AGENT-V-WAIVER markers.",
+  "fix": "Created TriOSEncryption helper with named per-purpose keys in Application Support/trios/keys. Refactored ConversationEncryption to delegate to it while preserving the legacy conversation.key location. Encrypted HotkeyAnalytics flush/load with legacy plaintext migration. Added SafeFilePath validation and 0o700 + excluded-from-backup directory setup to ChatAttachmentImporter. Hardened clade-audit to run ./build.sh, skip .worktrees/.build/target/.git, and honor AGENT-V-WAIVER markers. Added TriOSEncryptionTests, ConversationEncryptionTests, ChatAttachmentImporterSafePathTests, and HotkeyAnalyticsEncryptionTests.",
+  "files": [
+    "trios/rings/SR-00/TriOSEncryption.swift",
+    "trios/rings/SR-02/ConversationEncryption.swift",
+    "trios/BR-OUTPUT/HotkeyAnalytics.swift",
+    "trios/rings/SR-01/ChatAttachmentImporter.swift",
+    "trios/rings/RUST-12/clade-audit/src/main.rs",
+    "trios/tests/TriOSKitTests/TriOSEncryptionTests.swift",
+    "trios/tests/TriOSKitTests/ConversationEncryptionTests.swift",
+    "trios/tests/TriOSKitTests/ChatAttachmentImporterSafePathTests.swift",
+    "trios/tests/TriOSKitTests/HotkeyAnalyticsEncryptionTests.swift",
+    ".claude/plans/trios-cycle10-encryption-safepath-plan.md",
+    ".claude/plans/trios-cycle10-encryption-safepath-report.md"
+  ],
+  "tests": {
+    "build_sh": "PASS",
+    "cargo_clade_build": "PASS",
+    "cargo_clade_audit": "0 hard-gate findings",
+    "cargo_clade_seal": "SEAL VALID",
+    "cargo_clade_e2e": "PASS",
+    "cargo_clippy_workspace": "PASS",
+    "trios_app_relaunch": "ok",
+    "health_check": "{\"status\":\"ok\",\"cdpConnected\":true}"
+  },
+  "variants": [
+    {
+      "name": "A - minimal encryption coverage",
+      "selected": false,
+      "summary": "Use TriOSEncryption only for ConversationPersister and HotkeyAnalytics; skip attachment SafeFilePath and encryption. Fast but leaves dropped-image weak spot open."
+    },
+    {
+      "name": "B - balanced runtime encryption + SafeFilePath",
+      "selected": true,
+      "summary": "Shared encryption helper, encrypted analytics with legacy migration, SafeFilePath validation for attachments, and an encrypted-attachment marker for Cycle 11. Shipped and passes all gates."
+    },
+    {
+      "name": "C - comprehensive runtime encryption",
+      "selected": false,
+      "summary": "Also encrypt MemoryStore SQLite, encrypt attachment images end-to-end, and add an audit log for every agent file write. Strongest privacy bar but requires SQLCipher and a cross-stack attachment refactor; deferred beyond one cycle."
+    }
+  ],
+  "next_options": [
+    "Encrypt persisted chat attachment images (preview + outbound pipeline)",
+    "Encrypt or field-level-protect the MemoryStore SQLite database",
+    "Add key-event audit log for file writes and encryption operations"
+  ],
+  "law_compliance": {
+    "L1_TRACEABILITY": true,
+    "L2_GENERATION": true,
+    "L3_PURITY": true,
+    "L4_TESTABILITY": true,
+    "L5_IDENTITY": true,
+    "L6_CEILING": true,
+    "L7_UNITY": true
+  }
+}

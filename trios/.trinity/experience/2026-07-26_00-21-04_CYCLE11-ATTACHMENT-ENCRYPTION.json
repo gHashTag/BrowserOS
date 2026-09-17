@@ -1,0 +1,43 @@
+{
+  "title": "Encrypted persisted chat attachments + structured base64 outbound",
+  "cycle": 11,
+  "date": "2026-07-26T00:21:04+07:00",
+  "rings": ["SR-00", "SR-01", "SR-02", "BR-OUTPUT"],
+  "agents": ["claude"],
+  "road": "B",
+  "problem": "Chat images dropped/pasted into the composer were written as plaintext files under ~/Library/Application Support/Trinity S3AI/Attachments/. The UI preview and outbound request both read from those plaintext paths, and the server fell back to filesystem_read for image content.",
+  "root_cause": "ChatAttachmentImporter.persistImageData wrote raw NSItemProvider data directly to disk and ChatComposerAttachment had no encryption flag or decrypt helper. ChatPanelView preview used NSImage(contentsOf:) on the plaintext path, and ChatViewModel.sendMessage only knew about a single text field with embedded <local_attachments> paths.",
+  "fix": "Extended ChatComposerAttachment with isEncrypted (default false) and a loadDecryptedData() helper backed by TriOSEncryption(keyName: \"attachments\"). Updated ChatAttachmentImporter.persistImageData to AES-256-GCM encrypt the image bytes before writing. Updated ChatPanelView.attachmentPreview to decrypt in memory and render via NSImage(data:). Split composer attachments into image vs file in triggerSend; image attachments are decrypted, base64-encoded, and passed to a new ChatRequestBuilder attachments field that emits structured {kind, mediaType, dataUrl} entries matching the existing BrowserOS agents.ts contract. Fixed ChatAttachmentImporterSafePathTests and added ChatAttachmentEncryptionTests and ChatRequestBuilder attachment tests.",
+  "files": [
+    "trios/rings/SR-00/ChatComposerAttachment.swift",
+    "trios/rings/SR-00/TriOSEncryption.swift",
+    "trios/rings/SR-01/ChatAttachmentImporter.swift",
+    "trios/rings/SR-02/ChatViewModel.swift",
+    "trios/BR-OUTPUT/ChatPanelView.swift",
+    "trios/tests/TriOSKitTests/ChatAttachmentImporterSafePathTests.swift",
+    "trios/tests/TriOSKitTests/ChatAttachmentEncryptionTests.swift",
+    "trios/tests/TriOSKitTests/ChatRequestBuilderTests.swift",
+    ".claude/plans/trios-cycle11-attachment-encryption-plan.md",
+    ".claude/plans/trios-cycle11-attachment-encryption-report.md"
+  ],
+  "tests": {
+    "build_sh": "PASS",
+    "clade_build": "PASS",
+    "clade_audit": "0 findings",
+    "clade_seal": "SEAL VALID",
+    "clade_e2e": "PASS",
+    "health": "{\"status\":\"ok\",\"cdpConnected\":true}",
+    "swift_test": "SKIPPED (XCTest not available in CommandLineTools-only environment)"
+  },
+  "variants": {
+    "A": "Minimal: encrypt only dropped/pasted image data, leave file attachments and MemoryStore plaintext — fast, closes the highest-risk gap.",
+    "B": "Balanced: encrypt image attachments + structured base64 outbound + preview decryption + tests — implemented, server never reads a plaintext image file.",
+    "C": "Comprehensive: add SQLCipher to MemoryStore, encrypt file attachments by copying them into the encrypted attachment directory, and rotate per-conversation attachment keys."
+  },
+  "lessons": [
+    "A small model flag (isEncrypted) preserves source compatibility while letting all callers treat encrypted and legacy plaintext attachments uniformly.",
+    "Reusing the existing TriOSEncryption named-key helper keeps the key lifecycle (generation, backup exclusion, 256-bit AES-GCM) consistent across analytics, conversation, and attachments.",
+    "The BrowserOS server already accepted structured image attachments, so the client-side change to emit them removed the need for server-side filesystem access for images.",
+    "Preview and outbound pipelines must both decrypt; if only one is updated the UI looks correct but the request still leaks plaintext or fails."
+  ]
+}

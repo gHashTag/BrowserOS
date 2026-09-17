@@ -1,0 +1,70 @@
+{
+  "wave": "WAVE-063",
+  "date": "2026-07-28",
+  "domain": "dev/release build separation; outdated planner assertions",
+  "summary": "Made the dev variant the safe default so a routine rebuild cannot break the running app, completed the isolation on every axis, and fixed a crash plus five stale assertions left by the dynamic-plan change.",
+  "findings": [
+    {
+      "id": "W1",
+      "finding": "The default was unsafe. `VARIANT=${TRIOS_VARIANT:-prod}` meant a bare ./build.sh rebuilt the release bundle - the app the user was running - and every skill, cron job and agent runs the bare command.",
+      "fix": "The default is now dev. Touching trios.app requires TRIOS_VARIANT=prod or --release. Proven: a default build left the release bundle and binary mtimes unchanged; an explicit prod build updated them."
+    },
+    {
+      "id": "W2",
+      "finding": "The standalone binary and Frameworks directory were shared between variants, so a dev build still overwrote the release binary and its dylibs.",
+      "fix": "Per-variant OUTPUT (trios_dev_app) and STANDALONE_FRAMEWORKS (Frameworks-dev)."
+    },
+    {
+      "id": "W3",
+      "finding": "Runtime data was shared: ProjectPaths.trinity was the same for both variants, so a dev schema change could corrupt the release app's encrypted database, logs and delegation store.",
+      "fix": "Dev writes .trinity-dev; releaseTrinity exposes the release root for tooling that deliberately inspects it."
+    },
+    {
+      "id": "C1",
+      "finding": "The chat e2e suite was CRASHING with 'Index out of range' in all four preceding builds, and my reporting missed it: I grepped for lines starting with FAIL, but the process trapped before printing any. I had reported 'chatFAILs: 0' while the test was dying.",
+      "fix": "Root cause was tests/swift/ChatSSEEndToEndTest.swift asserting items[1] and progress == 1.0/3.0 - the retired fixed three-step template. Assertions now check state rather than row index."
+    },
+    {
+      "id": "C2",
+      "finding": "completePlan swept up user-added tasks. The previous fixed-template version deliberately left them alone, and the dynamic rewrite lost that.",
+      "fix": "TODOItem.isUserAdded, set by addTask, excluded from agent completion. Decoded with a default so plans persisted before the flag still load."
+    }
+  ],
+  "lessons": [
+    {
+      "lesson": "A verification grep that looks for failure text misses a crash. The process trapped before printing anything, so 'zero FAIL lines' read as success across four builds.",
+      "how_to_apply": "Assert on the positive signal - 'All ... tests passed' - not on the absence of failure lines, and check the exit code."
+    },
+    {
+      "lesson": "The safe option has to be the default, not the documented one. The dev variant existed and was correct, but defaulting to prod meant every unthinking rebuild still clobbered the release app.",
+      "how_to_apply": "BuildVariantPolicy.defaultVariant is .dev and a test asserts it, so flipping it back fails loudly."
+    },
+    {
+      "lesson": "Replacing a fixed structure with a dynamic one silently invalidates every test that indexed into it.",
+      "how_to_apply": "After such a change, grep the test suite for literal indices into the changed collection."
+    }
+  ],
+  "artifacts": {
+    "plan": ".trinity/wave-loop-063.md",
+    "new_sources": ["rings/SR-00/BuildVariantPolicy.swift"],
+    "modified_sources": [
+      "build.sh",
+      "BR-OUTPUT/ProjectPaths.swift",
+      "rings/SR-02/TODOPlanner.swift",
+      "tests/swift/ChatSSEEndToEndTest.swift",
+      "rings/RUST-02/clade-e2e/src/main.rs"
+    ],
+    "new_tests": ["tests/swift/build_variant_test.swift"]
+  },
+  "verification": {
+    "clade_e2e": "14/14 Swift logic suites passed",
+    "new_assertions": 21,
+    "isolation_proof": "default build left trios.app and trios_app mtimes unchanged; TRIOS_VARIANT=prod updated them",
+    "chat_e2e": "crash eliminated; 5 stale assertions fixed; the standalone binary passes 4/4; the remaining 2 harness failures are the pre-existing timing flake measured in WAVE-061"
+  },
+  "known_gaps": [
+    "The Queen delegation core (QueenDelegationRegistry, QueenBranchPolicy) is still not wired: she cannot yet open a worker chat or create its GitButler virtual branch.",
+    "The chat e2e harness flake (1-in-3 under build.sh, 4/4 standalone) is still unexplained.",
+    "The postgres stale-lease auth failure in the agent server still needs DATABASE_URL."
+  ]
+}

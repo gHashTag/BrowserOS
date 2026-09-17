@@ -1,0 +1,36 @@
+{
+  "task_id": "CYCLE-15-SQLCIPHER",
+  "issue_url": "https://github.com/gHashTag/trios/issues/T27-EPIC-001",
+  "domain": "MemoryStore",
+  "agent_chain": [
+    "t27-creator",
+    "t27-verifier"
+  ],
+  "root_cause": "Cycle 12 MemoryStore used a plain sqlite3 database plus an AES-256-GCM encrypted snapshot. The snapshot pattern added migration complexity and did not provide native page-level encryption. During Cycle 15 migration to SQLCipher, the durable-memory e2e test failed because TriOSEncryption generated a fresh key on each Keychain access when Keychain reads returned errSecNotAvailable (-25320) in the non-UI test context, so the reloaded store keyed the same file with a different key and SQLite reported 'file is not a database'.",
+  "fix_pattern": "Replace the encrypted snapshot with native SQLCipher page-level encryption via a new SQLCipherMemoryStore helper. Open databases with PRAGMA key using the Keychain-backed raw key, validate with PRAGMA cipher_version, migrate existing plaintext DBs and legacy .enc snapshots in place, switch journal mode to WAL with stale -wal/-shm cleanup, and checkpoint WAL before close. Cache the symmetric key inside TriOSEncryption so every caller in the same process uses the identical key, eliminating per-call Keychain drift in CLI tests and improving app runtime efficiency.",
+  "files_changed": [
+    "trios/rings/SR-00/TriOSEncryption.swift",
+    "trios/rings/SR-01/SQLCipherMemoryStore.swift",
+    "trios/rings/SR-01/MemoryStore.swift",
+    "trios/rings/SR-01/EncryptedMemoryStore.swift",
+    "trios/tests/TriOSKitTests/MemoryStoreEncryptionTests.swift",
+    "trios/tests/swift/run_chat_sse_e2e.sh",
+    "trios/tests/swift/ChatSSEEndToEndTest.swift",
+    "trios/build.sh"
+  ],
+  "tests_added": [
+    "SQLCipher file-header check in MemoryStoreEncryptionTests",
+    "legacy .enc migration test",
+    "wrong-key rejection test",
+    "durable-memory reload in ChatSSEEndToEndTest"
+  ],
+  "lessons": [
+    "Keychain-backed keys can return errSecNotAvailable in non-UI contexts; in-process caching is required for deterministic SQLCipher keying in tests.",
+    "SQLCipher WAL mode is safe because WAL pages are encrypted, but stale plaintext -wal/-shm siblings must be removed before opening an encrypted database.",
+    "PRAGMA wal_checkpoint(TRUNCATE) before sqlite3_close_v2 is necessary for a subsequent process (or reloaded instance) to see a consistent encrypted file.",
+    "Native SQLCipher page-level encryption is simpler and more robust than application-layer encrypted snapshots.",
+    "All Trinity gates must be re-run after key-management changes because key drift surfaces only on reopen, not on first write."
+  ],
+  "seal_status": "BUILD_PASS, E2E_PASS, AUDIT_PASS, SEAL_VALID",
+  "timestamp": "2026-07-26T07:15:00Z"
+}

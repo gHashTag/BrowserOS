@@ -1,0 +1,55 @@
+{
+  "episode_id": "cycle24-refresh-rotation",
+  "title": "Cycle 24: local-auth refresh-token rotation + family invalidation",
+  "date": "2026-07-25",
+  "law": ["L1", "L2", "L4"],
+  "tags": ["local-auth", "refresh-token", "token-family", "Swift", "TypeScript", "Hono", "Keychain", "security", "TriOS"],
+  "summary": "Closed the loopback-token replay window by implementing refresh-token rotation with family invalidation on BrowserOS and a matching refresh flow in TriOS. The access token stays 15 minutes, the refresh token rotates on every use, and reuse of an old refresh token revokes the whole family.",
+  "weak_spots": [
+    "Single access token replayable until TTL expiry",
+    "No refresh token or rotation",
+    "No family invalidation / theft detection",
+    "No server-side audit of token usage",
+    "Tests did not cover TTL metadata or refresh path"
+  ],
+  "competitors": [
+    "OAuth2 refresh-token rotation (RFC 6749 / RFC 9700)",
+    "OWASP ASVS 5.0 V3 session management",
+    "macOS SecAccessControl biometric Keychain binding",
+    "Capability/UAPK route-scoped tokens"
+  ],
+  "variant_chosen": "B",
+  "variants": {
+    "A": "Server-side audit + rate limiting on auth failures",
+    "B": "Refresh-token rotation + family invalidation (implemented)",
+    "C": "Biometric Keychain binding + per-route capability tokens"
+  },
+  "files_changed": [
+    "packages/browseros-agent/apps/server/src/api/services/local-auth-service.ts",
+    "packages/browseros-agent/apps/server/src/api/routes/local-auth.ts",
+    "packages/browseros-agent/apps/server/src/api/utils/require-local-auth.ts",
+    "packages/browseros-agent/apps/server/tests/api/routes/auth-routes.test.ts",
+    "trios/rings/SR-01/LocalAuthProvider.swift",
+    "trios/rings/SR-01/LocalAuthMonitor.swift",
+    "trios/tests/TriOSKitTests/LocalAuthProviderTests.swift",
+    "trios/tests/TriOSKitTests/LocalAuthMonitorTests.swift",
+    ".claude/plans/trios-cycle24-refresh-rotation-plan.md",
+    ".claude/plans/trios-cycle24-refresh-rotation-report.md"
+  ],
+  "verification": {
+    "server_tests": "33 pass, 0 fail",
+    "tsc": "clean",
+    "clade_build": "PASS",
+    "clade_audit": "0 findings",
+    "clade_seal": "VALID",
+    "clade_e2e": "PASS",
+    "health": "{\"status\":\"ok\",\"cdpConnected\":true}"
+  },
+  "lessons": [
+    "Store token hashes, not raw tokens; validate with timingSafeEqual on hashes.",
+    "Refresh endpoint must distinguish family revocation (401) from missing auth (403) so the client can bootstrap.",
+    "Set JSONDecoder.dateDecodingStrategy = .iso8601 when the server returns ISO-8601 strings.",
+    "Audit logs must be token-free by design.",
+    "Single-flight deduplication wraps bootstrap and refresh under one task."
+  ]
+}

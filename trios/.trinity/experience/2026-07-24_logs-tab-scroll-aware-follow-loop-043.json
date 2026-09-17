@@ -1,0 +1,37 @@
+{
+  "date": "2026-07-24",
+  "title": "LOGS Tab Scroll-Aware Live Follow — Cycle 43",
+  "ring": "SR-02 / BR-OUTPUT",
+  "agent": "claude",
+  "road": "B",
+  "problem": "Cycle 42 added live tail to the LOGS tab, but every 5-second tick snapped the detail view back to the bottom regardless of user scroll position. If the user scrolled up to inspect a historical line, the next tick jerked the view away, breaking reading flow and making text selection fragile. There was no visual indication that follow was paused and no one-tap way to resume.",
+  "root_cause": "tickLive incremented liveTick unconditionally whenever isLive was true, and the onChange(of: liveTick) handler scrolled to the bottom anchor without checking whether the user had manually scrolled. The view had no state for paused follow and no resume affordance.",
+  "fix": "Added LogsTabScrollPolicy.shouldAutoScroll(isLive:isFollowPaused:) as a testable decision point. Added @State private var isFollowPaused to LogsTabView and a simultaneous DragGesture on the detail ScrollView that pauses follow on user interaction. Updated tickLive and loadAll to scroll only when isLive && !isFollowPaused while continuing to refresh data in the background. Added resumeLiveFollow() that clears the pause and scrolls to bottom. Updated the Jump to latest button to resume follow. Added a floating Resume live pill overlay inside the detail pane and an orange paused indicator next to the live toggle. Added LogsTabViewTests covering all policy states.",
+  "files": [
+    "trios/rings/SR-02/LogParser.swift",
+    "trios/BR-OUTPUT/LogsTabView.swift",
+    "trios/tests/TriOSKitTests/LogsTabViewTests.swift",
+    "trios/.trinity/specs/logs-tab-scroll-aware-follow.md",
+    "trios/.claude/plans/trios-cycle43-logs-tab-scroll-aware-follow.md",
+    "trios/.claude/plans/trios-cycle43-logs-tab-scroll-aware-follow-report.md",
+    "trios/.trinity/experience/2026-07-24_logs-tab-scroll-aware-follow-loop-043.json"
+  ],
+  "tests": {
+    "build_sh": "PASS",
+    "cargo_test_workspace": "101 passed",
+    "cargo_clippy": "PASS",
+    "clade_audit": "0 findings",
+    "clade_seal": "SEAL VALID",
+    "clade_e2e": "PASS",
+    "swift_test": "UNAVAILABLE (CommandLineTools-only environment)"
+  },
+  "episode": ".trinity/experience/2026-07-24_logs-tab-scroll-aware-follow-loop-043.json",
+  "plan": ".claude/plans/trios-cycle43-logs-tab-scroll-aware-follow.md",
+  "report": ".claude/plans/trios-cycle43-logs-tab-scroll-aware-follow-report.md",
+  "next_options": [
+    "True bottom-detection with GeometryReader — replace drag pause heuristic with actual content-offset math so scrolling back to bottom auto-resumes follow",
+    "Structured query and export — add a tiny search DSL (level:warn source:cron-log) and export filtered results to JSONL/CSV",
+    "Cross-source correlated timeline — merge all sources by timestamp or correlation_id into a single chronological trace view"
+  ],
+  "claim": "claim-LOGS-TAB-SCROLL-AWARE-043"
+}

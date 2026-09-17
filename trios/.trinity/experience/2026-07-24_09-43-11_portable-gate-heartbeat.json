@@ -1,0 +1,24 @@
+{
+  "timestamp": "2026-07-24T09:43:11Z",
+  "task_id": "TRIOS-PORTABLE-LAND-001",
+  "claim_id": "989F8151-6640-44B4-AFE1-FEEB17078EF2",
+  "action": "portable_release_gate_state_and_automation_audit",
+  "result": "BLOCKED",
+  "evidence": {
+    "command": "Read current AGENTS, SOUL, claim, active queue, final handoff, dirty tree, branch refs, and update the heartbeat automation to the landed state",
+    "exit_code": 0,
+    "artifact": "def368fc98eec80a6c6617d32b06df1690f883ac",
+    "facts": [
+      "Local dev and feat/zai-provider still resolve to the same verified commit.",
+      "The active queue and claim still identify TRIOS-PORTABLE-LAND-001.",
+      "No new user choice exists among cross-repo release, vendored Queen and mesh, or core-only TriOS.",
+      "The automation no longer requests repeating the completed merge or splitting already landed history.",
+      "No product code, commit, push, or merge was performed in this cycle.",
+      "Foreign dirty and untracked work remains untouched."
+    ]
+  },
+  "residual_risks": [
+    "Published Queen and mesh dependencies still cannot reproduce a clean installation.",
+    "A user choice is required before product work can safely continue."
+  ]
+}

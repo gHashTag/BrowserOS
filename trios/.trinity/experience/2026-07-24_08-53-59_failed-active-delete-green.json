@@ -1,0 +1,23 @@
+{
+  "timestamp": "2026-07-24T08:53:59Z",
+  "task_id": "TRIOS-PORTABLE-LAND-001",
+  "claim_id": "989F8151-6640-44B4-AFE1-FEEB17078EF2",
+  "action": "failed_active_delete_history_tdd_green",
+  "result": "PASS",
+  "evidence": {
+    "command": "bash tests/swift/run_chat_sse_e2e.sh",
+    "exit_code": 0,
+    "facts": [
+      "The harness compiled 61 Swift files.",
+      "All 22 ChatSSEEndToEnd scenarios passed.",
+      "Failed active deletion finalized and persisted the retained partial response with a failure receipt.",
+      "Successful active deletion did not restore its captured snapshot.",
+      "The explicit Stop test now waits for concrete partial content before cancellation."
+    ]
+  },
+  "residual_risks": [
+    "The final exact diff still requires an independent Agent V approval.",
+    "Full build, signature, and runtime checks must be repeated once more.",
+    "Portable release dependency publication remains blocked."
+  ]
+}

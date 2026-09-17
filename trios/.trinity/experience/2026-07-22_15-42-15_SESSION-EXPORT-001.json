@@ -1,0 +1,30 @@
+{
+  "task_id": "SESSION-EXPORT-001",
+  "claim_id": "573C2DDB-3B91-4C0A-BD3F-AD5FB1CE6BA1",
+  "timestamp": "2026-07-22T15:42:15Z",
+  "action": "spec_tdd_build_verify_learn",
+  "result": "clean",
+  "problem": "A broken agent session had no portable way to preserve all conversations, the active transcript, browser context, tool history, runtime identity, token state, and detailed diagnostics.",
+  "solution": "Added a visible Recovery control and Command-Shift-E menu command that create a sanitized ZIP with all saved conversations, current BrowserOS context, transcripts, runtime metadata, detailed TriOS logs, a handoff guide, and a SHA-256 manifest. Keychain values are never read, secret patterns are redacted recursively, and archives are created atomically without shell interpolation.",
+  "verification": {
+    "recovery_tests": "PASS",
+    "swift_build": "PASS",
+    "compiled_swift_files": 83,
+    "code_signature": "PASS",
+    "archive_path": "/Users/playra/Documents/Trinity-Recovery-20260722-161945.zip",
+    "archive_files": 227,
+    "archive_bytes": 1277802,
+    "manifest_sha256_mismatches": 0,
+    "appledouble_entries": 0,
+    "redacted_secret_values": 56,
+    "remaining_secret_hits": 0,
+    "zip_integrity": "PASS",
+    "live_health": {
+      "status": "ok",
+      "cdpConnected": true
+    },
+    "runtime_launch": "PASS",
+    "pid": 41989
+  },
+  "lesson": "A recovery export is trustworthy only when snapshot completeness, recursive redaction, archive path safety, manifest checksums, actual ZIP integrity, and a human-readable handoff are verified together. Redaction must also be idempotent so already sanitized archives and escaped JSON cannot accumulate corrupt markers."
+}

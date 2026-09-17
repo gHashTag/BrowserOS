@@ -1,0 +1,37 @@
+{
+  "date": "2026-07-24",
+  "title": "LOGS Tab Saved Searches and Quick Filters — Cycle 45",
+  "ring": "SR-02 / BR-OUTPUT",
+  "agent": "claude",
+  "road": "B",
+  "problem": "Cycle 44 gave the LOGS tab a structured query DSL and export, but useful queries had to be retyped every session. There was no way to persist common filters or expose them as one-tap chips, so recurring investigations (errors only, cron warnings, companion errors) started from scratch each time.",
+  "root_cause": "LogsTabView kept only the current search string in @State and had no persistence model for named queries. LogParser had no Codable search model and no actor-backed store.",
+  "fix": "Added LogSavedSearch struct (id, label, query) and LogSavedSearchStore actor that loads/saves a JSON file at .trinity/state/logs_saved_searches.json and provides defaultSavedSearches(). Added a quick-filters bar in LogsTabView above the search field with one-tap chips, a '+' save alert, delete and reset-to-defaults actions. Wired selection so the search field and token chips update immediately. Extended LogsTabViewTests with default loading, persistence round-trip, and query application tests.",
+  "files": [
+    "trios/rings/SR-02/LogParser.swift",
+    "trios/BR-OUTPUT/LogsTabView.swift",
+    "trios/tests/TriOSKitTests/LogsTabViewTests.swift",
+    "trios/.trinity/specs/logs-tab-saved-searches.md",
+    "trios/.claude/plans/trios-cycle45-logs-tab-saved-searches.md",
+    "trios/.claude/plans/trios-cycle45-logs-tab-saved-searches-report.md",
+    "trios/.trinity/experience/2026-07-24_logs-tab-saved-searches-loop-045.json"
+  ],
+  "tests": {
+    "build_sh": "PASS",
+    "cargo_test_workspace": "101 passed",
+    "cargo_clippy": "PASS",
+    "clade_audit": "0 findings",
+    "clade_seal": "SEAL VALID",
+    "clade_e2e": "PASS",
+    "swift_test": "UNAVAILABLE (CommandLineTools-only environment)"
+  },
+  "episode": ".trinity/experience/2026-07-24_logs-tab-saved-searches-loop-045.json",
+  "plan": ".claude/plans/trios-cycle45-logs-tab-saved-searches.md",
+  "report": ".claude/plans/trios-cycle45-logs-tab-saved-searches-report.md",
+  "next_options": [
+    "Search history and recent queries — keep a rolling list of the last N executed queries and surface them as a 'recent' chip group under the search field",
+    "Cross-machine / shared saved searches — sync named searches via the encrypted recovery package or a BrowserOS preference endpoint so filters follow the user across TriOS instances",
+    "Advanced query operators — extend the DSL with negation, wildcards, numeric comparisons, and quoted phrases to rival Datadog / Splunk search ergonomics"
+  ],
+  "claim": "claim-LOGS-TAB-SAVED-SEARCHES-045"
+}

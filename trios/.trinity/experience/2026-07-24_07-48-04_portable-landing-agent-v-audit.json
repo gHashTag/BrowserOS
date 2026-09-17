@@ -1,0 +1,24 @@
+{
+  "timestamp": "2026-07-24T07:48:04Z",
+  "task_id": "TRIOS-PORTABLE-LAND-001",
+  "claim_id": "989F8151-6640-44B4-AFE1-FEEB17078EF2",
+  "action": "independent_branch_and_dirty_scope_audit",
+  "result": "BLOCKED",
+  "evidence": {
+    "command": "Independent read-only branch topology, dirty-scope, and dependency audit",
+    "exit_code": 0,
+    "artifact": "feat/zai-provider@cd87482c2",
+    "facts": [
+      "No master branch exists; origin HEAD and the repository law identify dev as the integration branch.",
+      "The feature branch is 160 commits ahead of dev and spans 492 paths, so a full merge is not a narrow memory change.",
+      "The dirty tree contains two completed feature scopes plus active coordination state and generated local artifacts.",
+      "The trios-mesh submodule points to a commit that is not reachable from its configured remote.",
+      "The separate Trinity Queen dependency also contains unpublished required integration code."
+    ]
+  },
+  "residual_risks": [
+    "A blind merge would import unpublished dependency references and mixed-scope local changes.",
+    "The user must authorize the cross-repository release boundary or choose a dependency-removal design.",
+    "No commit, push, branch switch, or merge was performed."
+  ]
+}

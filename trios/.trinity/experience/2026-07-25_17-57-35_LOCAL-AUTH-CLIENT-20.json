@@ -1,0 +1,43 @@
+{
+  "task_id": "LOCAL-AUTH-CLIENT-20",
+  "date": "2026-07-25",
+  "domain": "Security/Auth",
+  "ring": "SR-01 / SR-02 / BR-OUTPUT",
+  "road": "B",
+  "issue": "#T27-EPIC-001",
+  "agents": ["claude"],
+  "root_cause": "SSETransport and A2ARegistryClient built URLRequests independently and never attached the server-issued X-TriOS-Local-Auth token, so newly gated POST /chat and A2A mutation routes returned 503. There was no shared fetch/cache helper for the token.",
+  "fix_pattern": "Introduced a LocalAuthProviding protocol and actor LocalAuthProvider that fetches GET /auth/local-token once and caches it for the process lifetime. Injected the provider into SSETransport and A2ARegistryClient from main.swift. Added authorized request helpers in A2ARegistryClient and header attachment in SSETransport.sendMessage. Added Swift unit tests and updated the server integration test to cover missing-header 403 behavior.",
+  "files_changed": [
+    "trios/rings/SR-01/LocalAuthProvider.swift",
+    "trios/rings/SR-01/SSETransport.swift",
+    "trios/rings/SR-02/A2ARegistryClient.swift",
+    "trios/main.swift",
+    "trios/tests/TriOSKitTests/SSETransportTests.swift",
+    "packages/browseros-agent/apps/server/tests/server.integration.test.ts"
+  ],
+  "tests_added": [
+    "trios/tests/TriOSKitTests/SSETransportTests.swift (local-auth cases)",
+    "packages/browseros-agent/apps/server/tests/server.integration.test.ts (missing header 403)"
+  ],
+  "verification": {
+    "build": "PASS",
+    "clade_build": "PASS",
+    "clade_e2e": "PASS",
+    "clade_audit": "0 hard findings",
+    "clade_seal": "SEAL VALID",
+    "browseros_targeted": "PASS",
+    "browseros_full": "4 pre-existing failures unrelated to auth"
+  },
+  "lessons": [
+    "When server auth moves from origin-trust to a token header, every client request path must be audited; two independent request builders (SSE and A2A) means two injection points.",
+    "A single shared provider is preferable to per-caller token fetching: it centralizes caching, refresh policy, and error handling.",
+    "Protocol methods that take a forcingRefresh flag should provide a default value so callers are not forced to repeat the policy decision.",
+    "Server integration tests must be updated the moment a route is gated; otherwise the client fix appears broken when it is actually correct."
+  ],
+  "next_options": [
+    "Keychain-backed token persistence + automatic refresh on 401/403",
+    "Per-route capability tokens scoped to individual actions",
+    "Human-confirmation UI before high-impact A2A mutations"
+  ]
+}

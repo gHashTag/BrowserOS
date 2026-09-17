@@ -1,0 +1,70 @@
+{
+  "id": "2026-08-23_the-refusal-that-never-asked-the-keychain",
+  "date": "2026-08-23",
+  "ring": "SR-00, SR-02",
+  "branch": "feat/queen-supervisor",
+  "title": "The refusal that said the key was locked had never asked the Keychain, and the Queen's transcript went to disk in plaintext because of it",
+  "severity": "high",
+  "agent": "Queen",
+  "problem": "conversation.persist.encrypt_fallback wrote the Queen's own conversation to disk as PLAINTEXT, reporting 'The encryption key is locked. Approve the Keychain prompt, or sign the app with a stable identity so it stops asking.' No prompt was pending, the app's signing was unchanged, and the key was not locked.",
+  "root_cause": "TriOSEncryptionError carried ONE case for every failed key read, thrown from five call sites. Four of the five had measured something else: the in-flight guard, our own 60-second cool-down, and a 2-second deadline. Two of those four never contacted securityd at all. The 2026-08-21 round had already 'fixed' the fallback message by making it carry the thrown error verbatim - a real improvement that propagated the invented reason more precisely, because the error itself was the invention.",
+  "findings": [
+    "Release log 2026-08-23T02:56: cool-down armed at 02:56:28 (zai) and 02:56:30 (github-token); encrypt_fallback fired twice at 02:56:38.690 and .708; both Keychain items then settled with OSStatus 0 at 02:57:01 (40.7s) and 02:57:06 (37.7s) and were served_late at 02:57:15. The reads succeeded. Only our deadline failed.",
+    "The three offered starting points were all stale against the live log. queen.reconcile.disagrees was briefed as 8 per tick and measured 0; conversation.persist.encrypt_fallback was briefed as 8 conversations and measured 2; keychain.read.stalled measured 2, with 2 settled and 2 served_late beside it.",
+    "The largest conversation signal in the window was not in the briefing at all: conversation.persist.decrypt_deferred, 152 occurrences. The largest keychain signal was keychain.queue.starved, 10 occurrences, waits of 0.23-1.33s, hours after the stalls and uncorrelated with them.",
+    "conversation.persist.reencrypted exists as a named signal and fired 0 times in the window: the heal-on-read path is wired but has not run since launch.",
+    "make check was red on arrival for an environmental reason - the agent server on 127.0.0.1:9105 was down, so the prod health check failed. All 50 logic suites passed.",
+    "The release binary (08-23 09:55) predated two commits at the time of observation, so nothing landed after 09:55 was in the running process."
+  ],
+  "fix": "TriOSKeyRefusal replaces the single case with five, one per measured condition, carrying keychainWasAsked (two of the five never reach securityd) and a log-safe tag. Only interactionRequired - an answer FROM the Keychain - may say 'locked'. TriOSKeyTiming holds the deadline and cool-down so a refusal reports the number the code actually waited. The refusal travels with the error through ConversationEncryption to ConversationPersister, so encrypt_fallback and decrypt_deferred now attribute a plaintext write to whoever refused, including us. tools/forensics.py gains a refusals subcommand (make refusals) that histograms those attributes and counts lines from older binaries as unattributed rather than guessing.",
+  "files_changed": [
+    "rings/SR-00/TriOSKeyRefusal.swift",
+    "rings/SR-00/TriOSEncryption.swift",
+    "rings/SR-02/ConversationEncryption.swift",
+    "rings/SR-02/ConversationPersister.swift",
+    "rings/RUST-02/clade-e2e/src/main.rs",
+    "tests/swift/key_refusal_test.swift",
+    "tools/forensics.py",
+    ".claude/skills/unmeasured-cause/SKILL.md"
+  ],
+  "prevention": [
+    "An enum case thrown from N sites can only be honest if all N measured the same thing. Count the throw sites before trusting an error's own description.",
+    "A faithful wrapper around an invented reason is not a fix. When a message is repaired by carrying the underlying error verbatim, ask the same question of the value being carried: which statement established THAT?",
+    "A deadline is not a verdict. 'The read did not answer in 2s' and 'the key is locked' are different facts, and this project has now been wrong about the difference twice - once for a whole night.",
+    "A refusal must say whether the subsystem it names was contacted. keychainWasAsked exists because two of five refusals send the reader to Keychain Access over a cool-down TriOS armed itself.",
+    "Re-measure the briefing. All three offered starting points were stale against the live log, and the two largest live signals were not mentioned in it.",
+    "A tool that reports old data must mark it as unattributed. make refusals counts pre-change lines separately rather than inferring which condition they meant - the inference is the defect."
+  ],
+  "corrections_to_earlier_claims": [
+    "The briefing stated THREE COMMITS UNPUSHED. Measured at the start of the round: origin/feat/queen-supervisor..HEAD was empty - zero unpushed commits. The briefing's HEAD (d0be75df0) was also three commits behind the tree's."
+  ],
+  "shared_tree_incidents": [
+    "At 12:51 another agent committed 65e16b116, which swept the Makefile - including my uncommitted `refusals` target alongside their uncommitted `chain` target. Not reverted; recorded. The lesson runs both ways: commit-by-pathspec protects other agents' work from me, and does nothing to protect mine from them. Land a Makefile edit promptly or expect to find it in someone else's commit.",
+    "docs/parallel-two.md remains an L3 violation in the worktree: 7 of 12 lines Cyrillic, against 0 in the committed version. Reported, not landed, not reverted."
+  ],
+  "related_episodes": [
+    "2026-08-21_unmeasured-cause-and-the-bricked-queen-chat"
+  ],
+  "tags": [
+    "unmeasured-cause",
+    "diagnostics",
+    "keychain",
+    "conversation-encryption",
+    "plaintext-fallback",
+    "queen",
+    "make-check",
+    "shared-tree"
+  ],
+  "live_proof": {
+    "how": "make release + make relaunch, then make refusals against the release log",
+    "launch_anchor": "2026-08-23T06:04:55.897Z",
+    "quoted_line": "Could not encrypt conversation E621E1F8-C36C-495A-93FC-0C247A3E6E5F (The encryption key was not read: another read of the encryption key is already in flight, so this one was refused to keep blocked reads from piling up; the Keychain was not asked.); stored as plaintext fallback",
+    "attrs": {
+      "refusal": "read_already_in_flight",
+      "keychain_was_asked": "no"
+    },
+    "histogram": "encrypt_fallback 2 = 2 read_already_in_flight; decrypt_deferred 161 = 109 read_already_in_flight + 52 stored_but_unreadable; keychain actually asked: 111 no, 52 yes",
+    "verdict": "163 refusals in one launch window. Zero were interaction_required. The old code called every one of them 'The encryption key is locked. Approve the Keychain prompt.' Not one of them was a locked key, and 111 of them never contacted securityd."
+  },
+  "next_defect_now_visible": "The Queen's transcript still reaches disk as plaintext, and the measured reason is now ours: at 06:05:17.155 a decrypt of E621E1F8 was deferred for read_already_in_flight, and 82ms later at 06:05:17.237 the encrypt of the same conversation fell back to plaintext for the same reason. One slow key read, serialised behind a single-flight guard, is enough to put the Queen's own chat on disk unencrypted. The old message made this invisible by blaming the Keychain. The guard is right to exist; the plaintext fallback behind it is the open question."
+}

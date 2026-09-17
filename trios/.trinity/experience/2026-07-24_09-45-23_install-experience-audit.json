@@ -1,0 +1,26 @@
+{
+  "timestamp": "2026-07-24T09:45:23Z",
+  "task_id": "TRIOS-PORTABLE-LAND-001",
+  "claim_id": "989F8151-6640-44B4-AFE1-FEEB17078EF2",
+  "action": "current_install_experience_and_dependency_audit",
+  "result": "BLOCKED",
+  "evidence": {
+    "command": "Read tracked README, build.sh, ProjectPaths, ServerManager, portable design, current Trinity checkout, and mesh gitlink",
+    "exit_code": 0,
+    "artifact": "def368fc98eec80a6c6617d32b06df1690f883ac",
+    "facts": [
+      "The tracked README presents a three-command install but omits the required Trinity checkout, Bun dependencies, and companion runtime.",
+      "build.sh requires a sibling Trinity Queen package and bundles only libQueenUILib into trios.app.",
+      "The runtime companion is loaded from the BrowserOS source tree and requires an external Bun executable.",
+      "The mesh gitlink still points to local revision 27a76f21e3935b8ffe2e89e517a1f2821673c25f.",
+      "The local Trinity checkout still contains uncommitted Queen integration files.",
+      "The current app uses an ad-hoc signature rather than a notarized distribution identity.",
+      "No product code or install artifact was changed during the audit."
+    ]
+  },
+  "residual_risks": [
+    "A double-click installer requires a self-contained signed bundle or an explicitly smaller core-only product.",
+    "A one-command source installer still requires publishing and pinning the cross-repository dependencies.",
+    "The user must choose the intended installation experience before the design can be implemented."
+  ]
+}

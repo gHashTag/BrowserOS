@@ -1,0 +1,28 @@
+{
+    "date": "2026-07-27",
+    "title": "Output-Budget Progress During Streaming - Cycle 40 Closure",
+    "ring": "SR-00 / SR-01 / SR-02 / BR-OUTPUT",
+    "agents": "claude",
+    "road": "B",
+    "problem": "Cycle 39 completed the pre-send pin-aware guardrails, but once a stream started the user had no live visibility into token consumption. The StreamingContextWatchdog only surfaced a transient orange banner when the response crossed a warning ratio, so pauses felt sudden and the effective output ceiling remained hidden.",
+    "root_cause": "The watchdog tracked estimated input/output tokens internally and emitted only StreamingContextDecision events; it never exposed the raw counts, ratios, or dominant-limit kind to the UI. ChatViewModel had no published budget status, and ChatPanelView had no progress-bar component to render.",
+    "fix": "Added budgetRatios() to StreamingContextWatchdog to return outputUsed, outputCeiling, totalUsed, totalCeiling, and clamped ratios. Defined StreamingBudgetStatus in ChatEvents.swift with kind (safe/warning/critical) and limitKind (outputTokens/totalContext). Added @Published var streamingBudgetStatus: StreamingBudgetStatus? to ChatViewModel, refreshed after every SSE delta, and cleared it on conversation switch, send, cancel, new conversation, and all context-limit action handlers. In ChatPanelView.unifiedInputBar added a compact streamingBudgetProgressBar between the attachment notice and warning banner: a 4-pixel rounded bar colored green/amber/red, a compact used / ceiling label that names the dominant limit, and a tooltip with the output/total breakdown. Added StreamingContextWatchdogTests for budgetRatios and StreamingContextWatchdogIntegrationTests verifying the status is published during a stream and cleared on newConversation.",
+    "files": [
+        "trios/rings/SR-00/StreamingContextWatchdog.swift",
+        "trios/rings/SR-01/ChatEvents.swift",
+        "trios/rings/SR-02/ChatViewModel.swift",
+        "trios/BR-OUTPUT/ChatPanelView.swift",
+        "trios/tests/TriOSKitTests/StreamingContextWatchdogTests.swift",
+        "trios/tests/TriOSKitTests/StreamingContextWatchdogIntegrationTests.swift",
+        "trios/.claude/plans/trios-cycle40-output-budget-progress-during-streaming.md",
+        "trios/.claude/plans/trios-cycle40-output-budget-progress-during-streaming-report.md",
+        "trios/.trinity/experience/2026-07-27_output-budget-progress-during-streaming-loop-040.json"
+    ],
+    "tests": "TRIOS_SKIP_CHAT_E2E=1 ./build.sh PASS; cargo test -p trios-mesh PASS (101 tests); TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-build PASS; TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-audit PASS (0 hard-gate findings); TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-seal SEAL VALID. swift test unavailable in CommandLineTools-only environment.",
+    "next_options": [
+        "Conversation-level learned-limit reset - add a menu action to clear the learned context/output ceilings for the current conversation only, without resetting the global StreamingContextLimitLearner history.",
+        "Pin-aware draft context badge - extend the composer draft utilization badge to explicitly read Pinned model: X% of usable context with a pin icon, making it clear the bands are evaluated against the pinned tuple.",
+        "Stream health telemetry - record per-stream output/total ceiling utilization as a lightweight outcome event so future model selection can prefer models with headroom for the user's typical requested budgets."
+    ],
+    "claim": null
+}

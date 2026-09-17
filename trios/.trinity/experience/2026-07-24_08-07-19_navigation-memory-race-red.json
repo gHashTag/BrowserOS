@@ -1,0 +1,24 @@
+{
+  "timestamp": "2026-07-24T08:07:19Z",
+  "task_id": "TRIOS-PORTABLE-LAND-001",
+  "claim_id": "989F8151-6640-44B4-AFE1-FEEB17078EF2",
+  "action": "navigation_completed_memory_race_tdd_red",
+  "result": "EXPECTED_RED",
+  "evidence": {
+    "command": "bash tests/swift/run_chat_sse_e2e.sh",
+    "exit_code": 1,
+    "artifact": "working-tree test added before production fix",
+    "facts": [
+      "The completed turn reached the controlled durable save boundary.",
+      "The UI switched to the next conversation while that save was pending.",
+      "After releasing the save, the old conversation memory was absent.",
+      "All earlier scenarios remained green; the single new assertion failed for the intended lifecycle reason."
+    ]
+  },
+  "root_cause": "Post-save eligibility coupled privacy deletion to pendingMemoryTurn and streamGeneration. Ordinary navigation clears both even though it does not revoke memory consent.",
+  "hypothesis": "After an authoritative finish starts a write, only the per-conversation memory-write revision or an explicit clear operation may invalidate that write.",
+  "residual_risks": [
+    "Production code is intentionally unchanged at this RED checkpoint.",
+    "Scroll anchoring and terminal streaming-flag findings from Agent V remain unresolved."
+  ]
+}

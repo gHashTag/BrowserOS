@@ -1,0 +1,28 @@
+{
+  "task_id": "MODEL-CONTROL-001",
+  "claim_id": "B5355D0B-2B45-40A6-86E8-53325F7BC0A7",
+  "timestamp": "2026-07-22T12:29:15Z",
+  "action": "research_build_verify_learn",
+  "result": "clean",
+  "problem": "The chat hid its active provider and exact model, exposed no token usage, and required environment configuration with no discoverable model or credential management UI.",
+  "solution": "Added a Models tab, dynamic provider catalogs, manual model IDs, editable endpoints, macOS Keychain credentials, request serialization, streaming usage accounting, visibly approximate fallback estimates, and compact plus expanded model and token status controls.",
+  "verification": {
+    "model_provider_tests": "PASS",
+    "catalog_parser_tests": "PASS",
+    "token_usage_tests": "PASS",
+    "sse_usage_tests": "PASS",
+    "swift_build": "PASS",
+    "compiled_swift_files": 80,
+    "compiler_warnings": 0,
+    "code_signature": "PASS",
+    "visual_models_tab": "PASS",
+    "visual_status_bar": "PASS",
+    "live_health": {
+      "status": "ok",
+      "cdpConnected": true
+    },
+    "runtime_launch": "PASS",
+    "pid": 45183
+  },
+  "lesson": "Runtime identity, cost signals, and credentials are one control surface: the selected model must be visible where requests start, detailed configuration must remain adjacent, provider catalogs must be refreshed dynamically, and secrets must never share ordinary preference storage."
+}

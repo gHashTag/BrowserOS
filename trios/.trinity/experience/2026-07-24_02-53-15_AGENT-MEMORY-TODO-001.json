@@ -1,0 +1,45 @@
+{
+  "task_id": "AGENT-MEMORY-TODO-001",
+  "claim_id": "4C6C32D6-8454-460E-8413-FCDA9B9E85CD",
+  "timestamp": "2026-07-23T19:53:15Z",
+  "action": "audit_spec_tdd_code_build_runtime_verify_learn",
+  "result": "clean_local_not_landed",
+  "problem": "A supplied report claimed that durable agent memory, a TODO planner, animated UI, integration, tests, and a running app already existed. Repository and runtime evidence showed that the named files, integration, SQLite storage, and tests did not exist.",
+  "solution": "Audited the claim, wrote the behavior and privacy contract first, implemented SQLite WAL storage and a three-phase planner, added a compact matte-glass planner and memory UI, connected the stream lifecycle, guarded conversation transitions across actor suspension points, stored only controlled topics plus Keychain-keyed HMAC recall features, and repaired local Keychain compatibility for ad-hoc development builds.",
+  "verification": {
+    "fabricated_report_audit": "PASS",
+    "chat_sse_e2e": {
+      "status": "PASS",
+      "scenarios": 14,
+      "recall_navigation_gate": "DETERMINISTIC_PASS",
+      "early_release_latch": "PASS"
+    },
+    "trios_build": {
+      "status": "PASS",
+      "compiled_swift_files": 97
+    },
+    "code_signature": "PASS",
+    "agent_v": "PASS",
+    "sqlite": {
+      "status": "PASS",
+      "schema_version": 1,
+      "journal_mode": "wal"
+    },
+    "keychain_hmac": "PASS",
+    "runtime_launch": {
+      "status": "PASS",
+      "pid": 67135,
+      "mode": "exact signed binary from a clean temporary path"
+    },
+    "browseros_health": {
+      "status": "ok",
+      "cdpConnected": true
+    },
+    "diff_check": "PASS",
+    "ascii_feature_files": "PASS",
+    "xctest": "SKIPPED_TOOLCHAIN_XCTEST_UNAVAILABLE",
+    "screen_capture": "BLOCKED_BY_MACOS_SCREEN_RECORDING_PERMISSION",
+    "landing": "NOT_REQUESTED"
+  },
+  "lesson": "Never accept success prose as evidence. Verify the tree, compile the actual target, exercise lifecycle races, inspect the live persistence boundary, and independently review privacy. Search fingerprints for user text must be keyed, and every actor suspension point in a streaming UI must revalidate conversation identity before mutating or saving state."
+}

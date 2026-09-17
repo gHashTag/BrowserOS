@@ -1,0 +1,56 @@
+{
+  "id": "WAVE-006",
+  "date": "2026-07-21",
+  "ring": "trios",
+  "phase": "verify",
+  "road": "B",
+  "agents_involved": [
+    "t27-creator",
+    "t27-verifier",
+    "t27-experience"
+  ],
+  "issue": "Recurring /loop macro: Wave 6 research and implementation of trios tmp-zero cleanup.",
+  "problem": "Three trios Rust rings still used /tmp in unit tests and sample strings: clade-experience wrote size-test fixtures under /tmp, clade-audit read/wrote test files under /tmp, and clade-launchd tests used /tmp as sample WorkingDirectory values.",
+  "fix": "Added tempfile = '3' as dev-dependency to clade-experience and clade-audit; rewrote tests to use isolated tempfile::tempdir() directories with automatic cleanup. Replaced /tmp sample strings in clade-launchd tests with project-relative .trinity/dev/launchd-wd. Updated portable-paths/SKILL.md and created tmp-zero/SKILL.md.",
+  "files_changed": [
+    "trios/rings/RUST-07/clade-experience/Cargo.toml",
+    "trios/rings/RUST-07/clade-experience/src/main.rs",
+    "trios/rings/RUST-09/clade-launchd/src/main.rs",
+    "trios/rings/RUST-12/clade-audit/Cargo.toml",
+    "trios/rings/RUST-12/clade-audit/src/main.rs",
+    "trios/.trinity/specs/tmp-zero.md",
+    "trios/.trinity/wave-loop-006.md",
+    "trios/.claude/skills/portable-paths/SKILL.md",
+    "trios/.claude/skills/tmp-zero/SKILL.md"
+  ],
+  "tests_added": "No new tests; existing tests migrated to tempfile.",
+  "verification": "grep -RIn '/tmp' rings/RUST-*/src/ returned zero matches; cargo test -p clade-experience -p clade-launchd -p clade-audit --all-features passed 37 tests; cargo test --workspace --all-features passed; cargo clippy --workspace --all-targets --all-features clean; ./build.sh OK; ASCII scan of changed files clean.",
+  "pattern": "Use tempfile::tempdir() for test scratch directories and project-relative .trinity/ subdirs for persistent runtime state; never write /tmp paths into workspace Rust source.",
+  "anti_pattern": "Do not use /tmp for test fixtures or runtime state; do not manually clean up test directories when tempfile Drop handles it.",
+  "tags": [
+    "tmp-zero",
+    "tempfile",
+    "test-isolation",
+    "TOCTOU",
+    "CI-reproducibility",
+    "clade-experience",
+    "clade-audit",
+    "clade-launchd",
+    "ascii-only",
+    "L1-TRACEABILITY",
+    "L3-PURITY",
+    "L7-UNITY"
+  ],
+  "commit": "8316ffe85",
+  "branch": "feat/zai-provider",
+  "skills_saved": [
+    "trios/.claude/skills/portable-paths/SKILL.md",
+    "trios/.claude/skills/tmp-zero/SKILL.md"
+  ],
+  "next_wave_options": [
+    "seal-automation",
+    "meshd-revival",
+    "diff-hardening"
+  ],
+  "closeout_report": "trios/.trinity/wave-loop-006.md"
+}

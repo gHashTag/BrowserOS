@@ -1,0 +1,23 @@
+{
+  "timestamp": "2026-07-24T07:47:19Z",
+  "task_id": "TRIOS-PORTABLE-LAND-001",
+  "claim_id": "989F8151-6640-44B4-AFE1-FEEB17078EF2",
+  "action": "clean_dependency_reproduction_audit",
+  "result": "BLOCKED",
+  "evidence": {
+    "command": "TRINITY_ROOT=<clean-trinity-worktree-at-9acaebd248e95c7e9fccf5a9cf972498f71b111a> TRIOS_SKIP_CHAT_E2E=1 TRIOS_SKIP_SWIFT_TEST=1 ./build.sh",
+    "exit_code": 1,
+    "artifact": "gHashTag/trinity@9acaebd248e95c7e9fccf5a9cf972498f71b111a",
+    "facts": [
+      "The clean published Trinity revision has no QueenUILib product.",
+      "The working Trinity checkout contains uncommitted and untracked Queen integration APIs required by TriOS.",
+      "Merging BrowserOS alone would not make a clean-machine source build reproducible.",
+      "The temporary clean dependency worktree was removed after the audit."
+    ]
+  },
+  "residual_risks": [
+    "Cross-repository Queen changes are outside the currently authorized TriOS landing scope.",
+    "Most detailed agent checkpoints and the personal reliability-wave skill are ignored or stored outside this repository.",
+    "The repository has no master branch; its canonical integration branch is dev."
+  ]
+}

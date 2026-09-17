@@ -1,0 +1,52 @@
+{
+  "title": "Cycle 17: Latency-Aware Routing",
+  "date": "2026-07-26",
+  "weak_spots": [
+    "Reliability scorecard ignored observed request/probe latency",
+    "ModelHealthService returned only health state, losing duration",
+    "Chat streams measured no total duration or TTFT",
+    "MemoryStore schema had no latency columns",
+    "Models tab showed health but no latency signal"
+  ],
+  "files_changed": [
+    "rings/SR-00/ModelReliabilityService.swift",
+    "rings/SR-00/ModelHealthService.swift",
+    "rings/SR-00/ModelConfigurationStore.swift",
+    "rings/SR-01/ChatEvents.swift",
+    "rings/SR-01/MemoryStore.swift",
+    "rings/SR-02/ChatViewModel.swift",
+    "BR-OUTPUT/ModelsTabView.swift",
+    "tests/TriOSKitTests/ModelHealthServiceTests.swift (new)",
+    "tests/TriOSKitTests/ModelReliabilityServiceTests.swift",
+    "tests/swift/ChatSSEEndToEndTest.swift",
+    "tests/swift/ChatSSETestMocks.swift"
+  ],
+  "gates": {
+    "build.sh": "passed",
+    "clade-build": "passed",
+    "cargo test --workspace": "passed",
+    "cargo clippy --workspace": "passed",
+    "clade-audit": "0 findings",
+    "clade-seal": "SEAL VALID",
+    "trios.app": "relaunched",
+    "health": "{\"status\":\"ok\",\"cdpConnected\":true}"
+  },
+  "next_options": [
+    {
+      "name": "Adaptive concurrency / parallel warmup routing",
+      "summary": "Issue small warmup probes to multiple providers/models in parallel and route the live request to whichever returns the lowest TTFT (Zeph/Anyscale pattern)."
+    },
+    {
+      "name": "Cross-provider failover",
+      "summary": "Allow fallback and predictive selection to switch providers when the current provider is entirely unhealthy, not just pick another model within the same provider."
+    },
+    {
+      "name": "Latency SLO user preference",
+      "summary": "Expose a configurable target latency SLO in the Models tab and tune the composite penalty curve so users can prefer responsiveness over cost or raw reliability."
+    }
+  ],
+  "notes": [
+    "Chat e2e tests now pass an in-memory VolatileMemoryStore reliability backend to avoid opening the persistent SQLCipher database on every scenario.",
+    "Schema version bumped to 4; durable-memory e2e assertion updated to expect version 4."
+  ]
+}

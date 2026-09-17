@@ -1,0 +1,29 @@
+{
+  "timestamp": "2026-07-24T08:24:26Z",
+  "task_id": "TRIOS-PORTABLE-LAND-001",
+  "claim_id": "989F8151-6640-44B4-AFE1-FEEB17078EF2",
+  "action": "post_review_signature_runtime_e2e",
+  "result": "PASS_WITH_RESIDUAL_WARNING",
+  "evidence": {
+    "commands": [
+      "codesign --verify --deep --strict --verbose=2 trios.app",
+      "open /Users/playra/BrowserOS-full/trios/trios.app",
+      "curl http://127.0.0.1:9105/health",
+      "bash e2e/trios_e2e_flow.sh"
+    ],
+    "exit_codes": [0, 0, 0, 0],
+    "facts": [
+      "The regenerated bundle satisfies its designated requirement and contains the expected com.browseros.trios bundle identifier.",
+      "The exact regenerated executable launched from /Users/playra/BrowserOS-full/trios/trios.app.",
+      "Health returned status ok with cdpConnected true.",
+      "The runtime E2E script found the expected process and captured report /tmp/trios_e2e/report_1784881423.md.",
+      "Visual inspection of /tmp/trios_e2e/screenshot_1784881423.png found a coherent chat layout without overlap, black rectangles, or duplicated chrome.",
+      "A transient SecurityAgent process exited without intervention and no credential prompt remained visible."
+    ]
+  },
+  "residual_risks": [
+    "The runtime log still contains a connection-refused error from an optional local endpoint that the health check does not identify.",
+    "An independent TriOS agent is concurrently producing untracked installation artifacts; those foreign files must remain excluded.",
+    "A clean-machine release remains blocked by unpublished Queen and mesh dependency state."
+  ]
+}

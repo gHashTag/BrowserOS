@@ -1,0 +1,76 @@
+{
+  "episode_id": "2026-07-26_portable-land-local",
+  "date": "2026-07-26",
+  "task_id": "TRIOS-PORTABLE-LAND-001",
+  "agent": "claude",
+  "road": "B",
+  "title": "TriOS portable local landing of the zai-provider integration stack",
+  "problem": "The feat/zai-provider branch contained ~200 modified/untracked files spanning TriOS Swift rings, BrowserOS server changes, generated docs, build products, and runtime state. A safe local landing on dev required triaging the dirty tree, fixing pre-commit lint errors, running all Trinity gates, and documenting the remaining clean-machine blockers honestly.",
+  "root_cause": "Multiple cycles of autonomous work (Cycles 10-27) accumulated source, plans, generated artifacts, and runtime state in the same working tree. The stale task claim was held by codex-root with no TTL, blocking legal mutation under Trinity coordination law. The lefthook pre-commit gate then surfaced 8 Biome errors that had to be fixed before the integration commit could land.",
+  "fix": [
+    "Reclaimed the stale codex-root claim and created a new claude claim with TTL and P1 priority.",
+    "Classified files into buckets A (core source), B (plans/reports), C (generated docs), and D (runtime state).",
+    "Moved bucket C to .claude/drafts/portable-land-artifacts/ and added bucket D paths to root .gitignore.",
+    "Fixed 8 hard Biome errors in packages/browseros-agent/apps/server: unused variables/imports, redeclared types, node:crypto import, any types, and JSON formatting.",
+    "Committed 218 files as a single integration commit and fast-forwarded local dev to 0ffca73e1.",
+    "Wrote TRIOS_RELEASE_MANIFEST.md and trios/docs/INSTALLATION_README.md documenting exact commits, blockers, install steps, and first-launch guidance.",
+    "Ran the full Trinity verification contract: build.sh, clade-build, clade-e2e, clade-audit (0 findings), clade-seal (SEAL VALID), chat SSE e2e, trios e2e flow, and health check."
+  ],
+  "files": [
+    "trios/build.sh",
+    "trios/trios",
+    "trios/rings/SR-00/SR-01/SR-02",
+    "trios/BR-OUTPUT/",
+    "trios/tests/",
+    "packages/browseros-agent/apps/server/src/api/services/local-auth-service.ts",
+    "packages/browseros-agent/apps/server/src/api/services/token-family-store.ts",
+    "packages/browseros-agent/apps/server/src/api/services/chat-history-service.ts",
+    "packages/browseros-agent/apps/server/src/api/services/task-queue-service.ts",
+    "packages/browseros-agent/apps/server/src/api/routes/local-auth.ts",
+    "packages/browseros-agent/apps/server/src/api/routes/chat-history.ts",
+    "packages/browseros-agent/apps/server/src/api/routes/tasks.ts",
+    "packages/browseros-agent/apps/server/src/api/utils/require-local-auth.ts",
+    "packages/browseros-agent/apps/server/src/lib/db/retry.ts",
+    "packages/browseros-agent/apps/server/tests/api/routes/auth-routes.test.ts",
+    ".gitignore",
+    "TRIOS_RELEASE_MANIFEST.md",
+    "trios/docs/INSTALLATION_README.md",
+    ".claude/plans/trios-portable-land-001-report.md"
+  ],
+  "tests": {
+    "build.sh": "PASS",
+    "clade-build": "PASS",
+    "clade-e2e": "PASS",
+    "clade-audit": "0 hard findings",
+    "clade-seal": "SEAL VALID",
+    "chat_sse_e2e": "PASS",
+    "trios_e2e_flow": "PASS",
+    "health": "{\"status\":\"ok\",\"cdpConnected\":true}"
+  },
+  "variants": [
+    "A \u2014 Minimal: polish docs and local installer only, do not resolve publication blockers.",
+    "B \u2014 Balanced (recommended): publication runbook + push QueenUILib integration and trios-mesh submodule to reachable branches + CI clean-clone gate.",
+    "C \u2014 Deep: full clean-machine release with Developer ID signing, notarization, signed .dmg/.zip, GitHub Releases, and verification on a fresh Mac."
+  ],
+  "blockers": [
+    "Unpublished QueenUILib integration in local Trinity checkout (~/trinity).",
+    "trios-mesh submodule commit 27a76f2 is local-only (feat/trios-integration branch).",
+    "Ad-hoc code signing only; Developer ID + notarization required for public release.",
+    "No signed release artifact, GitHub Release, or Homebrew cask."
+  ],
+  "learnings": [
+    "Dirty-tree triage before staging is essential when many autonomous cycles have mixed source with generated/runtime files.",
+    "Run Biome directly in addition to lefthook to get stable, copy-pasteable diagnostics.",
+    "Fast-forward merge keeps history linear and avoids merge bubbles.",
+    "After ./build.sh, always relaunch trios.app with open trios.app to preserve the menu-bar logo invariant.",
+    "clade-audit and clade-seal are long-running; avoid concurrent runs that contend for the Cargo package cache lock."
+  ],
+  "next_task": "Address the user-reported chat failure: model claude-opus-4-6 is unavailable / insufficient balance; /doctor reports model access issue.",
+  "follow_up": [
+    {
+      "timestamp": "2026-07-26T06:27:03.878528Z",
+      "event": "upstream_divergence",
+      "detail": "origin/dev advanced 17 commits removing trios/ and apps/server/; local dev is 12 ahead, 17 behind. feat/zai-provider recreated from origin/dev."
+    }
+  ]
+}

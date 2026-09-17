@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "mimosa-finding-history/v1",
+  "runId": "20260831T083906134Z-19417-b425c7440941",
+  "runStatus": "inconclusive",
+  "errors": [
+    "bash-discovery:trios/.worktrees/prod/queen-5002/trios/agent-server/apps/agent/entrypoints/app/connect-mcp/useGetUserMCPIntegrations.tsx: bash_discovery_incomplete: project enumeration exceeded 5000 reviewable files",
+    "baseline:trios/.worktrees/prod/queen-5002/trios/agent-server/apps/agent/entrypoints/app/connect-mcp/useRemoveManagedServer.tsx: baseline_partial: baseline exceeded 5000 candidate files",
+    "scan:trios/agent-server/apps/server/src/api/server.ts: scanner_failed: spawnSync /Users/playra/.nvm/versions/node/v22.22.0/bin/node ETIMEDOUT",
+    "scan:trios/agent-server/apps/server/src/api/services/queen-tick.ts: scanner_failed: spawnSync /Users/playra/.nvm/versions/node/v22.22.0/bin/node ETIMEDOUT"
+  ],
+  "target": ".",
+  "revision": "4dc220be840d1ee33f1dfaa06e44e29d285fd47f",
+  "diffHash": "b4d13be566bfca63dc92a7cd654c56ee3c7735f9329fa650c2e45e3f7a5dcfd4",
+  "rulesVersion": "unavailable",
+  "recordedAt": "2026-08-31T08:39:06.134Z",
+  "timing": {
+    "startedAt": "2026-08-31T08:39:03.757Z",
+    "completedAt": "2026-08-31T08:39:06.134Z",
+    "durationMs": 2377
+  },
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "total": 0,
+    "modelCalls": 0,
+    "measurement": "known-zero"
+  },
+  "findings": {
+    "total": 0,
+    "bySeverity": {},
+    "byStatus": {}
+  },
+  "coverage": {
+    "status": "partial",
+    "reasonCounts": {
+      "bash_discovery_incomplete": 1,
+      "baseline_partial": 1,
+      "scanner_failed": 2,
+      "project_check_failed": 4
+    }
+  },
+  "evidenceBoundary": "static_only",
+  "immutableReport": ".mimosa/reports/task-review-sess_2c244a44-c950-44f1-91c3-11aa8d7a76e9-20260831T083906134Z-19417-b425c7440941.json"
+}

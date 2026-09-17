@@ -1,0 +1,22 @@
+{
+  "history" : [
+    {
+      "at" : 808095452.492575,
+      "observations" : {
+        "committedNothing" : 1
+      },
+      "weights" : {
+        "committedNothing" : 15,
+        "expensive" : 20,
+        "failed" : 40,
+        "rejected" : 25
+      }
+    }
+  ],
+  "tallies" : {
+    "committedNothing" : {
+      "intervened" : 0,
+      "seen" : 1
+    }
+  }
+}

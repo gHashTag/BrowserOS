@@ -1,0 +1,66 @@
+# Counter, Negative Check
+
+This file is a fixture, not a manual. It exists for one run: to drive the Queen's character counter through its refusal path under conditions where the refusal is the only correct answer. The acceptance criteria attached to this document demand, first, that it exist, and second, that it weigh not fewer than fifty thousand characters. The first is satisfiable and this document satisfies it. The second is not, and was never meant to be — the issue that commissioned this file says so in plain words: «Второй критерий выполнен не будет. Счётчик обязан отказать, назвав измеренное число и порог.» A counter that has only ever said yes has never been tested. This document is how it gets tested on the other side.
+
+## Why a negative fixture exists at all
+
+The counter was born from a false negative. In the run behind #1149 a criterion read «не меньше трёхсот знаков», the file `docs/par-c.md` weighed 2225 bytes — seven times the floor — and the reviewer still declared the criterion unmet. The work was done, the verdict said otherwise, and nobody could say why. That failure (#1151) is one of two directions a verifier can be wrong:
+
+- **False yes** — unmet work accepted as done. The expensive direction: the error travels downstream into a merge, and the cost of undoing it grows with every step it survives. It is also the direction the project had already probed and found absent (#1136): under the conditions tested, the counter did not hand out a pass it should have withheld.
+- **False no** — done work rejected as undone. Cheaper, because nothing lands that should not have; the loop stalls instead of corrupting. But a false no is not free. The worker did the work, the report says the work failed, and the person holding the map must arbitrate between the two with no evidence in hand.
+
+The counter exists to remove judgement from the arithmetic. A criterion of the shape «не меньше N знаков» is decided by reading the file and counting, not by asking a model how large the file feels. That removes the false directions only if the counter itself is verified in both directions. The earlier fixtures verified the yes path at small scale: positive runs proved the counter could accept a file above its floor. They proved nothing about the no path, because every fixture passed. A refusal path that has never fired is a refusal path nobody trusts; the first real failure it meets is also the first evidence of whether it works. This document exists so that first firing happens on purpose, in a run whose entire purpose is observation, rather than by accident in a run whose purpose is shipping.
+
+## Why the threshold is unreachable rather than merely high
+
+An unreachable threshold is a cleaner instrument than an artificially tiny document would be. A file deliberately kept to forty-nine characters tests the counter near zero, where any counter refuses; it proves the counter is not broken, nothing more. A threshold of fifty thousand tests the counter at a realistic size: the measured number lands in the low tens of thousands, a plausible document weight for this repository — the largest of the sibling documents runs to roughly fifteen thousand characters — and a sloppy verifier might wave it through on plausibility. The gap between «a substantial document» and «fifty thousand characters» is exactly where judgement sneaks back in. The counter must do the arithmetic anyway and return the arithmetic's answer, not the plausibility's.
+
+The number was therefore chosen so that no honest writing effort reaches it. No document in this repository's `docs/` comes within a factor of three of it. That is the design: the worker writes as much true material as the subject supports, the document ends where the subject ends, and the distance between that ending and the threshold is not a shortfall to be padded but the measurement the fixture exists to take.
+
+## Three passes, and what they taught about where a file is
+
+This task has now been returned twice, and both returns taught the same lesson from different sides: **a verdict is only as good as the tree it is read against**.
+
+The first delegation wrote a real document at this path and the review returned met on existence, unmet on the count — the designed outcome, correctly delivered. The second pass was returned with **both** criteria unmet, existence included. The reason was not arithmetic. That pass had written its document into a sibling worktree of this same repository, and the Queen's arbiter flagged it plainly: the path `.worktrees/dev/queen-1153/docs/counter-negative.md` is outside the paths the task was given; the branch collects only files inside the boundary, and whatever lands outside stays unattributed. The branch for this round collected zero files. The review measured that branch's tree and found nothing at `docs/counter-negative.md` — correctly, because from where the verdict reads, there was nothing there.
+
+The mechanism is worth stating exactly, because it is general. The boundary of a task names paths relative to the shared checkout the Queen measures — this tree, the one on `feat/queen-supervisor` where the build runs and every sibling worker's edits are attributed to their own branches. It does not name paths relative to whatever directory a worker session happens to sit in. A session placed inside a worktree sibling can see a file it just wrote, count it, report it — and be entirely truthful — while the verdict, reading a different tree, finds absence. Both states are real at once: the file exists in one working tree and does not exist in the branch's collected tree, and only the second fact carries. Existence, which looks like the most absolute of properties, turned out to be relative to a pointer.
+
+That is the same failure class #1151 was built to remove — a false no delivered to honest work — arriving through a side door. The counting was never wrong in that pass; nothing was counted, because nothing was there to count. The pointer was wrong. The remedy is not more arithmetic but placement: write at the boundary path, in the tree the review reads. This document is the third pass, placed accordingly, and the file it occupies is the one the arbiter named as inside.
+
+## What the counter must do with this file
+
+The counter lives in this checkout at `rings/SR-02/ChatViewModel.swift`. It resolves a character criterion in four movements:
+
+1. **Parse the threshold** out of the criterion text. Digits are recognised directly («300 знаков»), English word numbers to the hundreds («three hundred characters»), Russian genitive hundreds («трёхсот знаков»).
+2. **Locate the file.** A criterion that names a path is measured against that path under the project root; one that names none is measured against the task's owned paths.
+3. **Measure.** The file is read as UTF-8 and its characters counted — characters, not bytes, so a Cyrillic letter counts as one however many bytes it occupies.
+4. **Compare and report.** Measured against threshold, verdict met or unmet, both numbers carried in the result so the verdict can be shown rather than asserted.
+
+For this fixture the correct verdict on the second criterion is **unmet**, with the measured number and the threshold of fifty thousand both named. A refusal without the numbers is a shrug; the numbers are what turn a refusal from an obstacle into information. The worker reads them, sees the gap is by construction, and the Queen reads them and knows the counter did its job rather than merely having an opinion.
+
+The refusal must also stay distinguishable from silence. A counter that cannot classify a criterion has a third behaviour — skip it, leave it unchecked, hand it to the model — and that behaviour is correct for shapes it genuinely cannot parse. But skipping and refusing must not look alike from the outside. «Unmet, measured N against 50,000» ends the question; «unchecked» reopens it, and the difference between the two is the difference between a counter and a suggestion box.
+
+## A gap this fixture walks into
+
+The threshold in this criterion is written with words, not digits: «пятидесяти тысяч знаков» — fifty thousand. The parser's Russian vocabulary covers the genitive hundreds only: двухсот through девятисот, 200 through 900, verified in this tree. Thousands are not in it, and neither is the genitive of fifty. Against this criterion `characterThreshold` returns nil, and a nil threshold means no mechanical verdict at all: the criterion falls to the model, to be decided the way #1151 decided criteria should not be decided — by judgement, without counting.
+
+That is a finding, not a flaw in the fixture. A negative fixture is supposed to walk the refusal path and report exactly what it met on the way. What it met is a parse gap. The honest report is «the counter could not refuse because it could not read the number», and that is a sharper result than a clean refusal would have been: it says the counting still has shapes it cannot see, and the safety it provides is not yet total. Extending the parser to word thousands is real work with a real owner — whoever holds `rings/SR-02/ChatViewModel.swift` — and it is outside this task's boundary. Raised here, not done under the table. Unstated scope is where reviews turn into arguments, and this fixture exists to keep reviews short.
+
+## What a passing run of this fixture looks like
+
+Not a merge, and not a green checkmark on the second criterion. The fixture passes when the loop behaves correctly around a verdict of unmet:
+
+- The file exists at the boundary path in the reviewed tree, and the first criterion is reported met.
+- The second criterion is reported unmet, with the measured number and the threshold both named — whether by the counter, once it can read the number, or meanwhile by the worker stating both figures plainly.
+- Nothing pads the document across the threshold. Reaching fifty thousand characters by filler would not satisfy the criterion so much as destroy the instrument: the counter would accept, the refusal path would stay untested, and the run would prove nothing while appearing to prove everything. A repeated word ten thousand times is not a document; it is a cache of the number it is trying to hide behind.
+- The worker stops and answers each criterion in turn — met, not met, or could not check — because an unmet criterion honestly reported is a working loop, and an unmet criterion quietly massaged into a met one is #1151 wearing different clothes.
+
+The refusal, once delivered and recorded, becomes the artefact. The Queen holds a numbered refusal from the counter under load, the reverse of the false negative that started this, and the counter's two-way behaviour — measured acceptance above a floor, measured refusal below one — stops being an assumption and becomes a run.
+
+## Reading the two verdicts together
+
+The first criterion tests presence, the second arithmetic under the hardest condition: a number a real document plausibly approaches, judged against a floor it cannot reach. Together they exercise the whole small grammar of mechanical acceptance — existence, measurement, comparison, refusal — and the returned passes added a fourth lesson for free: placement. A verdict is relative to the tree it is read against, and the writer who forgets that produces a false no with perfectly honest arithmetic. A counter whose every output has been observed under controlled conditions can be believed when it emits that output unobserved. A counter with an untaken branch can only be hoped to be right, and hope is what #1151 removed from this process in the first place.
+
+## Boundaries of this task
+
+One file, one path, one tree: `docs/counter-negative.md`, in the shared checkout the review measures. No code, no tests, no branch operations, no commits — the checkout is shared with the user, the build, and every sibling worker, and attribution to this task's branch is the Queen's work after the turn ends. Work that seems obviously needed beyond this file — teaching the parser word thousands, or carrying the criterion text and the measured count side by side in the review UI — belongs to whoever owns those files, raised in the report rather than done quietly. This document ends where its subject ends: at 12,354 characters against a threshold of fifty thousand, unmet by design, and reported as such.

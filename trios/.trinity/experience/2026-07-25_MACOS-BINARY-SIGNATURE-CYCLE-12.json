@@ -1,0 +1,34 @@
+{
+  "title": "BrowserOS macOS compiled binary signature repair — Cycle 12 weak-spot closure",
+  "date": "2026-07-25",
+  "ring": "packages/browseros-agent/scripts/build",
+  "agents": ["claude", "Explore", "WebSearch"],
+  "road": "B",
+  "issue": "browseros-ai/BrowserOS#2025",
+  "problem": "BrowserOS server production binaries produced by `bun build --compile` were killed by macOS with SIGKILL (exit code 137) immediately on launch. `codesign --sign -` reported 'invalid or unsupported format for signature'. This blocked the server build smoke test and any portable install path that depends on a runnable compiled binary.",
+  "root_cause": "Bun v1.3.12 regression on macOS arm64: compiled Mach-O binaries have a corrupt/truncated LC_CODE_SIGNATURE. The kernel's AMFI rejects the binary before `main()` runs, so `--version` and the actual server both exit 137 with no output. Verified independently with a minimal `console.log('hello')` compiled binary (also killed).",
+  "fix": "Added a post-compile signature-repair step in `scripts/build/server/compile.ts` for macOS targets: strip the broken Bun-generated signature with `codesign --remove-signature` and apply a fresh ad-hoc signature with `codesign --force --sign -`. Made the step best-effort so cross-compilation environments that lack `codesign` only log a warning instead of failing the build.",
+  "files": [
+    "packages/browseros-agent/scripts/build/server/compile.ts",
+    "packages/browseros-agent/apps/server/tests/build.test.ts"
+  ],
+  "tests": [
+    "bun test apps/server/tests/build.test.ts PASS (2 pass, 0 fail)",
+    "bun tsc --noEmit PASS",
+    "./build.sh PASS",
+    "cargo run --bin clade-build PASS",
+    "cargo run --bin clade-e2e PASS",
+    "bash e2e/trios_e2e_flow.sh PASS",
+    "cargo test --workspace PASS (341 tests)",
+    "cargo clippy --workspace PASS",
+    "open trios.app relaunched; curl http://127.0.0.1:9105/health returns ok"
+  ],
+  "waivers": [
+    "AGENT-V-WAIVER: browseros-ai/BrowserOS#2025 for hand-edited compile.ts"
+  ],
+  "follow_up": [
+    "Remove the signature-repair workaround once the project upgrades to Bun >= 1.3.13 (oven-sh/bun#29272).",
+    "Add a CI step that verifies the compiled binary launches on the target OS before publishing artifacts.",
+    "Consider adding an optional entitlements file for the server binary if macOS hardened runtime becomes required."
+  ]
+}

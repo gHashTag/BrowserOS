@@ -1,0 +1,24 @@
+{
+  "timestamp": "2026-07-24T07:20:02Z",
+  "task_id": "MEMORY-CONTROLS-001",
+  "claim_id": "2621A8A0-22B7-4E85-AA5C-3F2857AFD10C",
+  "action": "reliability_wave_skill_tdd_red",
+  "agent": "wave_skill_red",
+  "result": "EXPECTED_GAPS_OBSERVED",
+  "baseline_strengths": [
+    "Preserved unrelated dirty changes.",
+    "Refused to approve a user-controlled Keychain prompt.",
+    "Required current-artifact verification.",
+    "Produced a scientific-metaphor report even for a no-change loop."
+  ],
+  "gaps_to_teach": [
+    "Suggested releasing the active claim as blocked or letting it lapse instead of following the repository's ownership and heartbeat protocol through a temporary gate.",
+    "Did not require primary external technical sources when research is part of the wave.",
+    "Did not require a decomposed status-bearing implementation plan.",
+    "Allowed equivalent causal evidence instead of a strict RED-GREEN cycle for an implementation increment.",
+    "Used self-review instead of requiring an independent reviewer.",
+    "Did not require a structured checkpoint after every build, E2E, audit, or agent run.",
+    "Two of the three future collaboration options were operational duplicates."
+  ],
+  "repository_changes": "NONE_BY_SUBAGENT"
+}

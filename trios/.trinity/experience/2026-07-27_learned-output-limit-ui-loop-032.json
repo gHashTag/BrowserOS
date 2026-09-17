@@ -1,0 +1,28 @@
+{
+  "date": "2026-07-27",
+  "title": "Learned Output-Limit UI + Per-Send Budget Cap — Cycle 32 Closure",
+  "ring": "SR-00 / SR-02 / BR-OUTPUT",
+  "agents": "claude",
+  "road": "B",
+  "problem": "Cycle 31 made ChatRequestSizer respect the effective (learned-blended) maxOutputTokens when no explicit budget was requested, but the effective ceiling was invisible to users and there was no way to request a larger (or smaller) per-send output budget. Senders who knew they needed a short answer could not cap tokens, and senders who needed a long answer could not raise the budget up to the learned ceiling.",
+  "root_cause": "ModelRuntimeConfiguration only carried provider/model/baseURL/apiKey/fallbackModels; it had no maxOutputTokens field and ChatRequestBuilder never emitted max_tokens. ModelConfigurationStore persisted many preferences but not a per-send output budget. ChatViewModel.sendMessage passed requestedOutputTokens: nil to resolveContextRoutingDecision. The composer toolbar had no output-budget control, and ModelsTabView only showed learned badges, not the effective blended ceiling.",
+  "fix": "Extended ModelRuntimeConfiguration with an optional maxOutputTokens field and made apply(to:) emit max_tokens when present. Added a persisted @Published requestedOutputTokens preference to ModelConfigurationStore with set/clear helpers and an effectiveRequestedOutputTokens(for:provider:baseURL:) async clamp helper. Updated ModelConfigurationStore.runtimeConfiguration to forward the clamped budget so the provider receives it. Wired ChatViewModel.sendMessage to pass modelStore.requestedOutputTokens into resolveContextRoutingDecision and updated continueStreamOnLargerModel to use the configured effective budget instead of hardcoded 1024. Added a compact composer output-budget Menu in ChatPanelView with presets (256–65536), a Default option, ceiling-aware disabling, and a label showing current/ceiling. Added an effective output-limit line to ModelsTabView.activeModelSection showing the blended ceiling and the learned badge when available. Added ChatRequestBuilderTests for max_tokens presence/omission and ChatRequestSizerTests for requested-budget clamping and honoring.",
+  "files": [
+    "trios/rings/SR-00/ModelProvider.swift",
+    "trios/rings/SR-00/ModelConfigurationStore.swift",
+    "trios/rings/SR-02/ChatViewModel.swift",
+    "trios/BR-OUTPUT/ChatPanelView.swift",
+    "trios/BR-OUTPUT/ModelsTabView.swift",
+    "trios/tests/TriOSKitTests/ChatRequestBuilderTests.swift",
+    "trios/tests/TriOSKitTests/ChatRequestSizerTests.swift",
+    "trios/.claude/plans/trios-cycle32-learned-output-limit-ui-loop-032-report.md",
+    "trios/.trinity/experience/2026-07-27_learned-output-limit-ui-loop-032.json"
+  ],
+  "tests": "TRIOS_SKIP_CHAT_E2E=1 ./build.sh PASS; cargo test -p trios-mesh PASS (101 tests); cargo run --bin clade-build PASS; cargo check --workspace PASS; cargo run --bin clade-e2e FAIL only because BrowserOS Server 127.0.0.1:9105/health is down (external dependency, CDP/Postgres not available); cargo run --bin clade-audit and cargo run --bin clade-seal hang at check 1 because they invoke ./build.sh without TRIOS_SKIP_CHAT_E2E=1 and wait on the unavailable server; open trios.app relaunched and menu-bar logo present. (swift test unavailable in CommandLineTools-only environment.)",
+  "next_options": [
+    "Pre-send routing by output budget — extend resolveContextRoutingDecision to consider both context-window and output-ceiling fit, and route to a candidate whose effective maxOutputTokens satisfies the user-requested budget.",
+    "Per-conversation output budget pinning — let each conversation thread remember its own requestedOutputTokens and context-window margin, overriding the global default only for that thread.",
+    "Live output-budget progress bar — add a streaming indicator showing consumed output tokens vs. the effective budget/ceiling with color bands, and surface approaching-limit warnings before the watchdog pauses."
+  ],
+  "claim": null
+}

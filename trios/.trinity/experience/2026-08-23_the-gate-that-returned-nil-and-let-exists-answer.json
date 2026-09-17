@@ -1,0 +1,62 @@
+{
+  "id": "2026-08-23_the-gate-that-returned-nil-and-let-exists-answer",
+  "date": "2026-08-23",
+  "ring": "SR-00, SR-02",
+  "branch": "feat/queen-supervisor",
+  "title": "The launch gate returned nil, exists() answered for it, and the attribute I added to prevent exactly this reported yes 55 times",
+  "severity": "high",
+  "agent": "Queen",
+  "problem": "The refusal histogram added yesterday reported 55 key reads as 'stored_but_unreadable' with keychain_was_asked: yes. Not one of them reached securityd. The attribute existed specifically to make that distinction and it inherited the same guess it was built to catch.",
+  "root_cause": "KeychainSymmetricKeyStore.read returned a bare nil while KeychainSecrets.isLaunching was true - a closed gate rendered identical to a missing item. TriOSEncryption.loadOrCreateSymmetricKey then fell through to exists(), which DOES query the Keychain and answers yes, and threw .storedButUnreadable. Two facts from two sources became one sentence naming the wrong refuser. keychainWasAsked was derived from the refusal case rather than from whether a call was made, so it inherited the error.",
+  "findings": [
+    "Release log 2026-08-23T07:06 window: 221 refusals - 166 read_already_in_flight, 55 stored_but_unreadable - and ZERO closed refusal windows.",
+    "The window measurement added yesterday is emitted only on a SUCCESSFUL key read, so a key that never answers produces no signal at all. make refusals printed 'none recorded', which reads as 'nothing wrong'. The worst case and the quiet case printed the same line.",
+    "The release binary predated the measurement commit a5eda7402 by two commits, so the previous round's work was in git and in no running process. Committing after the release build is what did it.",
+    "trios.app is signed with a stable self-signed identity ('TriOS Development', not adhoc), so the recurring ad-hoc-signing theory does NOT explain this failure. Measured with codesign before assuming it.",
+    "I claimed mid-round that ~10 concurrent make check runs from different agents were piling up. Wrong: the ppid chain showed two runs with nested make levels. I inferred a count from a process count without checking parentage - the same defect class, committed inside a round about it.",
+    "Another agent had already fixed the cassette SIGTERM race with a harness lock at /tmp/trios_harness.lock, complete with a comment quoting the exact failure I hit. Checking for an existing gate before building one would have saved the diagnosis."
+  ],
+  "fix": "KeychainSymmetricKeyStore.read throws launchGateClosed instead of returning nil. TriOSEncryption catches it and maps it to a fifth TriOSKeyRefusal case with keychainWasAsked = false, stopping before the exists() fall-through. make refusals now prints NONE CLOSED with the refusal count and names the still-open window as the bad case rather than the quiet one.",
+  "files_changed": [
+    "rings/SR-00/KeychainSymmetricKeyStore.swift",
+    "rings/SR-00/TriOSKeyRefusal.swift",
+    "rings/SR-00/TriOSEncryption.swift",
+    "tests/swift/key_refusal_test.swift",
+    "tools/forensics.py",
+    ".claude/skills/unmeasured-cause/SKILL.md"
+  ],
+  "prevention": [
+    "A bare nil return is a boolean standing in for an enum. If the refusing code knows why, throw the why - reconstructing it downstream is how the wrong refuser gets named.",
+    "When a read fails and the next line consults a DIFFERENT source to explain it, the explanation belongs to that other source. Say which one answered.",
+    "An attribute derived from a guess inherits the guess. keychainWasAsked must be set where the call is made or not made, not computed from the case that resulted.",
+    "Any report that prints the same line for a healthy and a broken system is not a report. A signal emitted only on success cannot describe a failure that never ends.",
+    "Build the release AFTER the last commit of the round, or the round's work is in git and in no running process. Check binary-drift before claiming a live fix.",
+    "Search for an existing gate before writing one. The cassette race was already fixed, in this tree, with a comment quoting my exact symptom."
+  ],
+  "corrections_to_earlier_claims": [
+    "Last round I recommended reviving conversation.persist.reencrypted to clear resting plaintext. Measured this round: the defaults store holds 55 conversation slots and ZERO TRIOS-PLAIN: markers. There is no resting plaintext. The recommendation was aimed at a problem that does not exist.",
+    "Last round I inferred 'the heal-on-read path is wired but has not run' from reencrypted == 0. It had run, once, at 06:05:58, over 55 conversations. It ran and produced nothing, which is a different fact.",
+    "Mid-round I reported ~10 concurrent make check runs from multiple agents. The ppid chain showed two runs with nested make levels."
+  ],
+  "related_episodes": [
+    "2026-08-23_the-refusal-that-never-asked-the-keychain",
+    "2026-08-21_unmeasured-cause-and-the-bricked-queen-chat"
+  ],
+  "tags": [
+    "unmeasured-cause",
+    "empty-vs-absent",
+    "keychain",
+    "launch-gate",
+    "conversation-encryption",
+    "self-inflicted",
+    "shared-tree"
+  ],
+  "the_number_that_was_missing": {
+    "measured_at": "2026-08-23T07:15 launch window, release log",
+    "conversation_key": "290.5s to answer, 2807 callers refused in that window",
+    "memory_key": "287.9s to answer, 1 caller refused",
+    "what_it_settles": "It kills the bounded-retry idea I proposed as variant A. A retry of 2s, or 30s, cannot close a 290-second window; no retry length that a save() can hold is in the right order of magnitude. The window is not a race to be waited out - it is the launch gate, and it lifts on an event the app already knows about.",
+    "what_it_points_to": "Defer the conversation write until the key is available, rather than retrying or writing plaintext. The wait is long but bounded and its end is observable: the same event that lets the heal sweep run. Writing plaintext to survive a 290s window that the app can simply wait out is the wrong trade, and until this number existed nobody could see that.",
+    "honesty_note": "2807 refusals for one key in one window also says the refusal path is far hotter than the 221 the histogram showed an hour earlier - the earlier count was taken before the gate had lifted, so it was a sample of an open window, not a total."
+  }
+}

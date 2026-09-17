@@ -1,0 +1,51 @@
+{
+  "date": "2026-07-24",
+  "title": "Variant B Phase 2/3: Task-Queue Lease Recovery, Route Auth, SSE Replay, and Graceful Shutdown",
+  "ring": "SR-01 / SR-02 / BrowserOS server",
+  "agents": "claude",
+  "road": "B",
+  "problem": "Continue Variant B implementation from the decomposed weak-spot plan: a crashed BrowserOS server left running tasks orphaned in agent_tasks; sensitive HTTP routes were reachable without origin validation; A2A SSE streams had no replay after reconnect and no keepalive; remaining fatal exit paths (CDP reconnect exhaustion, HTTP port conflict, missing OpenClaw/Hermes configuration) could kill the server or prevent startup; Swift network errors surfaced as raw URLError; no route-level auth or CORS tests existed.",
+  "root_cause": "Task dequeue claimed rows forever with no lease expiry, so a crash mid-task never returned work to the queue. requireTrustedAppOrigin existed but was not applied to most write/admin routes. A2ARegistryClient reconnected blindly without Last-Event-ID, dropping messages. Application.stop exited immediately without draining the PostgreSQL pool. CDP reconnect exhaustion called process.exit. OpenClaw/Hermes configure() failures were unguarded synchronous throws on the startup path.",
+  "fix": "Added lease-based crash recovery to TaskQueueService: lease_expires_at / lease_owner columns, atomic dequeue of pending or stale running tasks, renewLease, reclaimStaleLeases, and a heartbeat interval. Applied requireTrustedAppOrigin to /shutdown, /status, /memory, /skills, /test-provider, /refine-prompt, /oauth, /klavis, /credits, /mcp, /chat, /a2a while keeping /health open. Added per-agent SSE ring buffer in /a2a/stream with monotonic event ids, Last-Event-ID header replay, and :heartbeat comments every 30s; mirrored chat SSE heartbeat at 15s. Made Application.stop drain the task queue pool with a 2s ceiling. Removed process.exit from CDP reconnect exhaustion; wrapped HTTP startup and OpenClaw/Hermes configure failures in warning-and-continue paths. Replaced raw URLError throws in GitHubAPIClient with typed GitHubAPIError. Added Swift A2A reconnect tracking and Last-Event-ID header. Suppressed canary 9205 connection-refused logs in HealthCheckTransport. Added CORS middleware that only emits Access-Control-Allow-Credentials for allowlisted origins, plus auth/CORS unit tests.",
+  "files": [
+    "packages/browseros-agent/apps/server/src/lib/db/pg-migrate.ts",
+    "packages/browseros-agent/apps/server/src/api/services/task-queue-service.ts",
+    "packages/browseros-agent/apps/server/src/api/routes/tasks.ts",
+    "packages/browseros-agent/apps/server/src/api/server.ts",
+    "packages/browseros-agent/apps/server/src/api/routes/a2a.ts",
+    "packages/browseros-agent/apps/server/src/api/routes/chat.ts",
+    "packages/browseros-agent/apps/server/src/main.ts",
+    "packages/browseros-agent/apps/server/src/browser/backends/cdp.ts",
+    "packages/browseros-agent/apps/server/src/api/utils/cors.ts",
+    "packages/browseros-agent/apps/server/src/api/utils/request-auth.ts",
+    "packages/browseros-agent/apps/server/src/api/utils/cors.test.ts",
+    "packages/browseros-agent/apps/server/src/api/utils/request-auth.test.ts",
+    "packages/browseros-agent/apps/server/tests/api/request-auth.test.ts",
+    "packages/browseros-agent/apps/server/tests/api/routes/auth-routes.test.ts",
+    "packages/browseros-agent/apps/server/tests/main.test.ts",
+    "trios/rings/SR-02/A2ARegistryClient.swift",
+    "trios/BR-OUTPUT/GitHubAPIClient.swift",
+    "trios/rings/SR-01/HealthCheckTransport.swift",
+    "trios/rings/SR-01/SSETransport.swift"
+  ],
+  "tests": [
+    "bun tsc --noEmit in packages/browseros-agent/apps/server PASS",
+    "bun test --run tests/main.test.ts PASS",
+    "bun test --run src/api/utils/cors.test.ts src/api/utils/request-auth.test.ts tests/api/request-auth.test.ts tests/api/routes/auth-routes.test.ts PASS",
+    "bun test --run tests/server.integration.test.ts PASS in isolation",
+    "./build.sh PASS (chat integration tests + swift test PASS)",
+    "cargo run --bin clade-build PASS",
+    "cargo run --bin clade-e2e PASS",
+    "open trios.app relaunched; menu-bar logo present; curl /health returns ok"
+  ],
+  "lessons": [
+    "Lease-based task queues need explicit lease_expires_at + lease_owner columns and a periodic reclaim loop; otherwise crashes silently orphan work.",
+    "Apply route-level auth centrally in server.ts so no admin/write route is forgotten; keep health checks open so watchdogs and CI can probe.",
+    "SSE streams need both server-side heartbeats and Last-Event-ID replay; clients must remember the last id and send it on reconnect.",
+    "Synchronous optional subsystem configuration (OpenClaw/Hermes) must be guarded and best-effort; never let it crash the HTTP server or call process.exit.",
+    "Typed Swift errors (GitHubAPIError, A2AError.transport) produce actionable UI messages and are easier to retry/unwrap than raw URLError.",
+    "Custom CORS middleware is required when the framework cannot express conditional credentials; unit-test both allowed and disallowed origins."
+  ],
+  "degraded": false,
+  "seal": null
+}

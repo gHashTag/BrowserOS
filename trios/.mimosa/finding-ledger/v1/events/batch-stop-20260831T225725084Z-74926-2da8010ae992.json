@@ -1,0 +1,61 @@
+{
+  "schemaVersion": "mimosa-finding-ledger-batch/v1",
+  "batchId": "stop-20260831T225725084Z-74926-2da8010ae992",
+  "runId": "20260831T225725084Z-74926-2da8010ae992",
+  "runStatus": "inconclusive",
+  "coverage": {
+    "status": "partial",
+    "reasons": [
+      {
+        "code": "bash_discovery_incomplete",
+        "stage": "bash-discovery",
+        "target": ".worktrees/prod/queen-5002/trios/agent-server/apps/agent/entrypoints/app/layout/SidebarLayout.tsx",
+        "detail": "project enumeration exceeded 5000 reviewable files",
+        "affectsCompletion": true
+      },
+      {
+        "code": "baseline_partial",
+        "stage": "baseline",
+        "target": ".",
+        "detail": "baseline capture had enumeration or snapshot errors",
+        "affectsCompletion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "bash-discovery",
+        "target": ".worktrees/prod/queen-5002/trios/agent-server/apps/agent/entrypoints/app/layout/SidebarLayout.tsx",
+        "detail": "bash_discovery_incomplete: project enumeration exceeded 5000 reviewable files",
+        "affectsCompletion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "baseline",
+        "target": ".",
+        "detail": "baseline_partial: baseline capture had enumeration or snapshot errors",
+        "affectsCompletion": true
+      }
+    ]
+  },
+  "source": {
+    "component": "zcode-hook",
+    "operationId": "Stop"
+  },
+  "revision": "f6e2da95e2973b1f4f7d2f6a1e1d03c1839b2f4f",
+  "diffHash": "6e03a65b3bf7695302c810152ff4f0f0da43a53618a224975881f7a15973f76d",
+  "rulesVersion": "unavailable",
+  "sessionHash": "0fde83bfae4e4e2cce03467ccebfdac95f0d5d7ec1f0c92bb1d6c388ca5b7493",
+  "reportRef": ".mimosa/reports/task-review-sess_2c244a44-c950-44f1-91c3-11aa8d7a76e9-20260831T225725084Z-74926-2da8010ae992.json",
+  "events": [],
+  "observedFindingIds": [
+    "mimosa-ca224aa7d61e5031e208bf9b",
+    "mimosa-6b5e9029db4023323c56d14e"
+  ],
+  "verifiedFiles": [
+    {
+      "file": "tests/swift/run_chat_sse_e2e.sh",
+      "direct": "complete",
+      "projectContext": "partial"
+    }
+  ],
+  "recordedAt": "2026-08-31T22:57:25.345Z"
+}

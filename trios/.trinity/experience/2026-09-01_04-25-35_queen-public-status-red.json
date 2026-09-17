@@ -1,0 +1,15 @@
+{
+  "timestamp": "2026-09-01T04:25:35Z",
+  "task_id": "QUEEN-PUBLIC-STATUS-001",
+  "claim_id": "B2AD0166-19CB-43C9-AA84-651A9513A751",
+  "action": "Run the public Queen status route contract before implementation",
+  "result": "EXPECTED_RED",
+  "evidence": {
+    "command": "bun test apps/server/tests/api/queen-public-status.test.ts",
+    "exit_code": 1,
+    "fact": "The route module did not exist yet."
+  },
+  "residual_risks": [
+    "The endpoint and its public server mount remain to be implemented."
+  ]
+}

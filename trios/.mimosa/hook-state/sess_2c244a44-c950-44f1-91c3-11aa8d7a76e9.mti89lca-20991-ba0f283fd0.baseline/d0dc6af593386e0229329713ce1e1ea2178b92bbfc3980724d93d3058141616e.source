@@ -1,0 +1,208 @@
+import type { FC } from 'react'
+import { HashRouter, Navigate, Route, Routes, useParams } from 'react-router'
+import { Feature } from '@/lib/browseros/capabilities'
+import { useCapabilities } from '@/lib/browseros/useCapabilities'
+import { NewTab } from '../newtab/index/NewTab'
+import { NewTabChat } from '../newtab/index/NewTabChat'
+import { NewTabLayout } from '../newtab/layout/NewTabLayout'
+import { Personalize } from '../newtab/personalize/Personalize'
+import { OnboardingDemo } from '../onboarding/demo/OnboardingDemo'
+import { FeaturesPage } from '../onboarding/features/Features'
+import { Onboarding } from '../onboarding/index/Onboarding'
+import { StepsLayout } from '../onboarding/steps/StepsLayout'
+import { AclSettingsPage } from './acl-settings/AclSettingsPage'
+import { AdminDashboardPage } from './admin-dashboard/AdminDashboardPage'
+import { AgentCommandConversation } from './agent-command/AgentCommandConversation'
+import { AgentCommandHome } from './agent-command/AgentCommandHome'
+import { AgentCommandLayout } from './agent-command/agent-command-layout'
+import { AgentsPage } from './agents/AgentsPage'
+import { AISettingsPage } from './ai-settings/AISettingsPage'
+import { ConnectMCP } from './connect-mcp/ConnectMCP'
+import { CustomizationPage } from './customization/CustomizationPage'
+import { SurveyPage } from './jtbd-agent/SurveyPage'
+import { AuthLayout } from './layout/AuthLayout'
+import { SettingsSidebarLayout } from './layout/SettingsSidebarLayout'
+import { SidebarLayout } from './layout/SidebarLayout'
+import { LlmHubPage } from './llm-hub/LlmHubPage'
+import { LoginPage } from './login/LoginPage'
+import { LogoutPage } from './login/LogoutPage'
+import { MagicLinkCallback } from './login/MagicLinkCallback'
+import { MCPSettingsPage } from './mcp-settings/MCPSettingsPage'
+import { MemoryPage } from './memory/MemoryPage'
+import { ProfilePage } from './profile/ProfilePage'
+import { ScheduledTasksPage } from './scheduled-tasks/ScheduledTasksPage'
+import { SearchProviderPage } from './search-provider/SearchProviderPage'
+import { SkillsPage } from './skills/SkillsPage'
+import { SoulPage } from './soul/SoulPage'
+import { ToolApprovalsPage } from './tool-approvals/ToolApprovalsPage'
+import { UsagePage } from './usage/UsagePage'
+
+function getSurveyParams(): { maxTurns?: number; experimentId?: string } {
+  const params = new URLSearchParams(window.location.search)
+  const maxTurnsStr = params.get('maxTurns')
+  const experimentId = params.get('experimentId') ?? 'default'
+  const maxTurns = maxTurnsStr ? Number.parseInt(maxTurnsStr, 10) : 7
+  return { maxTurns, experimentId }
+}
+
+const OptionsRedirect: FC = () => {
+  const params = useParams()
+  const path = params['*'] || ''
+
+  const routeMap: Record<string, string> = {
+    ai: '/settings/ai',
+    chat: '/settings/chat',
+    'connect-mcp': '/connect-apps',
+    mcp: '/settings/mcp',
+    customization: '/settings/customization',
+    search: '/settings/search',
+    soul: '/home/soul',
+    skills: '/home/skills',
+    'jtbd-agent': '/settings/survey',
+    scheduled: '/scheduled',
+  }
+
+  const newPath = routeMap[path] || '/settings/ai'
+  return <Navigate to={newPath} replace />
+}
+
+export const App: FC = () => {
+  const surveyParams = getSurveyParams()
+  const { supports } = useCapabilities()
+  const alphaEnabled = supports(Feature.ALPHA_FEATURES_SUPPORT)
+
+  return (
+    <HashRouter>
+      <Routes>
+        {/* Public auth routes */}
+        <Route element={<AuthLayout />}>
+          <Route path="login" element={<LoginPage />} />
+          <Route path="logout" element={<LogoutPage />} />
+          <Route path="profile" element={<ProfilePage />} />
+          <Route path="auth/magic-link" element={<MagicLinkCallback />} />
+        </Route>
+
+        {/* Main app with sidebar */}
+        <Route element={<SidebarLayout />}>
+          {/* Home routes */}
+          <Route
+            path="home"
+            element={<NewTabLayout useChatSessionOnHome={!alphaEnabled} />}
+          >
+            {alphaEnabled ? (
+              <>
+                <Route element={<AgentCommandLayout />}>
+                  <Route index element={<AgentCommandHome />} />
+                  <Route
+                    path="agents/:agentId"
+                    element={<AgentCommandConversation />}
+                  />
+                </Route>
+                <Route path="chat" element={<NewTabChat />} />
+                <Route path="personalize" element={<Personalize />} />
+              </>
+            ) : (
+              <Route index element={<NewTab />} />
+            )}
+            <Route path="soul" element={<SoulPage />} />
+            <Route path="skills" element={<SkillsPage />} />
+            <Route path="memory" element={<MemoryPage />} />
+          </Route>
+
+          {/* Primary nav routes */}
+          <Route path="connect-apps" element={<ConnectMCP />} />
+          <Route path="scheduled" element={<ScheduledTasksPage />} />
+          {alphaEnabled ? (
+            <>
+              <Route path="agents" element={<AgentsPage />} />
+              <Route element={<AgentCommandLayout />}>
+                <Route
+                  path="agents/:agentId"
+                  element={
+                    <AgentCommandConversation
+                      variant="page"
+                      backPath="/agents"
+                      agentPathPrefix="/agents"
+                      createAgentPath="/agents"
+                    />
+                  }
+                />
+              </Route>
+            </>
+          ) : null}
+          {alphaEnabled ? (
+            <Route path="admin" element={<AdminDashboardPage />} />
+          ) : null}
+        </Route>
+
+        {/* Settings with dedicated sidebar */}
+        <Route element={<SettingsSidebarLayout />}>
+          <Route path="settings">
+            <Route index element={<Navigate to="/settings/ai" replace />} />
+            <Route path="ai" element={<AISettingsPage key="ai" />} />
+            <Route path="chat" element={<LlmHubPage />} />
+            <Route path="mcp" element={<MCPSettingsPage />} />
+            <Route path="customization" element={<CustomizationPage />} />
+            <Route path="search" element={<SearchProviderPage />} />
+            <Route path="survey" element={<SurveyPage {...surveyParams} />} />
+            <Route path="usage" element={<UsagePage />} />
+            {alphaEnabled ? (
+              <>
+                <Route path="acl" element={<AclSettingsPage />} />
+                <Route path="approvals" element={<ToolApprovalsPage />} />
+              </>
+            ) : null}
+          </Route>
+        </Route>
+
+        {/* Onboarding routes - no sidebar, no auth required */}
+        <Route path="onboarding">
+          <Route index element={<Onboarding />} />
+          <Route path="steps/:stepId" element={<StepsLayout />} />
+          <Route path="demo" element={<OnboardingDemo />} />
+          <Route path="features" element={<FeaturesPage />} />
+        </Route>
+
+        {/* Backward compatibility redirects */}
+        <Route path="/" element={<Navigate to="/home" replace />} />
+        <Route
+          path="/personalize"
+          element={
+            <Navigate
+              to={alphaEnabled ? '/home/personalize' : '/home'}
+              replace
+            />
+          }
+        />
+        <Route
+          path="/settings/connect-mcp"
+          element={<Navigate to="/connect-apps" replace />}
+        />
+        <Route
+          path="/settings/soul"
+          element={<Navigate to="/home/soul" replace />}
+        />
+        <Route
+          path="/settings/skills"
+          element={<Navigate to="/home/skills" replace />}
+        />
+        <Route
+          path="/audit"
+          element={<Navigate to={alphaEnabled ? '/admin' : '/home'} replace />}
+        />
+        <Route
+          path="/observability"
+          element={<Navigate to={alphaEnabled ? '/admin' : '/home'} replace />}
+        />
+        <Route
+          path="/executions"
+          element={<Navigate to={alphaEnabled ? '/admin' : '/home'} replace />}
+        />
+        <Route path="/options/*" element={<OptionsRedirect />} />
+
+        {/* Fallback to home */}
+        <Route path="*" element={<Navigate to="/home" replace />} />
+      </Routes>
+    </HashRouter>
+  )
+}

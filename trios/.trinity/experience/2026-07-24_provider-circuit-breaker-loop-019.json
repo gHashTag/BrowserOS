@@ -1,0 +1,26 @@
+{
+  "title": "Provider Circuit Breaker & Failover Hardening — Cycle 19",
+  "date": "2026-07-24",
+  "ring": "SR-00 / SR-01 / SR-02 / BR-OUTPUT",
+  "agents": "claude",
+  "road": "B",
+  "problem": "Cycle 18 introduced cross-provider failover, but it lacked provider-level failure isolation. A single rate-limited or auth-failed provider could be repeatedly retried during a single chat turn, and failures were tracked per-model name only, so a model marked bad on Provider A was wrongly skipped on Provider B. The cross-provider toggle also had a gating bug that allowed failover even when disabled.",
+  "root_cause": "There was no circuit-breaker state machine at the provider endpoint level. `TransportError.serverError` could not carry a `Retry-After` value. `ModelConfigurationStore` keyed unhealthy flags by model name only. `ChatViewModel` used `if !didFailover || store.isCrossProviderFailoverEnabled` which is always true. `ModelsTabView` showed provider probe results but not breaker state.",
+  "fix": "Added `ProviderCircuitBreaker` actor with closed/open/half-open states, kind-aware cooldowns, `Retry-After` honoring, and per-(provider, baseURL) isolation. Extended `TransportError.serverError` with an optional `retryAfter` payload and updated all pattern matches. Added `ModelEndpointTuple` and `ProviderEndpointKey`, made `ModelConfigurationStore` maintain `unhealthyTuples` for real per-endpoint logic while keeping `unhealthyModels` as a conservative UI set, and gated `selectFirstHealthyCrossProviderModel` and predictive selection through the breaker. Fixed the toggle gating bug in `ChatViewModel` and added breaker success/failure recording around main send, in-provider failover, and cross-provider failover. Added a circuit-breaker status list to `ModelsTabView`. Added `ProviderCircuitBreakerTests.swift` covering state transitions, cooldowns, Retry-After, half-open, and isolation.",
+  "files": [
+    "trios/rings/SR-00/ProviderCircuitBreaker.swift (new)",
+    "trios/rings/SR-00/ModelConfigurationStore.swift",
+    "trios/rings/SR-01/SSETransport.swift",
+    "trios/rings/SR-02/ChatViewModel.swift",
+    "trios/BR-OUTPUT/ModelsTabView.swift",
+    "trios/tests/TriOSKitTests/ProviderCircuitBreakerTests.swift (new)",
+    ".claude/plans/trios-cycle19-provider-circuit-breaker-loop-019.md",
+    ".claude/plans/trios-cycle19-provider-circuit-breaker-loop-019-report.md"
+  ],
+  "tests": "./build.sh PASS (chat integration tests PASS); cargo run --bin clade-build PASS; cargo test --workspace PASS; cargo clippy --workspace PASS; cargo run --bin clade-audit hard gates 0 findings; cargo run --bin clade-seal SEAL VALID; cargo run --bin clade-e2e PASS; open trios.app relaunched and /health returns {\"status\":\"ok\",\"cdpConnected\":true}. swift test could not be executed because XCTest is unavailable in the CommandLineTools-only environment.",
+  "next_options": [
+    "Adaptive parallel provider warmup — issue tiny probes to all eligible providers before a chat send and route the live request to the lowest-TTFT winner (Zeph/Anyscale pattern).",
+    "Account/budget-aware failover — read provider balance or quota headers and gate failover away from out-of-quota providers until the user tops up.",
+    "User-defined provider preference order — drag-to-rank providers in ModelsTabView and blend that priority into cross-provider ranking."
+  ]
+}

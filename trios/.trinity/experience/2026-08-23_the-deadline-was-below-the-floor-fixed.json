@@ -1,0 +1,21 @@
+{
+  "id": "2026-08-23_the-deadline-was-below-the-floor-fixed",
+  "date": "2026-08-23",
+  "ring": "SR-00",
+  "title": "Cross-application ACL evaluation is the cost; the warm-up pays it once and the guards stay load-bearing",
+  "severity": "high",
+  "agent": "Queen",
+  "findings": [
+    "B, isolated: same process, same keychain, same second - an item this process created itself reads in 0.002s on first touch, an existing app item reads in 6.644s. The cost is cross-application ACL evaluation, not a slow Keychain and not securityd load.",
+    "The data-protection keychain could not be compared: SecItemAdd returns -34018, missing entitlement. That remedy is untested, not rejected.",
+    "A, proven live: keychain.warmup.finished warmed 9 item(s) in 35.3s (0 refused) at +40.2s from launch.",
+    "C, measured rather than assumed: 6 stalls and plaintext writes occurred BEFORE the warm-up completed and 0 after. The restack guards and starved_out are load-bearing during that window. Nothing is redundant yet."
+  ],
+  "honesty": "The conversation key answered at +36s, BEFORE the warm-up finished at +40.2s, so on this launch the ordinary path warmed it and the warm-up did not cause that improvement. What the warm-up demonstrably does is warm all nine items including those no launch path touches, so no later caller pays a cold hit. One sample is not a trend and the key-answer time is not attributed to this change.",
+  "not_verified": [
+    "Why cross-application ACL evaluation costs seconds. Measured, not explained.",
+    "Whether the warm-up shortens the window - it finished after the key answered on the only launch observed.",
+    "keychain.read.not_restacked, keychain.enumeration.not_restacked and keychain.read.starved_out still have no live occurrence."
+  ],
+  "tags": ["unmeasured-cause", "keychain", "acl", "warmup", "measured-not-assumed"]
+}

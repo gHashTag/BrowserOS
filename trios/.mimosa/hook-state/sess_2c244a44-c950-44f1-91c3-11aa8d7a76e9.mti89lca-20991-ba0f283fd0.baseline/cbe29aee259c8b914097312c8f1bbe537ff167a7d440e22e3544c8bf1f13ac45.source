@@ -1,0 +1,4 @@
+{
+  "terminal.integrated.tabs.title": "${sequence} ${process}",
+  "terminal.integrated.tabs.description": "${cwd}"
+}

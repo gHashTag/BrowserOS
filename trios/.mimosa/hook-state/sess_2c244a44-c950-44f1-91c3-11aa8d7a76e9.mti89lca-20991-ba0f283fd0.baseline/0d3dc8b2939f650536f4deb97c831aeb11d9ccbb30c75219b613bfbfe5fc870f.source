@@ -1,0 +1,275 @@
+diff --git a/chrome/browser/browseros/extensions/browseros_extension_loader.cc b/chrome/browser/browseros/extensions/browseros_extension_loader.cc
+new file mode 100644
+index 0000000000000..fdb6be443f25b
+--- /dev/null
++++ b/chrome/browser/browseros/extensions/browseros_extension_loader.cc
+@@ -0,0 +1,269 @@
++// Copyright 2024 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/browseros/extensions/browseros_extension_loader.h"
++
++#include <utility>
++
++#include "base/feature_list.h"
++#include "base/logging.h"
++#include "base/task/single_thread_task_runner.h"
++#include "base/version.h"
++#include "chrome/browser/browser_features.h"
++#include "chrome/browser/browseros/core/browseros_constants.h"
++#include "chrome/browser/extensions/crx_installer.h"
++#include "chrome/browser/extensions/external_provider_impl.h"
++#include "chrome/browser/extensions/updater/extension_updater.h"
++#include "chrome/browser/profiles/profile.h"
++#include "extensions/browser/crx_file_info.h"
++#include "extensions/browser/extension_registry.h"
++#include "extensions/browser/pending_extension_manager.h"
++#include "extensions/common/extension.h"
++#include "extensions/common/mojom/manifest.mojom-shared.h"
++#include "extensions/common/verifier_formats.h"
++
++namespace browseros {
++
++namespace {
++
++constexpr base::TimeDelta kImmediateInstallDelay = base::Seconds(2);
++
++}  // namespace
++
++BrowserOSExtensionLoader::BrowserOSExtensionLoader(Profile* profile)
++    : profile_(profile) {
++  config_url_ =
++      GURL(base::FeatureList::IsEnabled(features::kBrowserOsAlphaFeatures)
++               ? kBrowserOSAlphaConfigUrl
++               : kBrowserOSConfigUrl);
++
++  for (const std::string& id : GetBrowserOSExtensionIds()) {
++    extension_ids_.insert(id);
++  }
++}
++
++BrowserOSExtensionLoader::~BrowserOSExtensionLoader() = default;
++
++void BrowserOSExtensionLoader::SetConfigUrl(const GURL& url) {
++  config_url_ = url;
++}
++
++void BrowserOSExtensionLoader::StartLoading() {
++  LOG(INFO) << "browseros: Extension loader starting";
++
++  installer_ = std::make_unique<BrowserOSExtensionInstaller>(profile_);
++  maintainer_ = std::make_unique<BrowserOSExtensionMaintainer>(profile_);
++
++  installer_->StartInstallation(
++      config_url_,
++      base::BindOnce(&BrowserOSExtensionLoader::OnInstallComplete,
++                     weak_ptr_factory_.GetWeakPtr()));
++}
++
++void BrowserOSExtensionLoader::OnInstallComplete(InstallResult result) {
++  LOG(INFO) << "browseros: OnInstallComplete from_bundled="
++            << result.from_bundled << " prefs=" << result.prefs.size()
++            << " ids=" << result.extension_ids.size();
++
++  if (result.from_bundled) {
++    bundled_crx_base_path_ = result.bundled_path;
++
++    for (const auto [ext_id, pref_value] : result.prefs) {
++      if (pref_value.is_dict()) {
++        const std::string* version = pref_value.GetDict().FindString(
++            extensions::ExternalProviderImpl::kExternalVersion);
++        if (version) {
++          bundled_versions_[ext_id] = *version;
++        }
++      }
++    }
++  }
++
++  extension_ids_.merge(result.extension_ids);
++  last_config_ = std::move(result.config);
++
++  base::DictValue prefs_to_load = std::move(result.prefs);
++
++  if (prefs_to_load.empty()) {
++    LOG(WARNING) << "browseros: Install returned empty prefs, "
++                 << "reconstructing from installed extensions";
++    prefs_to_load = ReconstructPrefsFromInstalledExtensions();
++    LOG(INFO) << "browseros: Reconstructed prefs for "
++              << prefs_to_load.size() << " installed extensions";
++  }
++
++  LoadFinished(std::move(prefs_to_load));
++  OnStartupComplete(result.from_bundled);
++}
++
++base::DictValue
++BrowserOSExtensionLoader::ReconstructPrefsFromInstalledExtensions() {
++  base::DictValue prefs;
++
++  extensions::ExtensionRegistry* registry =
++      extensions::ExtensionRegistry::Get(profile_);
++  if (!registry) {
++    return prefs;
++  }
++
++  const std::string update_url =
++      base::FeatureList::IsEnabled(features::kBrowserOsAlphaFeatures)
++          ? kBrowserOSAlphaUpdateUrl
++          : kBrowserOSUpdateUrl;
++
++  for (const std::string& id : GetBrowserOSExtensionIds()) {
++    const extensions::Extension* ext = registry->GetInstalledExtension(id);
++    if (!ext) {
++      continue;
++    }
++
++    base::DictValue ext_pref;
++    ext_pref.Set(extensions::ExternalProviderImpl::kExternalUpdateUrl,
++                 update_url);
++    prefs.Set(id, std::move(ext_pref));
++
++    LOG(INFO) << "browseros: Reconstructed pref for installed extension "
++              << id << " v" << ext->version().GetString();
++  }
++
++  return prefs;
++}
++
++const base::FilePath BrowserOSExtensionLoader::GetBaseCrxFilePath() {
++  return bundled_crx_base_path_;
++}
++
++void BrowserOSExtensionLoader::OnStartupComplete(bool from_bundled) {
++  LOG(INFO) << "browseros: Startup complete (from_bundled=" << from_bundled
++            << ")";
++
++  if (from_bundled) {
++    base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
++        FROM_HERE,
++        base::BindOnce(
++            &BrowserOSExtensionLoader::InstallBundledExtensionsNow,
++            weak_ptr_factory_.GetWeakPtr()),
++        kImmediateInstallDelay);
++  } else {
++    base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
++        FROM_HERE,
++        base::BindOnce(&BrowserOSExtensionLoader::InstallRemoteExtensionsNow,
++                       weak_ptr_factory_.GetWeakPtr(), last_config_.Clone()),
++        kImmediateInstallDelay);
++  }
++
++  // Maintainer owns the config now
++  maintainer_->Start(config_url_, extension_ids_, std::move(last_config_));
++}
++
++void BrowserOSExtensionLoader::InstallRemoteExtensionsNow(
++    base::DictValue config) {
++  if (!profile_ || extension_ids_.empty() || config.empty()) {
++    return;
++  }
++
++  extensions::ExtensionRegistry* registry =
++      extensions::ExtensionRegistry::Get(profile_);
++  extensions::PendingExtensionManager* pending =
++      extensions::PendingExtensionManager::Get(profile_);
++
++  if (!registry || !pending) {
++    return;
++  }
++
++  LOG(INFO) << "browseros: Installing " << extension_ids_.size()
++            << " remote extensions immediately";
++
++  for (const std::string& id : extension_ids_) {
++    if (registry->GetInstalledExtension(id)) {
++      continue;
++    }
++
++    const base::DictValue* ext_config = config.FindDict(id);
++    if (!ext_config) {
++      continue;
++    }
++
++    const std::string* update_url = ext_config->FindString(
++        extensions::ExternalProviderImpl::kExternalUpdateUrl);
++    if (!update_url) {
++      continue;
++    }
++
++    GURL url(*update_url);
++    if (!url.is_valid()) {
++      continue;
++    }
++
++    pending->AddFromExternalUpdateUrl(
++        id, std::string(), url,
++        extensions::mojom::ManifestLocation::kExternalComponent,
++        extensions::Extension::WAS_INSTALLED_BY_DEFAULT, false);
++  }
++
++  extensions::ExtensionUpdater* updater =
++      extensions::ExtensionUpdater::Get(profile_);
++  if (updater) {
++    extensions::ExtensionUpdater::CheckParams params;
++    params.ids = std::list<extensions::ExtensionId>(extension_ids_.begin(),
++                                                     extension_ids_.end());
++    params.install_immediately = true;
++    params.fetch_priority = extensions::DownloadFetchPriority::kForeground;
++    updater->InstallPendingNow(std::move(params));
++  }
++}
++
++void BrowserOSExtensionLoader::InstallBundledExtensionsNow() {
++  if (!profile_ || extension_ids_.empty() || bundled_crx_base_path_.empty()) {
++    return;
++  }
++
++  extensions::ExtensionRegistry* registry =
++      extensions::ExtensionRegistry::Get(profile_);
++  extensions::PendingExtensionManager* pending =
++      extensions::PendingExtensionManager::Get(profile_);
++
++  if (!registry || !pending) {
++    return;
++  }
++
++  LOG(INFO) << "browseros: Installing " << extension_ids_.size()
++            << " bundled extensions immediately";
++
++  for (const std::string& id : extension_ids_) {
++    if (registry->GetInstalledExtension(id) || pending->IsIdPending(id)) {
++      continue;
++    }
++
++    auto it = bundled_versions_.find(id);
++    if (it == bundled_versions_.end()) {
++      continue;
++    }
++
++    base::FilePath crx_path = bundled_crx_base_path_.Append(
++        base::FilePath::FromUTF8Unsafe(id + ".crx"));
++
++    LOG(INFO) << "browseros: Installing bundled " << id << " v" << it->second;
++
++    pending->AddFromExternalFile(
++        id, extensions::mojom::ManifestLocation::kExternalComponent,
++        base::Version(it->second),
++        extensions::Extension::WAS_INSTALLED_BY_DEFAULT, false);
++
++    scoped_refptr<extensions::CrxInstaller> installer(
++        extensions::CrxInstaller::CreateSilent(profile_));
++    installer->set_install_source(
++        extensions::mojom::ManifestLocation::kExternalComponent);
++    installer->set_expected_id(id);
++    installer->set_install_immediately(true);
++    installer->set_creation_flags(
++        extensions::Extension::WAS_INSTALLED_BY_DEFAULT);
++
++    extensions::CRXFileInfo file_info(
++        crx_path, extensions::GetExternalVerifierFormat());
++    installer->InstallCrxFile(file_info);
++  }
++}
++
++}  // namespace browseros

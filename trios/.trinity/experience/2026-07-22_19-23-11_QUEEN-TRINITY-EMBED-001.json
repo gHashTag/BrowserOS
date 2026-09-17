@@ -1,0 +1,42 @@
+{
+  "task_id": "QUEEN-TRINITY-EMBED-001",
+  "claim_id": "E31EF0E9-9C62-4FE7-BB38-C94156C07238",
+  "timestamp": "2026-07-22T19:23:11Z",
+  "action": "spec_tdd_embed_build_verify_learn",
+  "result": "clean",
+  "problem": "The Trios Queen tab was a small custom status dashboard and did not expose the canonical gHashTag/trinity Queen interface, its 27-petal navigation, or its complete routed screens.",
+  "solution": "Converted the existing Queen Swift package into a reusable dynamic QueenUILib product, added a public embedded root and centralized runtime paths, replaced the Trios placeholder tab with the actual MainView hierarchy, bundled the library with relative rpaths, and synchronized the latest upstream Chat input fix with the current macOS SwiftUI API.",
+  "verification": {
+    "red_green_embedding_test": "PASS",
+    "queen_tests": {
+      "status": "PASS",
+      "count": 42
+    },
+    "trios_build": {
+      "status": "PASS",
+      "compiled_swift_files": 91
+    },
+    "queen_library": {
+      "status": "PASS",
+      "product": "QueenUILib",
+      "source_files": 189,
+      "canonical_petals": 27,
+      "routed_screens": 29
+    },
+    "code_signature": "PASS",
+    "relative_rpaths": "PASS",
+    "compact_triangle": "PASS",
+    "compact_build_screen": "PASS",
+    "fullscreen_triangle": "PASS",
+    "fullscreen_chat_screen": "PASS",
+    "browseros_health": {
+      "status": "ok",
+      "cdpConnected": true
+    },
+    "runtime_launch": "PASS",
+    "pid": 10755,
+    "diff_check": "PASS",
+    "ascii_check": "PASS"
+  },
+  "lesson": "A full interface integration should preserve one source of truth. Linking the original SwiftUI package avoids a copied UI that drifts, while an explicit project root and a bundled relative-rpath library let the same Queen implementation run correctly inside another host process."
+}

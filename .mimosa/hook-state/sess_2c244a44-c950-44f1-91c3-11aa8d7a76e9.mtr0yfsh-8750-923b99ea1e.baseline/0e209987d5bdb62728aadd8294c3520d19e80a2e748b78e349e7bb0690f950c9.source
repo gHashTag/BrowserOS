@@ -1,0 +1,158 @@
+/* eslint-disable */
+import * as types from './graphql';
+
+
+
+/**
+ * Map of all GraphQL operations in the project.
+ *
+ * This map has several performance disadvantages:
+ * 1. It is not tree-shakeable, so it will include all operations in the project.
+ * 2. It is not minifiable, so the string of a GraphQL query will be multiple times inside the bundle.
+ * 3. It does not support dead code elimination, so it will add unused operations.
+ *
+ * Therefore it is highly recommended to use the babel or swc plugin for production.
+ * Learn more about it here: https://the-guild.dev/graphql/codegen/plugins/presets/preset-client#reducing-bundle-size
+ */
+type Documents = {
+    "\n  query GetRemoteLlmProviders($profileId: String!) {\n    llmProviders(condition: { profileId: $profileId }) {\n      nodes {\n        rowId\n        type\n        name\n        baseUrl\n        modelId\n        supportsImages\n        contextWindow\n        temperature\n        resourceName\n        region\n        createdAt\n        updatedAt\n      }\n    }\n  }\n": typeof types.GetRemoteLlmProvidersDocument,
+    "\n  mutation DeleteRemoteLlmProvider($rowId: String!) {\n    deleteLlmProvider(input: { rowId: $rowId }) {\n      deletedLlmProviderId\n    }\n  }\n": typeof types.DeleteRemoteLlmProviderDocument,
+    "\n  query GetProfileByUserId($userId: String!) {\n    profileByUserId(userId: $userId) {\n      rowId\n      firstName\n      lastName\n      avatarUrl\n    }\n  }\n": typeof types.GetProfileByUserIdDocument,
+    "\n  mutation UpdateProfileByUserId($userId: String!, $patch: ProfilePatch!) {\n    updateProfileByUserId(input: { userId: $userId, patch: $patch }) {\n      profile {\n        rowId\n        firstName\n        lastName\n        avatarUrl\n      }\n    }\n  }\n": typeof types.UpdateProfileByUserIdDocument,
+    "\n  query GetConversationsForHistory($profileId: String!, $first: Int = 50, $after: Cursor) {\n    conversations(\n      condition: { profileId: $profileId }\n      first: $first\n      after: $after\n      orderBy: LAST_MESSAGED_AT_DESC\n    ) {\n      nodes {\n        rowId\n        lastMessagedAt\n        conversationMessages(first: 2, orderBy: ORDER_INDEX_DESC) {\n          nodes {\n            message\n          }\n        }\n      }\n      pageInfo {\n        endCursor\n        hasNextPage\n      }\n    }\n  }\n": typeof types.GetConversationsForHistoryDocument,
+    "\n  mutation DeleteConversation($rowId: String!) {\n    deleteConversation(input: { rowId: $rowId }) {\n      deletedConversationId\n    }\n  }\n": typeof types.DeleteConversationDocument,
+    "\n  mutation CreateConversationWithMessage(\n    $conversationId: String!\n    $profileId: String!\n    $message: JSON!\n  ) {\n    createConversation(\n      input: {\n        conversation: {\n          rowId: $conversationId\n          profileId: $profileId\n          lastMessagedAt: \"now()\"\n        }\n      }\n    ) {\n      conversation {\n        rowId\n      }\n    }\n    createConversationMessage(\n      input: {\n        conversationMessage: {\n          rowId: $conversationId\n          conversationId: $conversationId\n          orderIndex: 0\n          message: $message\n        }\n      }\n    ) {\n      conversationMessage {\n        rowId\n        orderIndex\n      }\n    }\n  }\n": typeof types.CreateConversationWithMessageDocument,
+    "\n  mutation AppendConversationMessage(\n    $messageId: String!\n    $conversationId: String!\n    $orderIndex: Int!\n    $message: JSON!\n  ) {\n    createConversationMessage(\n      input: {\n        conversationMessage: {\n          rowId: $messageId\n          conversationId: $conversationId\n          orderIndex: $orderIndex\n          message: $message\n        }\n      }\n    ) {\n      conversationMessage {\n        rowId\n        orderIndex\n      }\n    }\n  }\n": typeof types.AppendConversationMessageDocument,
+    "\n  mutation UpdateConversationLastMessagedAt($conversationId: String!) {\n    updateConversation(\n      input: { rowId: $conversationId, patch: { lastMessagedAt: \"now()\" } }\n    ) {\n      conversation {\n        rowId\n        lastMessagedAt\n      }\n    }\n  }\n": typeof types.UpdateConversationLastMessagedAtDocument,
+    "\n  query GetConversationWithMessages($conversationId: String!) {\n    conversation(rowId: $conversationId) {\n      rowId\n      conversationMessages(first: 100, orderBy: ORDER_INDEX_ASC) {\n        nodes {\n          message\n        }\n      }\n    }\n  }\n": typeof types.GetConversationWithMessagesDocument,
+    "\n  query GetProfileIdByUserId($userId: String!) {\n    profileByUserId(userId: $userId) {\n      rowId\n    }\n  }\n": typeof types.GetProfileIdByUserIdDocument,
+    "\n  mutation CreateConversationForUpload($input: CreateConversationInput!) {\n    createConversation(input: $input) {\n      conversation {\n        id\n        rowId\n        profileId\n        lastMessagedAt\n        createdAt\n      }\n    }\n  }\n": typeof types.CreateConversationForUploadDocument,
+    "\n  mutation BulkCreateConversationMessages($input: BulkCreateConversationMessagesInput!) {\n    bulkCreateConversationMessages(input: $input) {\n      result {\n        id\n        rowId\n        conversationId\n        orderIndex\n      }\n    }\n  }\n": typeof types.BulkCreateConversationMessagesDocument,
+    "\n  query ConversationExists($pConversationId: String) {\n    conversationExists(pConversationId: $pConversationId)\n  }\n": typeof types.ConversationExistsDocument,
+    "\n  query GetUploadedMessageCount($conversationId: String!) {\n    conversationMessages(condition: { conversationId: $conversationId }, first: 0) {\n      totalCount\n    }\n  }\n": typeof types.GetUploadedMessageCountDocument,
+    "\n  mutation CreateLlmProviderForUpload($input: CreateLlmProviderInput!) {\n    createLlmProvider(input: $input) {\n      llmProvider {\n        rowId\n      }\n    }\n  }\n": typeof types.CreateLlmProviderForUploadDocument,
+    "\n  mutation UpdateLlmProviderForUpload($input: UpdateLlmProviderInput!) {\n    updateLlmProvider(input: $input) {\n      llmProvider {\n        rowId\n      }\n    }\n  }\n": typeof types.UpdateLlmProviderForUploadDocument,
+    "\n  query GetLlmProvidersByProfileId($profileId: String!) {\n    llmProviders(condition: { profileId: $profileId }) {\n      nodes {\n        rowId\n        type\n        name\n        baseUrl\n        modelId\n        supportsImages\n        contextWindow\n        temperature\n        resourceName\n        region\n      }\n    }\n  }\n": typeof types.GetLlmProvidersByProfileIdDocument,
+    "\n  query GetScheduledJobsByProfileId($profileId: String!) {\n    scheduledJobs(condition: { profileId: $profileId }, first: 100) {\n      nodes {\n        rowId\n        name\n        query\n        scheduleType\n        scheduleTime\n        scheduleInterval\n        enabled\n        llmProviderId\n        createdAt\n        updatedAt\n        lastRunAt\n      }\n    }\n  }\n": typeof types.GetScheduledJobsByProfileIdDocument,
+    "\n  mutation CreateScheduledJob($input: CreateScheduledJobInput!) {\n    createScheduledJob(input: $input) {\n      scheduledJob {\n        rowId\n      }\n    }\n  }\n": typeof types.CreateScheduledJobDocument,
+    "\n  mutation UpdateScheduledJob($input: UpdateScheduledJobInput!) {\n    updateScheduledJob(input: $input) {\n      scheduledJob {\n        rowId\n      }\n    }\n  }\n": typeof types.UpdateScheduledJobDocument,
+    "\n  mutation DeleteScheduledJob($rowId: String!) {\n    deleteScheduledJob(input: { rowId: $rowId }) {\n      deletedScheduledJobId\n    }\n  }\n": typeof types.DeleteScheduledJobDocument,
+};
+const documents: Documents = {
+    "\n  query GetRemoteLlmProviders($profileId: String!) {\n    llmProviders(condition: { profileId: $profileId }) {\n      nodes {\n        rowId\n        type\n        name\n        baseUrl\n        modelId\n        supportsImages\n        contextWindow\n        temperature\n        resourceName\n        region\n        createdAt\n        updatedAt\n      }\n    }\n  }\n": types.GetRemoteLlmProvidersDocument,
+    "\n  mutation DeleteRemoteLlmProvider($rowId: String!) {\n    deleteLlmProvider(input: { rowId: $rowId }) {\n      deletedLlmProviderId\n    }\n  }\n": types.DeleteRemoteLlmProviderDocument,
+    "\n  query GetProfileByUserId($userId: String!) {\n    profileByUserId(userId: $userId) {\n      rowId\n      firstName\n      lastName\n      avatarUrl\n    }\n  }\n": types.GetProfileByUserIdDocument,
+    "\n  mutation UpdateProfileByUserId($userId: String!, $patch: ProfilePatch!) {\n    updateProfileByUserId(input: { userId: $userId, patch: $patch }) {\n      profile {\n        rowId\n        firstName\n        lastName\n        avatarUrl\n      }\n    }\n  }\n": types.UpdateProfileByUserIdDocument,
+    "\n  query GetConversationsForHistory($profileId: String!, $first: Int = 50, $after: Cursor) {\n    conversations(\n      condition: { profileId: $profileId }\n      first: $first\n      after: $after\n      orderBy: LAST_MESSAGED_AT_DESC\n    ) {\n      nodes {\n        rowId\n        lastMessagedAt\n        conversationMessages(first: 2, orderBy: ORDER_INDEX_DESC) {\n          nodes {\n            message\n          }\n        }\n      }\n      pageInfo {\n        endCursor\n        hasNextPage\n      }\n    }\n  }\n": types.GetConversationsForHistoryDocument,
+    "\n  mutation DeleteConversation($rowId: String!) {\n    deleteConversation(input: { rowId: $rowId }) {\n      deletedConversationId\n    }\n  }\n": types.DeleteConversationDocument,
+    "\n  mutation CreateConversationWithMessage(\n    $conversationId: String!\n    $profileId: String!\n    $message: JSON!\n  ) {\n    createConversation(\n      input: {\n        conversation: {\n          rowId: $conversationId\n          profileId: $profileId\n          lastMessagedAt: \"now()\"\n        }\n      }\n    ) {\n      conversation {\n        rowId\n      }\n    }\n    createConversationMessage(\n      input: {\n        conversationMessage: {\n          rowId: $conversationId\n          conversationId: $conversationId\n          orderIndex: 0\n          message: $message\n        }\n      }\n    ) {\n      conversationMessage {\n        rowId\n        orderIndex\n      }\n    }\n  }\n": types.CreateConversationWithMessageDocument,
+    "\n  mutation AppendConversationMessage(\n    $messageId: String!\n    $conversationId: String!\n    $orderIndex: Int!\n    $message: JSON!\n  ) {\n    createConversationMessage(\n      input: {\n        conversationMessage: {\n          rowId: $messageId\n          conversationId: $conversationId\n          orderIndex: $orderIndex\n          message: $message\n        }\n      }\n    ) {\n      conversationMessage {\n        rowId\n        orderIndex\n      }\n    }\n  }\n": types.AppendConversationMessageDocument,
+    "\n  mutation UpdateConversationLastMessagedAt($conversationId: String!) {\n    updateConversation(\n      input: { rowId: $conversationId, patch: { lastMessagedAt: \"now()\" } }\n    ) {\n      conversation {\n        rowId\n        lastMessagedAt\n      }\n    }\n  }\n": types.UpdateConversationLastMessagedAtDocument,
+    "\n  query GetConversationWithMessages($conversationId: String!) {\n    conversation(rowId: $conversationId) {\n      rowId\n      conversationMessages(first: 100, orderBy: ORDER_INDEX_ASC) {\n        nodes {\n          message\n        }\n      }\n    }\n  }\n": types.GetConversationWithMessagesDocument,
+    "\n  query GetProfileIdByUserId($userId: String!) {\n    profileByUserId(userId: $userId) {\n      rowId\n    }\n  }\n": types.GetProfileIdByUserIdDocument,
+    "\n  mutation CreateConversationForUpload($input: CreateConversationInput!) {\n    createConversation(input: $input) {\n      conversation {\n        id\n        rowId\n        profileId\n        lastMessagedAt\n        createdAt\n      }\n    }\n  }\n": types.CreateConversationForUploadDocument,
+    "\n  mutation BulkCreateConversationMessages($input: BulkCreateConversationMessagesInput!) {\n    bulkCreateConversationMessages(input: $input) {\n      result {\n        id\n        rowId\n        conversationId\n        orderIndex\n      }\n    }\n  }\n": types.BulkCreateConversationMessagesDocument,
+    "\n  query ConversationExists($pConversationId: String) {\n    conversationExists(pConversationId: $pConversationId)\n  }\n": types.ConversationExistsDocument,
+    "\n  query GetUploadedMessageCount($conversationId: String!) {\n    conversationMessages(condition: { conversationId: $conversationId }, first: 0) {\n      totalCount\n    }\n  }\n": types.GetUploadedMessageCountDocument,
+    "\n  mutation CreateLlmProviderForUpload($input: CreateLlmProviderInput!) {\n    createLlmProvider(input: $input) {\n      llmProvider {\n        rowId\n      }\n    }\n  }\n": types.CreateLlmProviderForUploadDocument,
+    "\n  mutation UpdateLlmProviderForUpload($input: UpdateLlmProviderInput!) {\n    updateLlmProvider(input: $input) {\n      llmProvider {\n        rowId\n      }\n    }\n  }\n": types.UpdateLlmProviderForUploadDocument,
+    "\n  query GetLlmProvidersByProfileId($profileId: String!) {\n    llmProviders(condition: { profileId: $profileId }) {\n      nodes {\n        rowId\n        type\n        name\n        baseUrl\n        modelId\n        supportsImages\n        contextWindow\n        temperature\n        resourceName\n        region\n      }\n    }\n  }\n": types.GetLlmProvidersByProfileIdDocument,
+    "\n  query GetScheduledJobsByProfileId($profileId: String!) {\n    scheduledJobs(condition: { profileId: $profileId }, first: 100) {\n      nodes {\n        rowId\n        name\n        query\n        scheduleType\n        scheduleTime\n        scheduleInterval\n        enabled\n        llmProviderId\n        createdAt\n        updatedAt\n        lastRunAt\n      }\n    }\n  }\n": types.GetScheduledJobsByProfileIdDocument,
+    "\n  mutation CreateScheduledJob($input: CreateScheduledJobInput!) {\n    createScheduledJob(input: $input) {\n      scheduledJob {\n        rowId\n      }\n    }\n  }\n": types.CreateScheduledJobDocument,
+    "\n  mutation UpdateScheduledJob($input: UpdateScheduledJobInput!) {\n    updateScheduledJob(input: $input) {\n      scheduledJob {\n        rowId\n      }\n    }\n  }\n": types.UpdateScheduledJobDocument,
+    "\n  mutation DeleteScheduledJob($rowId: String!) {\n    deleteScheduledJob(input: { rowId: $rowId }) {\n      deletedScheduledJobId\n    }\n  }\n": types.DeleteScheduledJobDocument,
+};
+
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  query GetRemoteLlmProviders($profileId: String!) {\n    llmProviders(condition: { profileId: $profileId }) {\n      nodes {\n        rowId\n        type\n        name\n        baseUrl\n        modelId\n        supportsImages\n        contextWindow\n        temperature\n        resourceName\n        region\n        createdAt\n        updatedAt\n      }\n    }\n  }\n"): typeof import('./graphql').GetRemoteLlmProvidersDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  mutation DeleteRemoteLlmProvider($rowId: String!) {\n    deleteLlmProvider(input: { rowId: $rowId }) {\n      deletedLlmProviderId\n    }\n  }\n"): typeof import('./graphql').DeleteRemoteLlmProviderDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  query GetProfileByUserId($userId: String!) {\n    profileByUserId(userId: $userId) {\n      rowId\n      firstName\n      lastName\n      avatarUrl\n    }\n  }\n"): typeof import('./graphql').GetProfileByUserIdDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  mutation UpdateProfileByUserId($userId: String!, $patch: ProfilePatch!) {\n    updateProfileByUserId(input: { userId: $userId, patch: $patch }) {\n      profile {\n        rowId\n        firstName\n        lastName\n        avatarUrl\n      }\n    }\n  }\n"): typeof import('./graphql').UpdateProfileByUserIdDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  query GetConversationsForHistory($profileId: String!, $first: Int = 50, $after: Cursor) {\n    conversations(\n      condition: { profileId: $profileId }\n      first: $first\n      after: $after\n      orderBy: LAST_MESSAGED_AT_DESC\n    ) {\n      nodes {\n        rowId\n        lastMessagedAt\n        conversationMessages(first: 2, orderBy: ORDER_INDEX_DESC) {\n          nodes {\n            message\n          }\n        }\n      }\n      pageInfo {\n        endCursor\n        hasNextPage\n      }\n    }\n  }\n"): typeof import('./graphql').GetConversationsForHistoryDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  mutation DeleteConversation($rowId: String!) {\n    deleteConversation(input: { rowId: $rowId }) {\n      deletedConversationId\n    }\n  }\n"): typeof import('./graphql').DeleteConversationDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  mutation CreateConversationWithMessage(\n    $conversationId: String!\n    $profileId: String!\n    $message: JSON!\n  ) {\n    createConversation(\n      input: {\n        conversation: {\n          rowId: $conversationId\n          profileId: $profileId\n          lastMessagedAt: \"now()\"\n        }\n      }\n    ) {\n      conversation {\n        rowId\n      }\n    }\n    createConversationMessage(\n      input: {\n        conversationMessage: {\n          rowId: $conversationId\n          conversationId: $conversationId\n          orderIndex: 0\n          message: $message\n        }\n      }\n    ) {\n      conversationMessage {\n        rowId\n        orderIndex\n      }\n    }\n  }\n"): typeof import('./graphql').CreateConversationWithMessageDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  mutation AppendConversationMessage(\n    $messageId: String!\n    $conversationId: String!\n    $orderIndex: Int!\n    $message: JSON!\n  ) {\n    createConversationMessage(\n      input: {\n        conversationMessage: {\n          rowId: $messageId\n          conversationId: $conversationId\n          orderIndex: $orderIndex\n          message: $message\n        }\n      }\n    ) {\n      conversationMessage {\n        rowId\n        orderIndex\n      }\n    }\n  }\n"): typeof import('./graphql').AppendConversationMessageDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  mutation UpdateConversationLastMessagedAt($conversationId: String!) {\n    updateConversation(\n      input: { rowId: $conversationId, patch: { lastMessagedAt: \"now()\" } }\n    ) {\n      conversation {\n        rowId\n        lastMessagedAt\n      }\n    }\n  }\n"): typeof import('./graphql').UpdateConversationLastMessagedAtDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  query GetConversationWithMessages($conversationId: String!) {\n    conversation(rowId: $conversationId) {\n      rowId\n      conversationMessages(first: 100, orderBy: ORDER_INDEX_ASC) {\n        nodes {\n          message\n        }\n      }\n    }\n  }\n"): typeof import('./graphql').GetConversationWithMessagesDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  query GetProfileIdByUserId($userId: String!) {\n    profileByUserId(userId: $userId) {\n      rowId\n    }\n  }\n"): typeof import('./graphql').GetProfileIdByUserIdDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  mutation CreateConversationForUpload($input: CreateConversationInput!) {\n    createConversation(input: $input) {\n      conversation {\n        id\n        rowId\n        profileId\n        lastMessagedAt\n        createdAt\n      }\n    }\n  }\n"): typeof import('./graphql').CreateConversationForUploadDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  mutation BulkCreateConversationMessages($input: BulkCreateConversationMessagesInput!) {\n    bulkCreateConversationMessages(input: $input) {\n      result {\n        id\n        rowId\n        conversationId\n        orderIndex\n      }\n    }\n  }\n"): typeof import('./graphql').BulkCreateConversationMessagesDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  query ConversationExists($pConversationId: String) {\n    conversationExists(pConversationId: $pConversationId)\n  }\n"): typeof import('./graphql').ConversationExistsDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  query GetUploadedMessageCount($conversationId: String!) {\n    conversationMessages(condition: { conversationId: $conversationId }, first: 0) {\n      totalCount\n    }\n  }\n"): typeof import('./graphql').GetUploadedMessageCountDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  mutation CreateLlmProviderForUpload($input: CreateLlmProviderInput!) {\n    createLlmProvider(input: $input) {\n      llmProvider {\n        rowId\n      }\n    }\n  }\n"): typeof import('./graphql').CreateLlmProviderForUploadDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  mutation UpdateLlmProviderForUpload($input: UpdateLlmProviderInput!) {\n    updateLlmProvider(input: $input) {\n      llmProvider {\n        rowId\n      }\n    }\n  }\n"): typeof import('./graphql').UpdateLlmProviderForUploadDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  query GetLlmProvidersByProfileId($profileId: String!) {\n    llmProviders(condition: { profileId: $profileId }) {\n      nodes {\n        rowId\n        type\n        name\n        baseUrl\n        modelId\n        supportsImages\n        contextWindow\n        temperature\n        resourceName\n        region\n      }\n    }\n  }\n"): typeof import('./graphql').GetLlmProvidersByProfileIdDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  query GetScheduledJobsByProfileId($profileId: String!) {\n    scheduledJobs(condition: { profileId: $profileId }, first: 100) {\n      nodes {\n        rowId\n        name\n        query\n        scheduleType\n        scheduleTime\n        scheduleInterval\n        enabled\n        llmProviderId\n        createdAt\n        updatedAt\n        lastRunAt\n      }\n    }\n  }\n"): typeof import('./graphql').GetScheduledJobsByProfileIdDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  mutation CreateScheduledJob($input: CreateScheduledJobInput!) {\n    createScheduledJob(input: $input) {\n      scheduledJob {\n        rowId\n      }\n    }\n  }\n"): typeof import('./graphql').CreateScheduledJobDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  mutation UpdateScheduledJob($input: UpdateScheduledJobInput!) {\n    updateScheduledJob(input: $input) {\n      scheduledJob {\n        rowId\n      }\n    }\n  }\n"): typeof import('./graphql').UpdateScheduledJobDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  mutation DeleteScheduledJob($rowId: String!) {\n    deleteScheduledJob(input: { rowId: $rowId }) {\n      deletedScheduledJobId\n    }\n  }\n"): typeof import('./graphql').DeleteScheduledJobDocument;
+
+
+export function graphql(source: string) {
+  return (documents as any)[source] ?? {};
+}

@@ -1,0 +1,33 @@
+{
+  "title": "LOGS Tab Cross-Source Correlated Timeline",
+  "cycle": 47,
+  "date": "2026-07-24",
+  "ring": "SR-02 / BR-OUTPUT",
+  "agent": "claude",
+  "road": "B",
+  "problem": "Events from different log sources were still shown grouped by source, making it hard to correlate incidents across heterogeneous timestamp formats.",
+  "root_cause": "LogParser returned independent LogSource arrays with no cross-source timestamp normalization, unified sort, or merged deduplication.",
+  "fix_summary": "Added LogTimelineMode, tolerant parseLineTimestamp, unifiedLines merge/sort/dedup, Sources/Timeline segmented picker, unified timeline view with source chips + timestamp + event/level badges, and Copy/Export actions. Added timestamp and unified-timeline tests.",
+  "files": [
+    "trios/rings/SR-02/LogParser.swift",
+    "trios/BR-OUTPUT/LogsTabView.swift",
+    "trios/tests/TriOSKitTests/LogsTabViewTests.swift",
+    "trios/.trinity/specs/logs-tab-correlated-timeline.md",
+    "trios/.claude/plans/trios-cycle47-logs-tab-correlated-timeline.md",
+    "trios/.claude/plans/trios-cycle47-logs-tab-correlated-timeline-report.md"
+  ],
+  "tests": {
+    "build_sh": "PASS",
+    "mesh_tests": "PASS (101 tests)",
+    "clade_build": "PASS",
+    "clade_audit": "PASS (0 findings)",
+    "clade_seal": "SEAL VALID",
+    "clade_e2e": "PASS",
+    "menu_bar_logo": "relaunched via open trios.app"
+  },
+  "next_options": [
+    "Time-window zoom and range export",
+    "Alert-derived markers on the timeline",
+    "Full structured event store"
+  ]
+}

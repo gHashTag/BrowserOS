@@ -1,0 +1,39 @@
+{
+  "id": "2026-08-23_the-gate-now-waits-for-the-warmup",
+  "date": "2026-08-23",
+  "ring": "SR-00",
+  "title": "The warm-up was right and started at the wrong moment; ordering it ahead of the callers gave the first clean launch",
+  "severity": "high",
+  "agent": "Queen",
+  "problem": "The warm-up added in the previous round paid the per-process cold Keychain cost correctly and changed almost nothing: it was started at the same instant the launch gate dropped, so ordinary deadlined reads raced it and lost. 6 stalls and plaintext writes before it finished at +40.2s, 0 after.",
+  "fix": "clearLaunchGate starts the warm-up and lowers the gate when it finishes, or after warmupGateCeiling (90s), whichever is first. lowerGateOnce is idempotent so the loser of that race cannot re-announce a gate already down. The ceiling exists because a warm-up that hangs must not hold the gate for the life of the process.",
+  "live_proof": {
+    "prediction": "Written into the commit message BEFORE the test ran: stalls and plaintext writes before the gate lowers should be 0, against 6 last launch.",
+    "trace": [
+      "+3.8s   keychain.launch_gate.cleared   (main.swift, now premature by ~20s)",
+      "+23.9s  keychain.warmup.finished       warmed=9 failed=0 seconds=20.1",
+      "+23.9s  keychain.launch_gate.lowered   reason=warm-up finished"
+    ],
+    "result": "0 stalls and 0 plaintext writes before the gate lowered, against 6. The whole window contains no read.stalled, no enumeration.stalled, no encrypt_fallback and no refusal window - the first such launch in the investigation.",
+    "limits": "One launch. The prediction was made in advance and the mechanism is direct, which is why this is reported as evidence rather than as the unattributable improvement of two rounds ago."
+  },
+  "findings": [
+    "main.swift's keychain.launch_gate.cleared now fires ~20s before the gate is actually down, visible in the trace as +3.8s against +23.9s. That file is another agent's uncommitted work, so the true event took a different name rather than burying a premature line under a correct one.",
+    "keychain_floor.swift tripped the keychain-doors gate, correctly: it calls SecItemCopyMatching outside the allowlist. Added on purpose with the reason recorded in the Makefile - routing a tool that times the API through KeychainSecrets would measure the deadlines and cooldowns instead of the call underneath them."
+  ],
+  "shared_tree_incidents": [
+    "I committed another agent's in-flight Makefile work - a t27-lowering target, 53 lines, and its addition to the check target - inside my own commit 630306a64. Pathspec protects against unrelated FILES, not against another agent's hunks in a file I am also editing. I did print the hunk count, but in the same command as the commit, so the diagnostic arrived too late to act on. History not rewritten; recorded instead. This is the same incident that happened to me from the other direction earlier today."
+  ],
+  "prevention": [
+    "A correct fix at the wrong moment measures as no fix. Ask when it runs relative to what it protects, not only whether it is right.",
+    "Predict the number in writing before the test. A number that improves after a change is not evidence; a number you said would go to zero, and did, is.",
+    "When a call's timing changes, its callers' log lines can silently become false. Check what else asserts something about the moment you just moved.",
+    "On a shared file, count the diff hunks in a SEPARATE command before committing. A diagnostic printed in the same command as the commit cannot change the commit."
+  ],
+  "not_verified": [
+    "Why cross-application ACL evaluation costs seconds. Measured, not explained.",
+    "keychain.read.not_restacked, keychain.enumeration.not_restacked and keychain.read.starved_out still have no live occurrence - and after this change they may never get one on a healthy launch, which is the point.",
+    "Whether the clean window holds across launches. One sample."
+  ],
+  "tags": ["unmeasured-cause", "keychain", "warmup", "ordering", "predict-then-measure", "shared-tree"]
+}

@@ -1,0 +1,33 @@
+{
+  "task_id": "TRI-NET-TABS-001",
+  "claim_id": "EABC6E97-899B-490F-ADD4-2C8792819301",
+  "timestamp": "2026-07-22T18:22:06Z",
+  "action": "spec_tdd_build_verify_learn",
+  "result": "clean",
+  "problem": "Trios Git and Mesh tabs did not expose the authoritative tri-net delivery state, so the merged PR, exact merge identity, current main head, and security-related follow-up work were invisible or easy to confuse.",
+  "solution": "Added one shared live GitHub snapshot store with a verified offline fallback and one reusable repository status card. Git Repos and Mesh Status now show PR #89 as merged with 263 commits at 5b147bf, keep the moving main head separate, link recent commits, and preserve a delivery-focus summary for security, spam hardening, listener fuzzing, and BWE recovery.",
+  "verification": {
+    "red_test": "PASS",
+    "repository_status_tests": "PASS",
+    "swift_build": "PASS",
+    "compiled_swift_files": 90,
+    "code_signature": "PASS",
+    "visual_git_tab": "PASS",
+    "visual_mesh_status": "PASS",
+    "github_live_refresh": {
+      "status": "PASS",
+      "observed_main": "8ae733b",
+      "commits_after_merge": 7
+    },
+    "browseros_health": {
+      "status": "ok",
+      "cdpConnected": true
+    },
+    "runtime_launch": "PASS",
+    "pid": 65013,
+    "mesh_daemon": "OFFLINE_PREEXISTING_OUT_OF_SCOPE",
+    "diff_check": "PASS",
+    "ascii_check": "PASS"
+  },
+  "lesson": "A merged PR is an immutable delivery fact while main is a moving runtime fact. Presenting them from one shared source prevents stale duplication, and a derived focus summary keeps important security and resilience work visible as new commits push older highlights down the timeline."
+}

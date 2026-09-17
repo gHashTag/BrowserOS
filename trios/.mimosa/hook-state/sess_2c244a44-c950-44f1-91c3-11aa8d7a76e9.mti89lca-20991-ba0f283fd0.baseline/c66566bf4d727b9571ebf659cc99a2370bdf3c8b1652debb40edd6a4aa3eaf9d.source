@@ -1,0 +1,2354 @@
+/* eslint-disable */
+import { DocumentTypeDecoration } from '@graphql-typed-document-node/core';
+export type Maybe<T> = T | null;
+export type InputMaybe<T> = T | null | undefined;
+export type Exact<T extends { [key: string]: unknown }> = { [K in keyof T]: T[K] };
+export type MakeOptional<T, K extends keyof T> = Omit<T, K> & { [SubKey in K]?: Maybe<T[SubKey]> };
+export type MakeMaybe<T, K extends keyof T> = Omit<T, K> & { [SubKey in K]: Maybe<T[SubKey]> };
+export type MakeEmpty<T extends { [key: string]: unknown }, K extends keyof T> = { [_ in K]?: never };
+export type Incremental<T> = T | { [P in keyof T]?: P extends ' $fragmentName' | '__typename' ? T[P] : never };
+/** All built-in and custom scalars, mapped to their actual values */
+export type Scalars = {
+  ID: { input: string; output: string; }
+  String: { input: string; output: string; }
+  Boolean: { input: boolean; output: boolean; }
+  Int: { input: number; output: number; }
+  Float: { input: number; output: number; }
+  /** A location in a connection that can be used for resuming pagination. */
+  Cursor: { input: any; output: any; }
+  /**
+   * A point in time as described by the [ISO
+   * 8601](https://en.wikipedia.org/wiki/ISO_8601) and, if it has a timezone, [RFC
+   * 3339](https://datatracker.ietf.org/doc/html/rfc3339) standards. Input values
+   * that do not conform to both ISO 8601 and RFC 3339 may be coerced, which may lead
+   * to unexpected results.
+   */
+  Datetime: { input: any; output: any; }
+  /** Represents JSON values as specified by [ECMA-404](http://www.ecma-international.org/publications/files/ECMA-ST/ECMA-404.pdf). */
+  JSON: { input: any; output: any; }
+};
+
+/** All input for the `bulkCreateConversationMessages` mutation. */
+export type BulkCreateConversationMessagesInput = {
+  /**
+   * An arbitrary string value with no semantic meaning. Will be included in the
+   * payload verbatim. May be used to track mutations by the client.
+   */
+  clientMutationId?: InputMaybe<Scalars['String']['input']>;
+  pConversationId?: InputMaybe<Scalars['String']['input']>;
+  pMessages?: InputMaybe<Array<InputMaybe<ConversationMessageInputRecordInput>>>;
+};
+
+/** The output of our `bulkCreateConversationMessages` mutation. */
+export type BulkCreateConversationMessagesPayload = {
+  __typename?: 'BulkCreateConversationMessagesPayload';
+  /**
+   * The exact same `clientMutationId` that was provided in the mutation input,
+   * unchanged and unused. May be used by a client to track mutations.
+   */
+  clientMutationId?: Maybe<Scalars['String']['output']>;
+  /** Our root query field type. Allows us to run any query from our mutation payload. */
+  query?: Maybe<Query>;
+  result?: Maybe<Array<Maybe<ConversationMessage>>>;
+};
+
+export type Conversation = Node & {
+  __typename?: 'Conversation';
+  /** Reads and enables pagination through a set of `ConversationMessage`. */
+  conversationMessages: ConversationMessageConnection;
+  createdAt: Scalars['Datetime']['output'];
+  /** A globally unique identifier. Can be used in various places throughout the system to identify this single value. */
+  id: Scalars['ID']['output'];
+  lastMessagedAt: Scalars['Datetime']['output'];
+  /** Reads a single `Profile` that is related to this `Conversation`. */
+  profile?: Maybe<Profile>;
+  profileId: Scalars['String']['output'];
+  rowId: Scalars['String']['output'];
+};
+
+
+export type ConversationConversationMessagesArgs = {
+  after?: InputMaybe<Scalars['Cursor']['input']>;
+  before?: InputMaybe<Scalars['Cursor']['input']>;
+  condition?: InputMaybe<ConversationMessageCondition>;
+  first?: InputMaybe<Scalars['Int']['input']>;
+  last?: InputMaybe<Scalars['Int']['input']>;
+  offset?: InputMaybe<Scalars['Int']['input']>;
+  orderBy?: InputMaybe<Array<ConversationMessageOrderBy>>;
+};
+
+/**
+ * A condition to be used against `Conversation` object types. All fields are
+ * tested for equality and combined with a logical ‘and.’
+ */
+export type ConversationCondition = {
+  /** Checks for equality with the object’s `lastMessagedAt` field. */
+  lastMessagedAt?: InputMaybe<Scalars['Datetime']['input']>;
+  /** Checks for equality with the object’s `profileId` field. */
+  profileId?: InputMaybe<Scalars['String']['input']>;
+  /** Checks for equality with the object’s `rowId` field. */
+  rowId?: InputMaybe<Scalars['String']['input']>;
+};
+
+/** A connection to a list of `Conversation` values. */
+export type ConversationConnection = {
+  __typename?: 'ConversationConnection';
+  /** A list of edges which contains the `Conversation` and cursor to aid in pagination. */
+  edges: Array<Maybe<ConversationEdge>>;
+  /** A list of `Conversation` objects. */
+  nodes: Array<Maybe<Conversation>>;
+  /** Information to aid in pagination. */
+  pageInfo: PageInfo;
+  /** The count of *all* `Conversation` you could get from the connection. */
+  totalCount: Scalars['Int']['output'];
+};
+
+/** A `Conversation` edge in the connection. */
+export type ConversationEdge = {
+  __typename?: 'ConversationEdge';
+  /** A cursor for use in pagination. */
+  cursor?: Maybe<Scalars['Cursor']['output']>;
+  /** The `Conversation` at the end of the edge. */
+  node?: Maybe<Conversation>;
+};
+
+/** An input for mutations affecting `Conversation` */
+export type ConversationInput = {
+  createdAt?: InputMaybe<Scalars['Datetime']['input']>;
+  lastMessagedAt?: InputMaybe<Scalars['Datetime']['input']>;
+  profileId: Scalars['String']['input'];
+  rowId: Scalars['String']['input'];
+};
+
+export type ConversationMessage = Node & {
+  __typename?: 'ConversationMessage';
+  /** Reads a single `Conversation` that is related to this `ConversationMessage`. */
+  conversation?: Maybe<Conversation>;
+  conversationId: Scalars['String']['output'];
+  createdAt: Scalars['Datetime']['output'];
+  /** A globally unique identifier. Can be used in various places throughout the system to identify this single value. */
+  id: Scalars['ID']['output'];
+  message: Scalars['JSON']['output'];
+  orderIndex: Scalars['Int']['output'];
+  rowId: Scalars['String']['output'];
+};
+
+/**
+ * A condition to be used against `ConversationMessage` object types. All fields
+ * are tested for equality and combined with a logical ‘and.’
+ */
+export type ConversationMessageCondition = {
+  /** Checks for equality with the object’s `conversationId` field. */
+  conversationId?: InputMaybe<Scalars['String']['input']>;
+  /** Checks for equality with the object’s `orderIndex` field. */
+  orderIndex?: InputMaybe<Scalars['Int']['input']>;
+  /** Checks for equality with the object’s `rowId` field. */
+  rowId?: InputMaybe<Scalars['String']['input']>;
+};
+
+/** A connection to a list of `ConversationMessage` values. */
+export type ConversationMessageConnection = {
+  __typename?: 'ConversationMessageConnection';
+  /** A list of edges which contains the `ConversationMessage` and cursor to aid in pagination. */
+  edges: Array<Maybe<ConversationMessageEdge>>;
+  /** A list of `ConversationMessage` objects. */
+  nodes: Array<Maybe<ConversationMessage>>;
+  /** Information to aid in pagination. */
+  pageInfo: PageInfo;
+  /** The count of *all* `ConversationMessage` you could get from the connection. */
+  totalCount: Scalars['Int']['output'];
+};
+
+/** A `ConversationMessage` edge in the connection. */
+export type ConversationMessageEdge = {
+  __typename?: 'ConversationMessageEdge';
+  /** A cursor for use in pagination. */
+  cursor?: Maybe<Scalars['Cursor']['output']>;
+  /** The `ConversationMessage` at the end of the edge. */
+  node?: Maybe<ConversationMessage>;
+};
+
+/** An input for mutations affecting `ConversationMessage` */
+export type ConversationMessageInput = {
+  conversationId: Scalars['String']['input'];
+  createdAt?: InputMaybe<Scalars['Datetime']['input']>;
+  message: Scalars['JSON']['input'];
+  orderIndex: Scalars['Int']['input'];
+  rowId: Scalars['String']['input'];
+};
+
+/** An input for mutations affecting `ConversationMessageInputRecord` */
+export type ConversationMessageInputRecordInput = {
+  message?: InputMaybe<Scalars['JSON']['input']>;
+  orderIndex?: InputMaybe<Scalars['Int']['input']>;
+};
+
+/** Methods to use when ordering `ConversationMessage`. */
+export enum ConversationMessageOrderBy {
+  ConversationIdAsc = 'CONVERSATION_ID_ASC',
+  ConversationIdDesc = 'CONVERSATION_ID_DESC',
+  Natural = 'NATURAL',
+  OrderIndexAsc = 'ORDER_INDEX_ASC',
+  OrderIndexDesc = 'ORDER_INDEX_DESC',
+  PrimaryKeyAsc = 'PRIMARY_KEY_ASC',
+  PrimaryKeyDesc = 'PRIMARY_KEY_DESC',
+  RowIdAsc = 'ROW_ID_ASC',
+  RowIdDesc = 'ROW_ID_DESC'
+}
+
+/** Represents an update to a `ConversationMessage`. Fields that are set will be updated. */
+export type ConversationMessagePatch = {
+  conversationId?: InputMaybe<Scalars['String']['input']>;
+  createdAt?: InputMaybe<Scalars['Datetime']['input']>;
+  message?: InputMaybe<Scalars['JSON']['input']>;
+  orderIndex?: InputMaybe<Scalars['Int']['input']>;
+  rowId?: InputMaybe<Scalars['String']['input']>;
+};
+
+/** Methods to use when ordering `Conversation`. */
+export enum ConversationOrderBy {
+  LastMessagedAtAsc = 'LAST_MESSAGED_AT_ASC',
+  LastMessagedAtDesc = 'LAST_MESSAGED_AT_DESC',
+  Natural = 'NATURAL',
+  PrimaryKeyAsc = 'PRIMARY_KEY_ASC',
+  PrimaryKeyDesc = 'PRIMARY_KEY_DESC',
+  ProfileIdAsc = 'PROFILE_ID_ASC',
+  ProfileIdDesc = 'PROFILE_ID_DESC',
+  RowIdAsc = 'ROW_ID_ASC',
+  RowIdDesc = 'ROW_ID_DESC'
+}
+
+/** Represents an update to a `Conversation`. Fields that are set will be updated. */
+export type ConversationPatch = {
+  createdAt?: InputMaybe<Scalars['Datetime']['input']>;
+  lastMessagedAt?: InputMaybe<Scalars['Datetime']['input']>;
+  profileId?: InputMaybe<Scalars['String']['input']>;
+  rowId?: InputMaybe<Scalars['String']['input']>;
+};
+
+/** All input for the create `Conversation` mutation. */
+export type CreateConversationInput = {
+  /**
+   * An arbitrary string value with no semantic meaning. Will be included in the
+   * payload verbatim. May be used to track mutations by the client.
+   */
+  clientMutationId?: InputMaybe<Scalars['String']['input']>;
+  /** The `Conversation` to be created by this mutation. */
+  conversation: ConversationInput;
+};
+
+/** All input for the create `ConversationMessage` mutation. */
+export type CreateConversationMessageInput = {
+  /**
+   * An arbitrary string value with no semantic meaning. Will be included in the
+   * payload verbatim. May be used to track mutations by the client.
+   */
+  clientMutationId?: InputMaybe<Scalars['String']['input']>;
+  /** The `ConversationMessage` to be created by this mutation. */
+  conversationMessage: ConversationMessageInput;
+};
+
+/** The output of our create `ConversationMessage` mutation. */
+export type CreateConversationMessagePayload = {
+  __typename?: 'CreateConversationMessagePayload';
+  /**
+   * The exact same `clientMutationId` that was provided in the mutation input,
+   * unchanged and unused. May be used by a client to track mutations.
+   */
+  clientMutationId?: Maybe<Scalars['String']['output']>;
+  /** The `ConversationMessage` that was created by this mutation. */
+  conversationMessage?: Maybe<ConversationMessage>;
+  /** An edge for our `ConversationMessage`. May be used by Relay 1. */
+  conversationMessageEdge?: Maybe<ConversationMessageEdge>;
+  /** Our root query field type. Allows us to run any query from our mutation payload. */
+  query?: Maybe<Query>;
+};
+
+
+/** The output of our create `ConversationMessage` mutation. */
+export type CreateConversationMessagePayloadConversationMessageEdgeArgs = {
+  orderBy?: Array<ConversationMessageOrderBy>;
+};
+
+/** The output of our create `Conversation` mutation. */
+export type CreateConversationPayload = {
+  __typename?: 'CreateConversationPayload';
+  /**
+   * The exact same `clientMutationId` that was provided in the mutation input,
+   * unchanged and unused. May be used by a client to track mutations.
+   */
+  clientMutationId?: Maybe<Scalars['String']['output']>;
+  /** The `Conversation` that was created by this mutation. */
+  conversation?: Maybe<Conversation>;
+  /** An edge for our `Conversation`. May be used by Relay 1. */
+  conversationEdge?: Maybe<ConversationEdge>;
+  /** Our root query field type. Allows us to run any query from our mutation payload. */
+  query?: Maybe<Query>;
+};
+
+
+/** The output of our create `Conversation` mutation. */
+export type CreateConversationPayloadConversationEdgeArgs = {
+  orderBy?: Array<ConversationOrderBy>;
+};
+
+/** All input for the create `LlmProvider` mutation. */
+export type CreateLlmProviderInput = {
+  /**
+   * An arbitrary string value with no semantic meaning. Will be included in the
+   * payload verbatim. May be used to track mutations by the client.
+   */
+  clientMutationId?: InputMaybe<Scalars['String']['input']>;
+  /** The `LlmProvider` to be created by this mutation. */
+  llmProvider: LlmProviderInput;
+};
+
+/** The output of our create `LlmProvider` mutation. */
+export type CreateLlmProviderPayload = {
+  __typename?: 'CreateLlmProviderPayload';
+  /**
+   * The exact same `clientMutationId` that was provided in the mutation input,
+   * unchanged and unused. May be used by a client to track mutations.
+   */
+  clientMutationId?: Maybe<Scalars['String']['output']>;
+  /** The `LlmProvider` that was created by this mutation. */
+  llmProvider?: Maybe<LlmProvider>;
+  /** An edge for our `LlmProvider`. May be used by Relay 1. */
+  llmProviderEdge?: Maybe<LlmProviderEdge>;
+  /** Our root query field type. Allows us to run any query from our mutation payload. */
+  query?: Maybe<Query>;
+};
+
+
+/** The output of our create `LlmProvider` mutation. */
+export type CreateLlmProviderPayloadLlmProviderEdgeArgs = {
+  orderBy?: Array<LlmProviderOrderBy>;
+};
+
+/** All input for the create `Profile` mutation. */
+export type CreateProfileInput = {
+  /**
+   * An arbitrary string value with no semantic meaning. Will be included in the
+   * payload verbatim. May be used to track mutations by the client.
+   */
+  clientMutationId?: InputMaybe<Scalars['String']['input']>;
+  /** The `Profile` to be created by this mutation. */
+  profile: ProfileInput;
+};
+
+/** The output of our create `Profile` mutation. */
+export type CreateProfilePayload = {
+  __typename?: 'CreateProfilePayload';
+  /**
+   * The exact same `clientMutationId` that was provided in the mutation input,
+   * unchanged and unused. May be used by a client to track mutations.
+   */
+  clientMutationId?: Maybe<Scalars['String']['output']>;
+  /** The `Profile` that was created by this mutation. */
+  profile?: Maybe<Profile>;
+  /** An edge for our `Profile`. May be used by Relay 1. */
+  profileEdge?: Maybe<ProfileEdge>;
+  /** Our root query field type. Allows us to run any query from our mutation payload. */
+  query?: Maybe<Query>;
+};
+
+
+/** The output of our create `Profile` mutation. */
+export type CreateProfilePayloadProfileEdgeArgs = {
+  orderBy?: Array<ProfileOrderBy>;
+};
+
+/** All input for the create `ScheduledJob` mutation. */
+export type CreateScheduledJobInput = {
+  /**
+   * An arbitrary string value with no semantic meaning. Will be included in the
+   * payload verbatim. May be used to track mutations by the client.
+   */
+  clientMutationId?: InputMaybe<Scalars['String']['input']>;
+  /** The `ScheduledJob` to be created by this mutation. */
+  scheduledJob: ScheduledJobInput;
+};
+
+/** The output of our create `ScheduledJob` mutation. */
+export type CreateScheduledJobPayload = {
+  __typename?: 'CreateScheduledJobPayload';
+  /**
+   * The exact same `clientMutationId` that was provided in the mutation input,
+   * unchanged and unused. May be used by a client to track mutations.
+   */
+  clientMutationId?: Maybe<Scalars['String']['output']>;
+  /** Our root query field type. Allows us to run any query from our mutation payload. */
+  query?: Maybe<Query>;
+  /** The `ScheduledJob` that was created by this mutation. */
+  scheduledJob?: Maybe<ScheduledJob>;
+  /** An edge for our `ScheduledJob`. May be used by Relay 1. */
+  scheduledJobEdge?: Maybe<ScheduledJobEdge>;
+};
+
+
+/** The output of our create `ScheduledJob` mutation. */
+export type CreateScheduledJobPayloadScheduledJobEdgeArgs = {
+  orderBy?: Array<ScheduledJobOrderBy>;
+};
+
+/** All input for the create `ScheduledJobRun` mutation. */
+export type CreateScheduledJobRunInput = {
+  /**
+   * An arbitrary string value with no semantic meaning. Will be included in the
+   * payload verbatim. May be used to track mutations by the client.
+   */
+  clientMutationId?: InputMaybe<Scalars['String']['input']>;
+  /** The `ScheduledJobRun` to be created by this mutation. */
+  scheduledJobRun: ScheduledJobRunInput;
+};
+
+/** The output of our create `ScheduledJobRun` mutation. */
+export type CreateScheduledJobRunPayload = {
+  __typename?: 'CreateScheduledJobRunPayload';
+  /**
+   * The exact same `clientMutationId` that was provided in the mutation input,
+   * unchanged and unused. May be used by a client to track mutations.
+   */
+  clientMutationId?: Maybe<Scalars['String']['output']>;
+  /** Our root query field type. Allows us to run any query from our mutation payload. */
+  query?: Maybe<Query>;
+  /** The `ScheduledJobRun` that was created by this mutation. */
+  scheduledJobRun?: Maybe<ScheduledJobRun>;
+  /** An edge for our `ScheduledJobRun`. May be used by Relay 1. */
+  scheduledJobRunEdge?: Maybe<ScheduledJobRunEdge>;
+};
+
+
+/** The output of our create `ScheduledJobRun` mutation. */
+export type CreateScheduledJobRunPayloadScheduledJobRunEdgeArgs = {
+  orderBy?: Array<ScheduledJobRunOrderBy>;
+};
+
+/** All input for the `deleteConversationById` mutation. */
+export type DeleteConversationByIdInput = {
+  /**
+   * An arbitrary string value with no semantic meaning. Will be included in the
+   * payload verbatim. May be used to track mutations by the client.
+   */
+  clientMutationId?: InputMaybe<Scalars['String']['input']>;
+  /** The globally unique `ID` which will identify a single `Conversation` to be deleted. */
+  id: Scalars['ID']['input'];
+};
+
+/** All input for the `deleteConversation` mutation. */
+export type DeleteConversationInput = {
+  /**
+   * An arbitrary string value with no semantic meaning. Will be included in the
+   * payload verbatim. May be used to track mutations by the client.
+   */
+  clientMutationId?: InputMaybe<Scalars['String']['input']>;
+  rowId: Scalars['String']['input'];
+};
+
+/** All input for the `deleteConversationMessageById` mutation. */
+export type DeleteConversationMessageByIdInput = {
+  /**
+   * An arbitrary string value with no semantic meaning. Will be included in the
+   * payload verbatim. May be used to track mutations by the client.
+   */
+  clientMutationId?: InputMaybe<Scalars['String']['input']>;
+  /** The globally unique `ID` which will identify a single `ConversationMessage` to be deleted. */
+  id: Scalars['ID']['input'];
+};
+
+/** All input for the `deleteConversationMessage` mutation. */
+export type DeleteConversationMessageInput = {
+  /**
+   * An arbitrary string value with no semantic meaning. Will be included in the
+   * payload verbatim. May be used to track mutations by the client.
+   */
+  clientMutationId?: InputMaybe<Scalars['String']['input']>;
+  rowId: Scalars['String']['input'];
+};
+
+/** The output of our delete `ConversationMessage` mutation. */
+export type DeleteConversationMessagePayload = {
+  __typename?: 'DeleteConversationMessagePayload';
+  /**
+   * The exact same `clientMutationId` that was provided in the mutation input,
+   * unchanged and unused. May be used by a client to track mutations.
+   */
+  clientMutationId?: Maybe<Scalars['String']['output']>;
+  /** The `ConversationMessage` that was deleted by this mutation. */
+  conversationMessage?: Maybe<ConversationMessage>;
+  /** An edge for our `ConversationMessage`. May be used by Relay 1. */
+  conversationMessageEdge?: Maybe<ConversationMessageEdge>;
+  deletedConversationMessageId?: Maybe<Scalars['ID']['output']>;
+  /** Our root query field type. Allows us to run any query from our mutation payload. */
+  query?: Maybe<Query>;
+};
+
+
+/** The output of our delete `ConversationMessage` mutation. */
+export type DeleteConversationMessagePayloadConversationMessageEdgeArgs = {
+  orderBy?: Array<ConversationMessageOrderBy>;
+};
+
+/** The output of our delete `Conversation` mutation. */
+export type DeleteConversationPayload = {
+  __typename?: 'DeleteConversationPayload';
+  /**
+   * The exact same `clientMutationId` that was provided in the mutation input,
+   * unchanged and unused. May be used by a client to track mutations.
+   */
+  clientMutationId?: Maybe<Scalars['String']['output']>;
+  /** The `Conversation` that was deleted by this mutation. */
+  conversation?: Maybe<Conversation>;
+  /** An edge for our `Conversation`. May be used by Relay 1. */
+  conversationEdge?: Maybe<ConversationEdge>;
+  deletedConversationId?: Maybe<Scalars['ID']['output']>;
+  /** Our root query field type. Allows us to run any query from our mutation payload. */
+  query?: Maybe<Query>;
+};
+
+
+/** The output of our delete `Conversation` mutation. */
+export type DeleteConversationPayloadConversationEdgeArgs = {
+  orderBy?: Array<ConversationOrderBy>;
+};
+
+/** All input for the `deleteLlmProviderById` mutation. */
+export type DeleteLlmProviderByIdInput = {
+  /**
+   * An arbitrary string value with no semantic meaning. Will be included in the
+   * payload verbatim. May be used to track mutations by the client.
+   */
+  clientMutationId?: InputMaybe<Scalars['String']['input']>;
+  /** The globally unique `ID` which will identify a single `LlmProvider` to be deleted. */
+  id: Scalars['ID']['input'];
+};
+
+/** All input for the `deleteLlmProvider` mutation. */
+export type DeleteLlmProviderInput = {
+  /**
+   * An arbitrary string value with no semantic meaning. Will be included in the
+   * payload verbatim. May be used to track mutations by the client.
+   */
+  clientMutationId?: InputMaybe<Scalars['String']['input']>;
+  rowId: Scalars['String']['input'];
+};
+
+/** The output of our delete `LlmProvider` mutation. */
+export type DeleteLlmProviderPayload = {
+  __typename?: 'DeleteLlmProviderPayload';
+  /**
+   * The exact same `clientMutationId` that was provided in the mutation input,
+   * unchanged and unused. May be used by a client to track mutations.
+   */
+  clientMutationId?: Maybe<Scalars['String']['output']>;
+  deletedLlmProviderId?: Maybe<Scalars['ID']['output']>;
+  /** The `LlmProvider` that was deleted by this mutation. */
+  llmProvider?: Maybe<LlmProvider>;
+  /** An edge for our `LlmProvider`. May be used by Relay 1. */
+  llmProviderEdge?: Maybe<LlmProviderEdge>;
+  /** Our root query field type. Allows us to run any query from our mutation payload. */
+  query?: Maybe<Query>;
+};
+
+
+/** The output of our delete `LlmProvider` mutation. */
+export type DeleteLlmProviderPayloadLlmProviderEdgeArgs = {
+  orderBy?: Array<LlmProviderOrderBy>;
+};
+
+/** All input for the `deleteProfileById` mutation. */
+export type DeleteProfileByIdInput = {
+  /**
+   * An arbitrary string value with no semantic meaning. Will be included in the
+   * payload verbatim. May be used to track mutations by the client.
+   */
+  clientMutationId?: InputMaybe<Scalars['String']['input']>;
+  /** The globally unique `ID` which will identify a single `Profile` to be deleted. */
+  id: Scalars['ID']['input'];
+};
+
+/** All input for the `deleteProfileByUserId` mutation. */
+export type DeleteProfileByUserIdInput = {
+  /**
+   * An arbitrary string value with no semantic meaning. Will be included in the
+   * payload verbatim. May be used to track mutations by the client.
+   */
+  clientMutationId?: InputMaybe<Scalars['String']['input']>;
+  userId: Scalars['String']['input'];
+};
+
+/** All input for the `deleteProfile` mutation. */
+export type DeleteProfileInput = {
+  /**
+   * An arbitrary string value with no semantic meaning. Will be included in the
+   * payload verbatim. May be used to track mutations by the client.
+   */
+  clientMutationId?: InputMaybe<Scalars['String']['input']>;
+  rowId: Scalars['String']['input'];
+};
+
+/** The output of our delete `Profile` mutation. */
+export type DeleteProfilePayload = {
+  __typename?: 'DeleteProfilePayload';
+  /**
+   * The exact same `clientMutationId` that was provided in the mutation input,
+   * unchanged and unused. May be used by a client to track mutations.
+   */
+  clientMutationId?: Maybe<Scalars['String']['output']>;
+  deletedProfileId?: Maybe<Scalars['ID']['output']>;
+  /** The `Profile` that was deleted by this mutation. */
+  profile?: Maybe<Profile>;
+  /** An edge for our `Profile`. May be used by Relay 1. */
+  profileEdge?: Maybe<ProfileEdge>;
+  /** Our root query field type. Allows us to run any query from our mutation payload. */
+  query?: Maybe<Query>;
+};
+
+
+/** The output of our delete `Profile` mutation. */
+export type DeleteProfilePayloadProfileEdgeArgs = {
+  orderBy?: Array<ProfileOrderBy>;
+};
+
+/** All input for the `deleteScheduledJobById` mutation. */
+export type DeleteScheduledJobByIdInput = {
+  /**
+   * An arbitrary string value with no semantic meaning. Will be included in the
+   * payload verbatim. May be used to track mutations by the client.
+   */
+  clientMutationId?: InputMaybe<Scalars['String']['input']>;
+  /** The globally unique `ID` which will identify a single `ScheduledJob` to be deleted. */
+  id: Scalars['ID']['input'];
+};
+
+/** All input for the `deleteScheduledJob` mutation. */
+export type DeleteScheduledJobInput = {
+  /**
+   * An arbitrary string value with no semantic meaning. Will be included in the
+   * payload verbatim. May be used to track mutations by the client.
+   */
+  clientMutationId?: InputMaybe<Scalars['String']['input']>;
+  rowId: Scalars['String']['input'];
+};
+
+/** The output of our delete `ScheduledJob` mutation. */
+export type DeleteScheduledJobPayload = {
+  __typename?: 'DeleteScheduledJobPayload';
+  /**
+   * The exact same `clientMutationId` that was provided in the mutation input,
+   * unchanged and unused. May be used by a client to track mutations.
+   */
+  clientMutationId?: Maybe<Scalars['String']['output']>;
+  deletedScheduledJobId?: Maybe<Scalars['ID']['output']>;
+  /** Our root query field type. Allows us to run any query from our mutation payload. */
+  query?: Maybe<Query>;
+  /** The `ScheduledJob` that was deleted by this mutation. */
+  scheduledJob?: Maybe<ScheduledJob>;
+  /** An edge for our `ScheduledJob`. May be used by Relay 1. */
+  scheduledJobEdge?: Maybe<ScheduledJobEdge>;
+};
+
+
+/** The output of our delete `ScheduledJob` mutation. */
+export type DeleteScheduledJobPayloadScheduledJobEdgeArgs = {
+  orderBy?: Array<ScheduledJobOrderBy>;
+};
+
+/** All input for the `deleteScheduledJobRunById` mutation. */
+export type DeleteScheduledJobRunByIdInput = {
+  /**
+   * An arbitrary string value with no semantic meaning. Will be included in the
+   * payload verbatim. May be used to track mutations by the client.
+   */
+  clientMutationId?: InputMaybe<Scalars['String']['input']>;
+  /** The globally unique `ID` which will identify a single `ScheduledJobRun` to be deleted. */
+  id: Scalars['ID']['input'];
+};
+
+/** All input for the `deleteScheduledJobRun` mutation. */
+export type DeleteScheduledJobRunInput = {
+  /**
+   * An arbitrary string value with no semantic meaning. Will be included in the
+   * payload verbatim. May be used to track mutations by the client.
+   */
+  clientMutationId?: InputMaybe<Scalars['String']['input']>;
+  rowId: Scalars['String']['input'];
+};
+
+/** The output of our delete `ScheduledJobRun` mutation. */
+export type DeleteScheduledJobRunPayload = {
+  __typename?: 'DeleteScheduledJobRunPayload';
+  /**
+   * The exact same `clientMutationId` that was provided in the mutation input,
+   * unchanged and unused. May be used by a client to track mutations.
+   */
+  clientMutationId?: Maybe<Scalars['String']['output']>;
+  deletedScheduledJobRunId?: Maybe<Scalars['ID']['output']>;
+  /** Our root query field type. Allows us to run any query from our mutation payload. */
+  query?: Maybe<Query>;
+  /** The `ScheduledJobRun` that was deleted by this mutation. */
+  scheduledJobRun?: Maybe<ScheduledJobRun>;
+  /** An edge for our `ScheduledJobRun`. May be used by Relay 1. */
+  scheduledJobRunEdge?: Maybe<ScheduledJobRunEdge>;
+};
+
+
+/** The output of our delete `ScheduledJobRun` mutation. */
+export type DeleteScheduledJobRunPayloadScheduledJobRunEdgeArgs = {
+  orderBy?: Array<ScheduledJobRunOrderBy>;
+};
+
+export type LlmProvider = Node & {
+  __typename?: 'LlmProvider';
+  baseUrl?: Maybe<Scalars['String']['output']>;
+  contextWindow?: Maybe<Scalars['Int']['output']>;
+  createdAt: Scalars['Datetime']['output'];
+  /** A globally unique identifier. Can be used in various places throughout the system to identify this single value. */
+  id: Scalars['ID']['output'];
+  modelId: Scalars['String']['output'];
+  name: Scalars['String']['output'];
+  /** Reads a single `Profile` that is related to this `LlmProvider`. */
+  profile?: Maybe<Profile>;
+  profileId: Scalars['String']['output'];
+  region?: Maybe<Scalars['String']['output']>;
+  resourceName?: Maybe<Scalars['String']['output']>;
+  rowId: Scalars['String']['output'];
+  supportsImages: Scalars['Boolean']['output'];
+  temperature?: Maybe<Scalars['Float']['output']>;
+  type: Scalars['String']['output'];
+  updatedAt: Scalars['Datetime']['output'];
+};
+
+/**
+ * A condition to be used against `LlmProvider` object types. All fields are tested
+ * for equality and combined with a logical ‘and.’
+ */
+export type LlmProviderCondition = {
+  /** Checks for equality with the object’s `profileId` field. */
+  profileId?: InputMaybe<Scalars['String']['input']>;
+  /** Checks for equality with the object’s `rowId` field. */
+  rowId?: InputMaybe<Scalars['String']['input']>;
+};
+
+/** A connection to a list of `LlmProvider` values. */
+export type LlmProviderConnection = {
+  __typename?: 'LlmProviderConnection';
+  /** A list of edges which contains the `LlmProvider` and cursor to aid in pagination. */
+  edges: Array<Maybe<LlmProviderEdge>>;
+  /** A list of `LlmProvider` objects. */
+  nodes: Array<Maybe<LlmProvider>>;
+  /** Information to aid in pagination. */
+  pageInfo: PageInfo;
+  /** The count of *all* `LlmProvider` you could get from the connection. */
+  totalCount: Scalars['Int']['output'];
+};
+
+/** A `LlmProvider` edge in the connection. */
+export type LlmProviderEdge = {
+  __typename?: 'LlmProviderEdge';
+  /** A cursor for use in pagination. */
+  cursor?: Maybe<Scalars['Cursor']['output']>;
+  /** The `LlmProvider` at the end of the edge. */
+  node?: Maybe<LlmProvider>;
+};
+
+/** An input for mutations affecting `LlmProvider` */
+export type LlmProviderInput = {
+  baseUrl?: InputMaybe<Scalars['String']['input']>;
+  contextWindow?: InputMaybe<Scalars['Int']['input']>;
+  createdAt?: InputMaybe<Scalars['Datetime']['input']>;
+  modelId: Scalars['String']['input'];
+  name: Scalars['String']['input'];
+  profileId: Scalars['String']['input'];
+  region?: InputMaybe<Scalars['String']['input']>;
+  resourceName?: InputMaybe<Scalars['String']['input']>;
+  rowId: Scalars['String']['input'];
+  supportsImages?: InputMaybe<Scalars['Boolean']['input']>;
+  temperature?: InputMaybe<Scalars['Float']['input']>;
+  type: Scalars['String']['input'];
+  updatedAt?: InputMaybe<Scalars['Datetime']['input']>;
+};
+
+/** Methods to use when ordering `LlmProvider`. */
+export enum LlmProviderOrderBy {
+  Natural = 'NATURAL',
+  PrimaryKeyAsc = 'PRIMARY_KEY_ASC',
+  PrimaryKeyDesc = 'PRIMARY_KEY_DESC',
+  ProfileIdAsc = 'PROFILE_ID_ASC',
+  ProfileIdDesc = 'PROFILE_ID_DESC',
+  RowIdAsc = 'ROW_ID_ASC',
+  RowIdDesc = 'ROW_ID_DESC'
+}
+
+/** Represents an update to a `LlmProvider`. Fields that are set will be updated. */
+export type LlmProviderPatch = {
+  baseUrl?: InputMaybe<Scalars['String']['input']>;
+  contextWindow?: InputMaybe<Scalars['Int']['input']>;
+  createdAt?: InputMaybe<Scalars['Datetime']['input']>;
+  modelId?: InputMaybe<Scalars['String']['input']>;
+  name?: InputMaybe<Scalars['String']['input']>;
+  profileId?: InputMaybe<Scalars['String']['input']>;
+  region?: InputMaybe<Scalars['String']['input']>;
+  resourceName?: InputMaybe<Scalars['String']['input']>;
+  rowId?: InputMaybe<Scalars['String']['input']>;
+  supportsImages?: InputMaybe<Scalars['Boolean']['input']>;
+  temperature?: InputMaybe<Scalars['Float']['input']>;
+  type?: InputMaybe<Scalars['String']['input']>;
+  updatedAt?: InputMaybe<Scalars['Datetime']['input']>;
+};
+
+/** The root mutation type which contains root level fields which mutate data. */
+export type Mutation = {
+  __typename?: 'Mutation';
+  /** Bulk insert up to 50 messages into a conversation. Each item must have {orderIndex: number, message: object}. Returns the created messages. */
+  bulkCreateConversationMessages?: Maybe<BulkCreateConversationMessagesPayload>;
+  /** Creates a single `Conversation`. */
+  createConversation?: Maybe<CreateConversationPayload>;
+  /** Creates a single `ConversationMessage`. */
+  createConversationMessage?: Maybe<CreateConversationMessagePayload>;
+  /** Creates a single `LlmProvider`. */
+  createLlmProvider?: Maybe<CreateLlmProviderPayload>;
+  /** Creates a single `Profile`. */
+  createProfile?: Maybe<CreateProfilePayload>;
+  /** Creates a single `ScheduledJob`. */
+  createScheduledJob?: Maybe<CreateScheduledJobPayload>;
+  /** Creates a single `ScheduledJobRun`. */
+  createScheduledJobRun?: Maybe<CreateScheduledJobRunPayload>;
+  /** Deletes a single `Conversation` using a unique key. */
+  deleteConversation?: Maybe<DeleteConversationPayload>;
+  /** Deletes a single `Conversation` using its globally unique id. */
+  deleteConversationById?: Maybe<DeleteConversationPayload>;
+  /** Deletes a single `ConversationMessage` using a unique key. */
+  deleteConversationMessage?: Maybe<DeleteConversationMessagePayload>;
+  /** Deletes a single `ConversationMessage` using its globally unique id. */
+  deleteConversationMessageById?: Maybe<DeleteConversationMessagePayload>;
+  /** Deletes a single `LlmProvider` using a unique key. */
+  deleteLlmProvider?: Maybe<DeleteLlmProviderPayload>;
+  /** Deletes a single `LlmProvider` using its globally unique id. */
+  deleteLlmProviderById?: Maybe<DeleteLlmProviderPayload>;
+  /** Deletes a single `Profile` using a unique key. */
+  deleteProfile?: Maybe<DeleteProfilePayload>;
+  /** Deletes a single `Profile` using its globally unique id. */
+  deleteProfileById?: Maybe<DeleteProfilePayload>;
+  /** Deletes a single `Profile` using a unique key. */
+  deleteProfileByUserId?: Maybe<DeleteProfilePayload>;
+  /** Deletes a single `ScheduledJob` using a unique key. */
+  deleteScheduledJob?: Maybe<DeleteScheduledJobPayload>;
+  /** Deletes a single `ScheduledJob` using its globally unique id. */
+  deleteScheduledJobById?: Maybe<DeleteScheduledJobPayload>;
+  /** Deletes a single `ScheduledJobRun` using a unique key. */
+  deleteScheduledJobRun?: Maybe<DeleteScheduledJobRunPayload>;
+  /** Deletes a single `ScheduledJobRun` using its globally unique id. */
+  deleteScheduledJobRunById?: Maybe<DeleteScheduledJobRunPayload>;
+  /** Updates a single `Conversation` using a unique key and a patch. */
+  updateConversation?: Maybe<UpdateConversationPayload>;
+  /** Updates a single `Conversation` using its globally unique id and a patch. */
+  updateConversationById?: Maybe<UpdateConversationPayload>;
+  /** Updates a single `ConversationMessage` using a unique key and a patch. */
+  updateConversationMessage?: Maybe<UpdateConversationMessagePayload>;
+  /** Updates a single `ConversationMessage` using its globally unique id and a patch. */
+  updateConversationMessageById?: Maybe<UpdateConversationMessagePayload>;
+  /** Updates a single `LlmProvider` using a unique key and a patch. */
+  updateLlmProvider?: Maybe<UpdateLlmProviderPayload>;
+  /** Updates a single `LlmProvider` using its globally unique id and a patch. */
+  updateLlmProviderById?: Maybe<UpdateLlmProviderPayload>;
+  /** Updates a single `Profile` using a unique key and a patch. */
+  updateProfile?: Maybe<UpdateProfilePayload>;
+  /** Updates a single `Profile` using its globally unique id and a patch. */
+  updateProfileById?: Maybe<UpdateProfilePayload>;
+  /** Updates a single `Profile` using a unique key and a patch. */
+  updateProfileByUserId?: Maybe<UpdateProfilePayload>;
+  /** Updates a single `ScheduledJob` using a unique key and a patch. */
+  updateScheduledJob?: Maybe<UpdateScheduledJobPayload>;
+  /** Updates a single `ScheduledJob` using its globally unique id and a patch. */
+  updateScheduledJobById?: Maybe<UpdateScheduledJobPayload>;
+  /** Updates a single `ScheduledJobRun` using a unique key and a patch. */
+  updateScheduledJobRun?: Maybe<UpdateScheduledJobRunPayload>;
+  /** Updates a single `ScheduledJobRun` using its globally unique id and a patch. */
+  updateScheduledJobRunById?: Maybe<UpdateScheduledJobRunPayload>;
+};
+
+
+/** The root mutation type which contains root level fields which mutate data. */
+export type MutationBulkCreateConversationMessagesArgs = {
+  input: BulkCreateConversationMessagesInput;
+};
+
+
+/** The root mutation type which contains root level fields which mutate data. */
+export type MutationCreateConversationArgs = {
+  input: CreateConversationInput;
+};
+
+
+/** The root mutation type which contains root level fields which mutate data. */
+export type MutationCreateConversationMessageArgs = {
+  input: CreateConversationMessageInput;
+};
+
+
+/** The root mutation type which contains root level fields which mutate data. */
+export type MutationCreateLlmProviderArgs = {
+  input: CreateLlmProviderInput;
+};
+
+
+/** The root mutation type which contains root level fields which mutate data. */
+export type MutationCreateProfileArgs = {
+  input: CreateProfileInput;
+};
+
+
+/** The root mutation type which contains root level fields which mutate data. */
+export type MutationCreateScheduledJobArgs = {
+  input: CreateScheduledJobInput;
+};
+
+
+/** The root mutation type which contains root level fields which mutate data. */
+export type MutationCreateScheduledJobRunArgs = {
+  input: CreateScheduledJobRunInput;
+};
+
+
+/** The root mutation type which contains root level fields which mutate data. */
+export type MutationDeleteConversationArgs = {
+  input: DeleteConversationInput;
+};
+
+
+/** The root mutation type which contains root level fields which mutate data. */
+export type MutationDeleteConversationByIdArgs = {
+  input: DeleteConversationByIdInput;
+};
+
+
+/** The root mutation type which contains root level fields which mutate data. */
+export type MutationDeleteConversationMessageArgs = {
+  input: DeleteConversationMessageInput;
+};
+
+
+/** The root mutation type which contains root level fields which mutate data. */
+export type MutationDeleteConversationMessageByIdArgs = {
+  input: DeleteConversationMessageByIdInput;
+};
+
+
+/** The root mutation type which contains root level fields which mutate data. */
+export type MutationDeleteLlmProviderArgs = {
+  input: DeleteLlmProviderInput;
+};
+
+
+/** The root mutation type which contains root level fields which mutate data. */
+export type MutationDeleteLlmProviderByIdArgs = {
+  input: DeleteLlmProviderByIdInput;
+};
+
+
+/** The root mutation type which contains root level fields which mutate data. */
+export type MutationDeleteProfileArgs = {
+  input: DeleteProfileInput;
+};
+
+
+/** The root mutation type which contains root level fields which mutate data. */
+export type MutationDeleteProfileByIdArgs = {
+  input: DeleteProfileByIdInput;
+};
+
+
+/** The root mutation type which contains root level fields which mutate data. */
+export type MutationDeleteProfileByUserIdArgs = {
+  input: DeleteProfileByUserIdInput;
+};
+
+
+/** The root mutation type which contains root level fields which mutate data. */
+export type MutationDeleteScheduledJobArgs = {
+  input: DeleteScheduledJobInput;
+};
+
+
+/** The root mutation type which contains root level fields which mutate data. */
+export type MutationDeleteScheduledJobByIdArgs = {
+  input: DeleteScheduledJobByIdInput;
+};
+
+
+/** The root mutation type which contains root level fields which mutate data. */
+export type MutationDeleteScheduledJobRunArgs = {
+  input: DeleteScheduledJobRunInput;
+};
+
+
+/** The root mutation type which contains root level fields which mutate data. */
+export type MutationDeleteScheduledJobRunByIdArgs = {
+  input: DeleteScheduledJobRunByIdInput;
+};
+
+
+/** The root mutation type which contains root level fields which mutate data. */
+export type MutationUpdateConversationArgs = {
+  input: UpdateConversationInput;
+};
+
+
+/** The root mutation type which contains root level fields which mutate data. */
+export type MutationUpdateConversationByIdArgs = {
+  input: UpdateConversationByIdInput;
+};
+
+
+/** The root mutation type which contains root level fields which mutate data. */
+export type MutationUpdateConversationMessageArgs = {
+  input: UpdateConversationMessageInput;
+};
+
+
+/** The root mutation type which contains root level fields which mutate data. */
+export type MutationUpdateConversationMessageByIdArgs = {
+  input: UpdateConversationMessageByIdInput;
+};
+
+
+/** The root mutation type which contains root level fields which mutate data. */
+export type MutationUpdateLlmProviderArgs = {
+  input: UpdateLlmProviderInput;
+};
+
+
+/** The root mutation type which contains root level fields which mutate data. */
+export type MutationUpdateLlmProviderByIdArgs = {
+  input: UpdateLlmProviderByIdInput;
+};
+
+
+/** The root mutation type which contains root level fields which mutate data. */
+export type MutationUpdateProfileArgs = {
+  input: UpdateProfileInput;
+};
+
+
+/** The root mutation type which contains root level fields which mutate data. */
+export type MutationUpdateProfileByIdArgs = {
+  input: UpdateProfileByIdInput;
+};
+
+
+/** The root mutation type which contains root level fields which mutate data. */
+export type MutationUpdateProfileByUserIdArgs = {
+  input: UpdateProfileByUserIdInput;
+};
+
+
+/** The root mutation type which contains root level fields which mutate data. */
+export type MutationUpdateScheduledJobArgs = {
+  input: UpdateScheduledJobInput;
+};
+
+
+/** The root mutation type which contains root level fields which mutate data. */
+export type MutationUpdateScheduledJobByIdArgs = {
+  input: UpdateScheduledJobByIdInput;
+};
+
+
+/** The root mutation type which contains root level fields which mutate data. */
+export type MutationUpdateScheduledJobRunArgs = {
+  input: UpdateScheduledJobRunInput;
+};
+
+
+/** The root mutation type which contains root level fields which mutate data. */
+export type MutationUpdateScheduledJobRunByIdArgs = {
+  input: UpdateScheduledJobRunByIdInput;
+};
+
+/** An object with a globally unique `ID`. */
+export type Node = {
+  /** A globally unique identifier. Can be used in various places throughout the system to identify this single value. */
+  id: Scalars['ID']['output'];
+};
+
+/** Information about pagination in a connection. */
+export type PageInfo = {
+  __typename?: 'PageInfo';
+  /** When paginating forwards, the cursor to continue. */
+  endCursor?: Maybe<Scalars['Cursor']['output']>;
+  /** When paginating forwards, are there more items? */
+  hasNextPage: Scalars['Boolean']['output'];
+  /** When paginating backwards, are there more items? */
+  hasPreviousPage: Scalars['Boolean']['output'];
+  /** When paginating backwards, the cursor to continue. */
+  startCursor?: Maybe<Scalars['Cursor']['output']>;
+};
+
+export type Profile = Node & {
+  __typename?: 'Profile';
+  avatarUrl?: Maybe<Scalars['String']['output']>;
+  /** Reads and enables pagination through a set of `Conversation`. */
+  conversations: ConversationConnection;
+  createdAt: Scalars['Datetime']['output'];
+  firstName?: Maybe<Scalars['String']['output']>;
+  /** A globally unique identifier. Can be used in various places throughout the system to identify this single value. */
+  id: Scalars['ID']['output'];
+  lastName?: Maybe<Scalars['String']['output']>;
+  /** Reads and enables pagination through a set of `LlmProvider`. */
+  llmProviders: LlmProviderConnection;
+  preferences?: Maybe<Scalars['JSON']['output']>;
+  rowId: Scalars['String']['output'];
+  /** Reads and enables pagination through a set of `ScheduledJob`. */
+  scheduledJobs: ScheduledJobConnection;
+  updatedAt: Scalars['Datetime']['output'];
+  userId: Scalars['String']['output'];
+};
+
+
+export type ProfileConversationsArgs = {
+  after?: InputMaybe<Scalars['Cursor']['input']>;
+  before?: InputMaybe<Scalars['Cursor']['input']>;
+  condition?: InputMaybe<ConversationCondition>;
+  first?: InputMaybe<Scalars['Int']['input']>;
+  last?: InputMaybe<Scalars['Int']['input']>;
+  offset?: InputMaybe<Scalars['Int']['input']>;
+  orderBy?: InputMaybe<Array<ConversationOrderBy>>;
+};
+
+
+export type ProfileLlmProvidersArgs = {
+  after?: InputMaybe<Scalars['Cursor']['input']>;
+  before?: InputMaybe<Scalars['Cursor']['input']>;
+  condition?: InputMaybe<LlmProviderCondition>;
+  first?: InputMaybe<Scalars['Int']['input']>;
+  last?: InputMaybe<Scalars['Int']['input']>;
+  offset?: InputMaybe<Scalars['Int']['input']>;
+  orderBy?: InputMaybe<Array<LlmProviderOrderBy>>;
+};
+
+
+export type ProfileScheduledJobsArgs = {
+  after?: InputMaybe<Scalars['Cursor']['input']>;
+  before?: InputMaybe<Scalars['Cursor']['input']>;
+  condition?: InputMaybe<ScheduledJobCondition>;
+  first?: InputMaybe<Scalars['Int']['input']>;
+  last?: InputMaybe<Scalars['Int']['input']>;
+  offset?: InputMaybe<Scalars['Int']['input']>;
+  orderBy?: InputMaybe<Array<ScheduledJobOrderBy>>;
+};
+
+/** A condition to be used against `Profile` object types. All fields are tested for equality and combined with a logical ‘and.’ */
+export type ProfileCondition = {
+  /** Checks for equality with the object’s `rowId` field. */
+  rowId?: InputMaybe<Scalars['String']['input']>;
+  /** Checks for equality with the object’s `userId` field. */
+  userId?: InputMaybe<Scalars['String']['input']>;
+};
+
+/** A connection to a list of `Profile` values. */
+export type ProfileConnection = {
+  __typename?: 'ProfileConnection';
+  /** A list of edges which contains the `Profile` and cursor to aid in pagination. */
+  edges: Array<Maybe<ProfileEdge>>;
+  /** A list of `Profile` objects. */
+  nodes: Array<Maybe<Profile>>;
+  /** Information to aid in pagination. */
+  pageInfo: PageInfo;
+  /** The count of *all* `Profile` you could get from the connection. */
+  totalCount: Scalars['Int']['output'];
+};
+
+/** A `Profile` edge in the connection. */
+export type ProfileEdge = {
+  __typename?: 'ProfileEdge';
+  /** A cursor for use in pagination. */
+  cursor?: Maybe<Scalars['Cursor']['output']>;
+  /** The `Profile` at the end of the edge. */
+  node?: Maybe<Profile>;
+};
+
+/** An input for mutations affecting `Profile` */
+export type ProfileInput = {
+  avatarUrl?: InputMaybe<Scalars['String']['input']>;
+  createdAt?: InputMaybe<Scalars['Datetime']['input']>;
+  firstName?: InputMaybe<Scalars['String']['input']>;
+  lastName?: InputMaybe<Scalars['String']['input']>;
+  preferences?: InputMaybe<Scalars['JSON']['input']>;
+  rowId: Scalars['String']['input'];
+  updatedAt?: InputMaybe<Scalars['Datetime']['input']>;
+  userId: Scalars['String']['input'];
+};
+
+/** Methods to use when ordering `Profile`. */
+export enum ProfileOrderBy {
+  Natural = 'NATURAL',
+  PrimaryKeyAsc = 'PRIMARY_KEY_ASC',
+  PrimaryKeyDesc = 'PRIMARY_KEY_DESC',
+  RowIdAsc = 'ROW_ID_ASC',
+  RowIdDesc = 'ROW_ID_DESC',
+  UserIdAsc = 'USER_ID_ASC',
+  UserIdDesc = 'USER_ID_DESC'
+}
+
+/** Represents an update to a `Profile`. Fields that are set will be updated. */
+export type ProfilePatch = {
+  avatarUrl?: InputMaybe<Scalars['String']['input']>;
+  createdAt?: InputMaybe<Scalars['Datetime']['input']>;
+  firstName?: InputMaybe<Scalars['String']['input']>;
+  lastName?: InputMaybe<Scalars['String']['input']>;
+  preferences?: InputMaybe<Scalars['JSON']['input']>;
+  rowId?: InputMaybe<Scalars['String']['input']>;
+  updatedAt?: InputMaybe<Scalars['Datetime']['input']>;
+  userId?: InputMaybe<Scalars['String']['input']>;
+};
+
+/** The root query type which gives access points into the data universe. */
+export type Query = Node & {
+  __typename?: 'Query';
+  /** Get a single `Conversation`. */
+  conversation?: Maybe<Conversation>;
+  /** Reads a single `Conversation` using its globally unique `ID`. */
+  conversationById?: Maybe<Conversation>;
+  /** Check if a conversation exists and is accessible to the current user. */
+  conversationExists?: Maybe<Scalars['Boolean']['output']>;
+  /** Get a single `ConversationMessage`. */
+  conversationMessage?: Maybe<ConversationMessage>;
+  /** Reads a single `ConversationMessage` using its globally unique `ID`. */
+  conversationMessageById?: Maybe<ConversationMessage>;
+  /** Reads and enables pagination through a set of `ConversationMessage`. */
+  conversationMessages?: Maybe<ConversationMessageConnection>;
+  /** Reads and enables pagination through a set of `Conversation`. */
+  conversations?: Maybe<ConversationConnection>;
+  /** The root query type must be a `Node` to work well with Relay 1 mutations. This just resolves to `query`. */
+  id: Scalars['ID']['output'];
+  /** Get a single `LlmProvider`. */
+  llmProvider?: Maybe<LlmProvider>;
+  /** Reads a single `LlmProvider` using its globally unique `ID`. */
+  llmProviderById?: Maybe<LlmProvider>;
+  /** Reads and enables pagination through a set of `LlmProvider`. */
+  llmProviders?: Maybe<LlmProviderConnection>;
+  /** Fetches an object given its globally unique `ID`. */
+  node?: Maybe<Node>;
+  /** Get a single `Profile`. */
+  profile?: Maybe<Profile>;
+  /** Reads a single `Profile` using its globally unique `ID`. */
+  profileById?: Maybe<Profile>;
+  /** Get a single `Profile`. */
+  profileByUserId?: Maybe<Profile>;
+  /** Reads and enables pagination through a set of `Profile`. */
+  profiles?: Maybe<ProfileConnection>;
+  /**
+   * Exposes the root query type nested one level down. This is helpful for Relay 1
+   * which can only query top level fields if they are in a particular form.
+   */
+  query: Query;
+  /** Get a single `ScheduledJob`. */
+  scheduledJob?: Maybe<ScheduledJob>;
+  /** Reads a single `ScheduledJob` using its globally unique `ID`. */
+  scheduledJobById?: Maybe<ScheduledJob>;
+  /** Get a single `ScheduledJobRun`. */
+  scheduledJobRun?: Maybe<ScheduledJobRun>;
+  /** Reads a single `ScheduledJobRun` using its globally unique `ID`. */
+  scheduledJobRunById?: Maybe<ScheduledJobRun>;
+  /** Reads and enables pagination through a set of `ScheduledJobRun`. */
+  scheduledJobRuns?: Maybe<ScheduledJobRunConnection>;
+  /** Reads and enables pagination through a set of `ScheduledJob`. */
+  scheduledJobs?: Maybe<ScheduledJobConnection>;
+};
+
+
+/** The root query type which gives access points into the data universe. */
+export type QueryConversationArgs = {
+  rowId: Scalars['String']['input'];
+};
+
+
+/** The root query type which gives access points into the data universe. */
+export type QueryConversationByIdArgs = {
+  id: Scalars['ID']['input'];
+};
+
+
+/** The root query type which gives access points into the data universe. */
+export type QueryConversationExistsArgs = {
+  pConversationId?: InputMaybe<Scalars['String']['input']>;
+};
+
+
+/** The root query type which gives access points into the data universe. */
+export type QueryConversationMessageArgs = {
+  rowId: Scalars['String']['input'];
+};
+
+
+/** The root query type which gives access points into the data universe. */
+export type QueryConversationMessageByIdArgs = {
+  id: Scalars['ID']['input'];
+};
+
+
+/** The root query type which gives access points into the data universe. */
+export type QueryConversationMessagesArgs = {
+  after?: InputMaybe<Scalars['Cursor']['input']>;
+  before?: InputMaybe<Scalars['Cursor']['input']>;
+  condition?: InputMaybe<ConversationMessageCondition>;
+  first?: InputMaybe<Scalars['Int']['input']>;
+  last?: InputMaybe<Scalars['Int']['input']>;
+  offset?: InputMaybe<Scalars['Int']['input']>;
+  orderBy?: InputMaybe<Array<ConversationMessageOrderBy>>;
+};
+
+
+/** The root query type which gives access points into the data universe. */
+export type QueryConversationsArgs = {
+  after?: InputMaybe<Scalars['Cursor']['input']>;
+  before?: InputMaybe<Scalars['Cursor']['input']>;
+  condition?: InputMaybe<ConversationCondition>;
+  first?: InputMaybe<Scalars['Int']['input']>;
+  last?: InputMaybe<Scalars['Int']['input']>;
+  offset?: InputMaybe<Scalars['Int']['input']>;
+  orderBy?: InputMaybe<Array<ConversationOrderBy>>;
+};
+
+
+/** The root query type which gives access points into the data universe. */
+export type QueryLlmProviderArgs = {
+  rowId: Scalars['String']['input'];
+};
+
+
+/** The root query type which gives access points into the data universe. */
+export type QueryLlmProviderByIdArgs = {
+  id: Scalars['ID']['input'];
+};
+
+
+/** The root query type which gives access points into the data universe. */
+export type QueryLlmProvidersArgs = {
+  after?: InputMaybe<Scalars['Cursor']['input']>;
+  before?: InputMaybe<Scalars['Cursor']['input']>;
+  condition?: InputMaybe<LlmProviderCondition>;
+  first?: InputMaybe<Scalars['Int']['input']>;
+  last?: InputMaybe<Scalars['Int']['input']>;
+  offset?: InputMaybe<Scalars['Int']['input']>;
+  orderBy?: InputMaybe<Array<LlmProviderOrderBy>>;
+};
+
+
+/** The root query type which gives access points into the data universe. */
+export type QueryNodeArgs = {
+  id: Scalars['ID']['input'];
+};
+
+
+/** The root query type which gives access points into the data universe. */
+export type QueryProfileArgs = {
+  rowId: Scalars['String']['input'];
+};
+
+
+/** The root query type which gives access points into the data universe. */
+export type QueryProfileByIdArgs = {
+  id: Scalars['ID']['input'];
+};
+
+
+/** The root query type which gives access points into the data universe. */
+export type QueryProfileByUserIdArgs = {
+  userId: Scalars['String']['input'];
+};
+
+
+/** The root query type which gives access points into the data universe. */
+export type QueryProfilesArgs = {
+  after?: InputMaybe<Scalars['Cursor']['input']>;
+  before?: InputMaybe<Scalars['Cursor']['input']>;
+  condition?: InputMaybe<ProfileCondition>;
+  first?: InputMaybe<Scalars['Int']['input']>;
+  last?: InputMaybe<Scalars['Int']['input']>;
+  offset?: InputMaybe<Scalars['Int']['input']>;
+  orderBy?: InputMaybe<Array<ProfileOrderBy>>;
+};
+
+
+/** The root query type which gives access points into the data universe. */
+export type QueryScheduledJobArgs = {
+  rowId: Scalars['String']['input'];
+};
+
+
+/** The root query type which gives access points into the data universe. */
+export type QueryScheduledJobByIdArgs = {
+  id: Scalars['ID']['input'];
+};
+
+
+/** The root query type which gives access points into the data universe. */
+export type QueryScheduledJobRunArgs = {
+  rowId: Scalars['String']['input'];
+};
+
+
+/** The root query type which gives access points into the data universe. */
+export type QueryScheduledJobRunByIdArgs = {
+  id: Scalars['ID']['input'];
+};
+
+
+/** The root query type which gives access points into the data universe. */
+export type QueryScheduledJobRunsArgs = {
+  after?: InputMaybe<Scalars['Cursor']['input']>;
+  before?: InputMaybe<Scalars['Cursor']['input']>;
+  condition?: InputMaybe<ScheduledJobRunCondition>;
+  first?: InputMaybe<Scalars['Int']['input']>;
+  last?: InputMaybe<Scalars['Int']['input']>;
+  offset?: InputMaybe<Scalars['Int']['input']>;
+  orderBy?: InputMaybe<Array<ScheduledJobRunOrderBy>>;
+};
+
+
+/** The root query type which gives access points into the data universe. */
+export type QueryScheduledJobsArgs = {
+  after?: InputMaybe<Scalars['Cursor']['input']>;
+  before?: InputMaybe<Scalars['Cursor']['input']>;
+  condition?: InputMaybe<ScheduledJobCondition>;
+  first?: InputMaybe<Scalars['Int']['input']>;
+  last?: InputMaybe<Scalars['Int']['input']>;
+  offset?: InputMaybe<Scalars['Int']['input']>;
+  orderBy?: InputMaybe<Array<ScheduledJobOrderBy>>;
+};
+
+export type ScheduledJob = Node & {
+  __typename?: 'ScheduledJob';
+  createdAt: Scalars['Datetime']['output'];
+  enabled: Scalars['Boolean']['output'];
+  /** A globally unique identifier. Can be used in various places throughout the system to identify this single value. */
+  id: Scalars['ID']['output'];
+  lastRunAt?: Maybe<Scalars['Datetime']['output']>;
+  llmProviderId?: Maybe<Scalars['String']['output']>;
+  name: Scalars['String']['output'];
+  /** Reads a single `Profile` that is related to this `ScheduledJob`. */
+  profile?: Maybe<Profile>;
+  profileId: Scalars['String']['output'];
+  query: Scalars['String']['output'];
+  rowId: Scalars['String']['output'];
+  scheduleInterval?: Maybe<Scalars['Int']['output']>;
+  scheduleTime?: Maybe<Scalars['String']['output']>;
+  scheduleType: Scalars['String']['output'];
+  /** Reads and enables pagination through a set of `ScheduledJobRun`. */
+  scheduledJobRunsByJobId: ScheduledJobRunConnection;
+  updatedAt: Scalars['Datetime']['output'];
+};
+
+
+export type ScheduledJobScheduledJobRunsByJobIdArgs = {
+  after?: InputMaybe<Scalars['Cursor']['input']>;
+  before?: InputMaybe<Scalars['Cursor']['input']>;
+  condition?: InputMaybe<ScheduledJobRunCondition>;
+  first?: InputMaybe<Scalars['Int']['input']>;
+  last?: InputMaybe<Scalars['Int']['input']>;
+  offset?: InputMaybe<Scalars['Int']['input']>;
+  orderBy?: InputMaybe<Array<ScheduledJobRunOrderBy>>;
+};
+
+/**
+ * A condition to be used against `ScheduledJob` object types. All fields are
+ * tested for equality and combined with a logical ‘and.’
+ */
+export type ScheduledJobCondition = {
+  /** Checks for equality with the object’s `profileId` field. */
+  profileId?: InputMaybe<Scalars['String']['input']>;
+  /** Checks for equality with the object’s `rowId` field. */
+  rowId?: InputMaybe<Scalars['String']['input']>;
+};
+
+/** A connection to a list of `ScheduledJob` values. */
+export type ScheduledJobConnection = {
+  __typename?: 'ScheduledJobConnection';
+  /** A list of edges which contains the `ScheduledJob` and cursor to aid in pagination. */
+  edges: Array<Maybe<ScheduledJobEdge>>;
+  /** A list of `ScheduledJob` objects. */
+  nodes: Array<Maybe<ScheduledJob>>;
+  /** Information to aid in pagination. */
+  pageInfo: PageInfo;
+  /** The count of *all* `ScheduledJob` you could get from the connection. */
+  totalCount: Scalars['Int']['output'];
+};
+
+/** A `ScheduledJob` edge in the connection. */
+export type ScheduledJobEdge = {
+  __typename?: 'ScheduledJobEdge';
+  /** A cursor for use in pagination. */
+  cursor?: Maybe<Scalars['Cursor']['output']>;
+  /** The `ScheduledJob` at the end of the edge. */
+  node?: Maybe<ScheduledJob>;
+};
+
+/** An input for mutations affecting `ScheduledJob` */
+export type ScheduledJobInput = {
+  createdAt?: InputMaybe<Scalars['Datetime']['input']>;
+  enabled?: InputMaybe<Scalars['Boolean']['input']>;
+  lastRunAt?: InputMaybe<Scalars['Datetime']['input']>;
+  llmProviderId?: InputMaybe<Scalars['String']['input']>;
+  name: Scalars['String']['input'];
+  profileId: Scalars['String']['input'];
+  query: Scalars['String']['input'];
+  rowId: Scalars['String']['input'];
+  scheduleInterval?: InputMaybe<Scalars['Int']['input']>;
+  scheduleTime?: InputMaybe<Scalars['String']['input']>;
+  scheduleType: Scalars['String']['input'];
+  updatedAt?: InputMaybe<Scalars['Datetime']['input']>;
+};
+
+/** Methods to use when ordering `ScheduledJob`. */
+export enum ScheduledJobOrderBy {
+  Natural = 'NATURAL',
+  PrimaryKeyAsc = 'PRIMARY_KEY_ASC',
+  PrimaryKeyDesc = 'PRIMARY_KEY_DESC',
+  ProfileIdAsc = 'PROFILE_ID_ASC',
+  ProfileIdDesc = 'PROFILE_ID_DESC',
+  RowIdAsc = 'ROW_ID_ASC',
+  RowIdDesc = 'ROW_ID_DESC'
+}
+
+/** Represents an update to a `ScheduledJob`. Fields that are set will be updated. */
+export type ScheduledJobPatch = {
+  createdAt?: InputMaybe<Scalars['Datetime']['input']>;
+  enabled?: InputMaybe<Scalars['Boolean']['input']>;
+  lastRunAt?: InputMaybe<Scalars['Datetime']['input']>;
+  llmProviderId?: InputMaybe<Scalars['String']['input']>;
+  name?: InputMaybe<Scalars['String']['input']>;
+  profileId?: InputMaybe<Scalars['String']['input']>;
+  query?: InputMaybe<Scalars['String']['input']>;
+  rowId?: InputMaybe<Scalars['String']['input']>;
+  scheduleInterval?: InputMaybe<Scalars['Int']['input']>;
+  scheduleTime?: InputMaybe<Scalars['String']['input']>;
+  scheduleType?: InputMaybe<Scalars['String']['input']>;
+  updatedAt?: InputMaybe<Scalars['Datetime']['input']>;
+};
+
+export type ScheduledJobRun = Node & {
+  __typename?: 'ScheduledJobRun';
+  completedAt?: Maybe<Scalars['Datetime']['output']>;
+  error?: Maybe<Scalars['String']['output']>;
+  executionLog?: Maybe<Scalars['String']['output']>;
+  finalResult?: Maybe<Scalars['String']['output']>;
+  /** A globally unique identifier. Can be used in various places throughout the system to identify this single value. */
+  id: Scalars['ID']['output'];
+  /** Reads a single `ScheduledJob` that is related to this `ScheduledJobRun`. */
+  job?: Maybe<ScheduledJob>;
+  jobId: Scalars['String']['output'];
+  result?: Maybe<Scalars['String']['output']>;
+  rowId: Scalars['String']['output'];
+  startedAt: Scalars['Datetime']['output'];
+  status: Scalars['String']['output'];
+  toolCalls?: Maybe<Scalars['JSON']['output']>;
+};
+
+/**
+ * A condition to be used against `ScheduledJobRun` object types. All fields are
+ * tested for equality and combined with a logical ‘and.’
+ */
+export type ScheduledJobRunCondition = {
+  /** Checks for equality with the object’s `jobId` field. */
+  jobId?: InputMaybe<Scalars['String']['input']>;
+  /** Checks for equality with the object’s `rowId` field. */
+  rowId?: InputMaybe<Scalars['String']['input']>;
+};
+
+/** A connection to a list of `ScheduledJobRun` values. */
+export type ScheduledJobRunConnection = {
+  __typename?: 'ScheduledJobRunConnection';
+  /** A list of edges which contains the `ScheduledJobRun` and cursor to aid in pagination. */
+  edges: Array<Maybe<ScheduledJobRunEdge>>;
+  /** A list of `ScheduledJobRun` objects. */
+  nodes: Array<Maybe<ScheduledJobRun>>;
+  /** Information to aid in pagination. */
+  pageInfo: PageInfo;
+  /** The count of *all* `ScheduledJobRun` you could get from the connection. */
+  totalCount: Scalars['Int']['output'];
+};
+
+/** A `ScheduledJobRun` edge in the connection. */
+export type ScheduledJobRunEdge = {
+  __typename?: 'ScheduledJobRunEdge';
+  /** A cursor for use in pagination. */
+  cursor?: Maybe<Scalars['Cursor']['output']>;
+  /** The `ScheduledJobRun` at the end of the edge. */
+  node?: Maybe<ScheduledJobRun>;
+};
+
+/** An input for mutations affecting `ScheduledJobRun` */
+export type ScheduledJobRunInput = {
+  completedAt?: InputMaybe<Scalars['Datetime']['input']>;
+  error?: InputMaybe<Scalars['String']['input']>;
+  executionLog?: InputMaybe<Scalars['String']['input']>;
+  finalResult?: InputMaybe<Scalars['String']['input']>;
+  jobId: Scalars['String']['input'];
+  result?: InputMaybe<Scalars['String']['input']>;
+  rowId: Scalars['String']['input'];
+  startedAt?: InputMaybe<Scalars['Datetime']['input']>;
+  status: Scalars['String']['input'];
+  toolCalls?: InputMaybe<Scalars['JSON']['input']>;
+};
+
+/** Methods to use when ordering `ScheduledJobRun`. */
+export enum ScheduledJobRunOrderBy {
+  JobIdAsc = 'JOB_ID_ASC',
+  JobIdDesc = 'JOB_ID_DESC',
+  Natural = 'NATURAL',
+  PrimaryKeyAsc = 'PRIMARY_KEY_ASC',
+  PrimaryKeyDesc = 'PRIMARY_KEY_DESC',
+  RowIdAsc = 'ROW_ID_ASC',
+  RowIdDesc = 'ROW_ID_DESC'
+}
+
+/** Represents an update to a `ScheduledJobRun`. Fields that are set will be updated. */
+export type ScheduledJobRunPatch = {
+  completedAt?: InputMaybe<Scalars['Datetime']['input']>;
+  error?: InputMaybe<Scalars['String']['input']>;
+  executionLog?: InputMaybe<Scalars['String']['input']>;
+  finalResult?: InputMaybe<Scalars['String']['input']>;
+  jobId?: InputMaybe<Scalars['String']['input']>;
+  result?: InputMaybe<Scalars['String']['input']>;
+  rowId?: InputMaybe<Scalars['String']['input']>;
+  startedAt?: InputMaybe<Scalars['Datetime']['input']>;
+  status?: InputMaybe<Scalars['String']['input']>;
+  toolCalls?: InputMaybe<Scalars['JSON']['input']>;
+};
+
+/** All input for the `updateConversationById` mutation. */
+export type UpdateConversationByIdInput = {
+  /**
+   * An arbitrary string value with no semantic meaning. Will be included in the
+   * payload verbatim. May be used to track mutations by the client.
+   */
+  clientMutationId?: InputMaybe<Scalars['String']['input']>;
+  /** The globally unique `ID` which will identify a single `Conversation` to be updated. */
+  id: Scalars['ID']['input'];
+  /** An object where the defined keys will be set on the `Conversation` being updated. */
+  patch: ConversationPatch;
+};
+
+/** All input for the `updateConversation` mutation. */
+export type UpdateConversationInput = {
+  /**
+   * An arbitrary string value with no semantic meaning. Will be included in the
+   * payload verbatim. May be used to track mutations by the client.
+   */
+  clientMutationId?: InputMaybe<Scalars['String']['input']>;
+  /** An object where the defined keys will be set on the `Conversation` being updated. */
+  patch: ConversationPatch;
+  rowId: Scalars['String']['input'];
+};
+
+/** All input for the `updateConversationMessageById` mutation. */
+export type UpdateConversationMessageByIdInput = {
+  /**
+   * An arbitrary string value with no semantic meaning. Will be included in the
+   * payload verbatim. May be used to track mutations by the client.
+   */
+  clientMutationId?: InputMaybe<Scalars['String']['input']>;
+  /** The globally unique `ID` which will identify a single `ConversationMessage` to be updated. */
+  id: Scalars['ID']['input'];
+  /** An object where the defined keys will be set on the `ConversationMessage` being updated. */
+  patch: ConversationMessagePatch;
+};
+
+/** All input for the `updateConversationMessage` mutation. */
+export type UpdateConversationMessageInput = {
+  /**
+   * An arbitrary string value with no semantic meaning. Will be included in the
+   * payload verbatim. May be used to track mutations by the client.
+   */
+  clientMutationId?: InputMaybe<Scalars['String']['input']>;
+  /** An object where the defined keys will be set on the `ConversationMessage` being updated. */
+  patch: ConversationMessagePatch;
+  rowId: Scalars['String']['input'];
+};
+
+/** The output of our update `ConversationMessage` mutation. */
+export type UpdateConversationMessagePayload = {
+  __typename?: 'UpdateConversationMessagePayload';
+  /**
+   * The exact same `clientMutationId` that was provided in the mutation input,
+   * unchanged and unused. May be used by a client to track mutations.
+   */
+  clientMutationId?: Maybe<Scalars['String']['output']>;
+  /** The `ConversationMessage` that was updated by this mutation. */
+  conversationMessage?: Maybe<ConversationMessage>;
+  /** An edge for our `ConversationMessage`. May be used by Relay 1. */
+  conversationMessageEdge?: Maybe<ConversationMessageEdge>;
+  /** Our root query field type. Allows us to run any query from our mutation payload. */
+  query?: Maybe<Query>;
+};
+
+
+/** The output of our update `ConversationMessage` mutation. */
+export type UpdateConversationMessagePayloadConversationMessageEdgeArgs = {
+  orderBy?: Array<ConversationMessageOrderBy>;
+};
+
+/** The output of our update `Conversation` mutation. */
+export type UpdateConversationPayload = {
+  __typename?: 'UpdateConversationPayload';
+  /**
+   * The exact same `clientMutationId` that was provided in the mutation input,
+   * unchanged and unused. May be used by a client to track mutations.
+   */
+  clientMutationId?: Maybe<Scalars['String']['output']>;
+  /** The `Conversation` that was updated by this mutation. */
+  conversation?: Maybe<Conversation>;
+  /** An edge for our `Conversation`. May be used by Relay 1. */
+  conversationEdge?: Maybe<ConversationEdge>;
+  /** Our root query field type. Allows us to run any query from our mutation payload. */
+  query?: Maybe<Query>;
+};
+
+
+/** The output of our update `Conversation` mutation. */
+export type UpdateConversationPayloadConversationEdgeArgs = {
+  orderBy?: Array<ConversationOrderBy>;
+};
+
+/** All input for the `updateLlmProviderById` mutation. */
+export type UpdateLlmProviderByIdInput = {
+  /**
+   * An arbitrary string value with no semantic meaning. Will be included in the
+   * payload verbatim. May be used to track mutations by the client.
+   */
+  clientMutationId?: InputMaybe<Scalars['String']['input']>;
+  /** The globally unique `ID` which will identify a single `LlmProvider` to be updated. */
+  id: Scalars['ID']['input'];
+  /** An object where the defined keys will be set on the `LlmProvider` being updated. */
+  patch: LlmProviderPatch;
+};
+
+/** All input for the `updateLlmProvider` mutation. */
+export type UpdateLlmProviderInput = {
+  /**
+   * An arbitrary string value with no semantic meaning. Will be included in the
+   * payload verbatim. May be used to track mutations by the client.
+   */
+  clientMutationId?: InputMaybe<Scalars['String']['input']>;
+  /** An object where the defined keys will be set on the `LlmProvider` being updated. */
+  patch: LlmProviderPatch;
+  rowId: Scalars['String']['input'];
+};
+
+/** The output of our update `LlmProvider` mutation. */
+export type UpdateLlmProviderPayload = {
+  __typename?: 'UpdateLlmProviderPayload';
+  /**
+   * The exact same `clientMutationId` that was provided in the mutation input,
+   * unchanged and unused. May be used by a client to track mutations.
+   */
+  clientMutationId?: Maybe<Scalars['String']['output']>;
+  /** The `LlmProvider` that was updated by this mutation. */
+  llmProvider?: Maybe<LlmProvider>;
+  /** An edge for our `LlmProvider`. May be used by Relay 1. */
+  llmProviderEdge?: Maybe<LlmProviderEdge>;
+  /** Our root query field type. Allows us to run any query from our mutation payload. */
+  query?: Maybe<Query>;
+};
+
+
+/** The output of our update `LlmProvider` mutation. */
+export type UpdateLlmProviderPayloadLlmProviderEdgeArgs = {
+  orderBy?: Array<LlmProviderOrderBy>;
+};
+
+/** All input for the `updateProfileById` mutation. */
+export type UpdateProfileByIdInput = {
+  /**
+   * An arbitrary string value with no semantic meaning. Will be included in the
+   * payload verbatim. May be used to track mutations by the client.
+   */
+  clientMutationId?: InputMaybe<Scalars['String']['input']>;
+  /** The globally unique `ID` which will identify a single `Profile` to be updated. */
+  id: Scalars['ID']['input'];
+  /** An object where the defined keys will be set on the `Profile` being updated. */
+  patch: ProfilePatch;
+};
+
+/** All input for the `updateProfileByUserId` mutation. */
+export type UpdateProfileByUserIdInput = {
+  /**
+   * An arbitrary string value with no semantic meaning. Will be included in the
+   * payload verbatim. May be used to track mutations by the client.
+   */
+  clientMutationId?: InputMaybe<Scalars['String']['input']>;
+  /** An object where the defined keys will be set on the `Profile` being updated. */
+  patch: ProfilePatch;
+  userId: Scalars['String']['input'];
+};
+
+/** All input for the `updateProfile` mutation. */
+export type UpdateProfileInput = {
+  /**
+   * An arbitrary string value with no semantic meaning. Will be included in the
+   * payload verbatim. May be used to track mutations by the client.
+   */
+  clientMutationId?: InputMaybe<Scalars['String']['input']>;
+  /** An object where the defined keys will be set on the `Profile` being updated. */
+  patch: ProfilePatch;
+  rowId: Scalars['String']['input'];
+};
+
+/** The output of our update `Profile` mutation. */
+export type UpdateProfilePayload = {
+  __typename?: 'UpdateProfilePayload';
+  /**
+   * The exact same `clientMutationId` that was provided in the mutation input,
+   * unchanged and unused. May be used by a client to track mutations.
+   */
+  clientMutationId?: Maybe<Scalars['String']['output']>;
+  /** The `Profile` that was updated by this mutation. */
+  profile?: Maybe<Profile>;
+  /** An edge for our `Profile`. May be used by Relay 1. */
+  profileEdge?: Maybe<ProfileEdge>;
+  /** Our root query field type. Allows us to run any query from our mutation payload. */
+  query?: Maybe<Query>;
+};
+
+
+/** The output of our update `Profile` mutation. */
+export type UpdateProfilePayloadProfileEdgeArgs = {
+  orderBy?: Array<ProfileOrderBy>;
+};
+
+/** All input for the `updateScheduledJobById` mutation. */
+export type UpdateScheduledJobByIdInput = {
+  /**
+   * An arbitrary string value with no semantic meaning. Will be included in the
+   * payload verbatim. May be used to track mutations by the client.
+   */
+  clientMutationId?: InputMaybe<Scalars['String']['input']>;
+  /** The globally unique `ID` which will identify a single `ScheduledJob` to be updated. */
+  id: Scalars['ID']['input'];
+  /** An object where the defined keys will be set on the `ScheduledJob` being updated. */
+  patch: ScheduledJobPatch;
+};
+
+/** All input for the `updateScheduledJob` mutation. */
+export type UpdateScheduledJobInput = {
+  /**
+   * An arbitrary string value with no semantic meaning. Will be included in the
+   * payload verbatim. May be used to track mutations by the client.
+   */
+  clientMutationId?: InputMaybe<Scalars['String']['input']>;
+  /** An object where the defined keys will be set on the `ScheduledJob` being updated. */
+  patch: ScheduledJobPatch;
+  rowId: Scalars['String']['input'];
+};
+
+/** The output of our update `ScheduledJob` mutation. */
+export type UpdateScheduledJobPayload = {
+  __typename?: 'UpdateScheduledJobPayload';
+  /**
+   * The exact same `clientMutationId` that was provided in the mutation input,
+   * unchanged and unused. May be used by a client to track mutations.
+   */
+  clientMutationId?: Maybe<Scalars['String']['output']>;
+  /** Our root query field type. Allows us to run any query from our mutation payload. */
+  query?: Maybe<Query>;
+  /** The `ScheduledJob` that was updated by this mutation. */
+  scheduledJob?: Maybe<ScheduledJob>;
+  /** An edge for our `ScheduledJob`. May be used by Relay 1. */
+  scheduledJobEdge?: Maybe<ScheduledJobEdge>;
+};
+
+
+/** The output of our update `ScheduledJob` mutation. */
+export type UpdateScheduledJobPayloadScheduledJobEdgeArgs = {
+  orderBy?: Array<ScheduledJobOrderBy>;
+};
+
+/** All input for the `updateScheduledJobRunById` mutation. */
+export type UpdateScheduledJobRunByIdInput = {
+  /**
+   * An arbitrary string value with no semantic meaning. Will be included in the
+   * payload verbatim. May be used to track mutations by the client.
+   */
+  clientMutationId?: InputMaybe<Scalars['String']['input']>;
+  /** The globally unique `ID` which will identify a single `ScheduledJobRun` to be updated. */
+  id: Scalars['ID']['input'];
+  /** An object where the defined keys will be set on the `ScheduledJobRun` being updated. */
+  patch: ScheduledJobRunPatch;
+};
+
+/** All input for the `updateScheduledJobRun` mutation. */
+export type UpdateScheduledJobRunInput = {
+  /**
+   * An arbitrary string value with no semantic meaning. Will be included in the
+   * payload verbatim. May be used to track mutations by the client.
+   */
+  clientMutationId?: InputMaybe<Scalars['String']['input']>;
+  /** An object where the defined keys will be set on the `ScheduledJobRun` being updated. */
+  patch: ScheduledJobRunPatch;
+  rowId: Scalars['String']['input'];
+};
+
+/** The output of our update `ScheduledJobRun` mutation. */
+export type UpdateScheduledJobRunPayload = {
+  __typename?: 'UpdateScheduledJobRunPayload';
+  /**
+   * The exact same `clientMutationId` that was provided in the mutation input,
+   * unchanged and unused. May be used by a client to track mutations.
+   */
+  clientMutationId?: Maybe<Scalars['String']['output']>;
+  /** Our root query field type. Allows us to run any query from our mutation payload. */
+  query?: Maybe<Query>;
+  /** The `ScheduledJobRun` that was updated by this mutation. */
+  scheduledJobRun?: Maybe<ScheduledJobRun>;
+  /** An edge for our `ScheduledJobRun`. May be used by Relay 1. */
+  scheduledJobRunEdge?: Maybe<ScheduledJobRunEdge>;
+};
+
+
+/** The output of our update `ScheduledJobRun` mutation. */
+export type UpdateScheduledJobRunPayloadScheduledJobRunEdgeArgs = {
+  orderBy?: Array<ScheduledJobRunOrderBy>;
+};
+
+export type GetRemoteLlmProvidersQueryVariables = Exact<{
+  profileId: Scalars['String']['input'];
+}>;
+
+
+export type GetRemoteLlmProvidersQuery = { __typename?: 'Query', llmProviders?: { __typename?: 'LlmProviderConnection', nodes: Array<{ __typename?: 'LlmProvider', rowId: string, type: string, name: string, baseUrl?: string | null, modelId: string, supportsImages: boolean, contextWindow?: number | null, temperature?: number | null, resourceName?: string | null, region?: string | null, createdAt: any, updatedAt: any } | null> } | null };
+
+export type DeleteRemoteLlmProviderMutationVariables = Exact<{
+  rowId: Scalars['String']['input'];
+}>;
+
+
+export type DeleteRemoteLlmProviderMutation = { __typename?: 'Mutation', deleteLlmProvider?: { __typename?: 'DeleteLlmProviderPayload', deletedLlmProviderId?: string | null } | null };
+
+export type GetProfileByUserIdQueryVariables = Exact<{
+  userId: Scalars['String']['input'];
+}>;
+
+
+export type GetProfileByUserIdQuery = { __typename?: 'Query', profileByUserId?: { __typename?: 'Profile', rowId: string, firstName?: string | null, lastName?: string | null, avatarUrl?: string | null } | null };
+
+export type UpdateProfileByUserIdMutationVariables = Exact<{
+  userId: Scalars['String']['input'];
+  patch: ProfilePatch;
+}>;
+
+
+export type UpdateProfileByUserIdMutation = { __typename?: 'Mutation', updateProfileByUserId?: { __typename?: 'UpdateProfilePayload', profile?: { __typename?: 'Profile', rowId: string, firstName?: string | null, lastName?: string | null, avatarUrl?: string | null } | null } | null };
+
+export type GetConversationsForHistoryQueryVariables = Exact<{
+  profileId: Scalars['String']['input'];
+  first?: InputMaybe<Scalars['Int']['input']>;
+  after?: InputMaybe<Scalars['Cursor']['input']>;
+}>;
+
+
+export type GetConversationsForHistoryQuery = { __typename?: 'Query', conversations?: { __typename?: 'ConversationConnection', nodes: Array<{ __typename?: 'Conversation', rowId: string, lastMessagedAt: any, conversationMessages: { __typename?: 'ConversationMessageConnection', nodes: Array<{ __typename?: 'ConversationMessage', message: any } | null> } } | null>, pageInfo: { __typename?: 'PageInfo', endCursor?: any | null, hasNextPage: boolean } } | null };
+
+export type DeleteConversationMutationVariables = Exact<{
+  rowId: Scalars['String']['input'];
+}>;
+
+
+export type DeleteConversationMutation = { __typename?: 'Mutation', deleteConversation?: { __typename?: 'DeleteConversationPayload', deletedConversationId?: string | null } | null };
+
+export type CreateConversationWithMessageMutationVariables = Exact<{
+  conversationId: Scalars['String']['input'];
+  profileId: Scalars['String']['input'];
+  message: Scalars['JSON']['input'];
+}>;
+
+
+export type CreateConversationWithMessageMutation = { __typename?: 'Mutation', createConversation?: { __typename?: 'CreateConversationPayload', conversation?: { __typename?: 'Conversation', rowId: string } | null } | null, createConversationMessage?: { __typename?: 'CreateConversationMessagePayload', conversationMessage?: { __typename?: 'ConversationMessage', rowId: string, orderIndex: number } | null } | null };
+
+export type AppendConversationMessageMutationVariables = Exact<{
+  messageId: Scalars['String']['input'];
+  conversationId: Scalars['String']['input'];
+  orderIndex: Scalars['Int']['input'];
+  message: Scalars['JSON']['input'];
+}>;
+
+
+export type AppendConversationMessageMutation = { __typename?: 'Mutation', createConversationMessage?: { __typename?: 'CreateConversationMessagePayload', conversationMessage?: { __typename?: 'ConversationMessage', rowId: string, orderIndex: number } | null } | null };
+
+export type UpdateConversationLastMessagedAtMutationVariables = Exact<{
+  conversationId: Scalars['String']['input'];
+}>;
+
+
+export type UpdateConversationLastMessagedAtMutation = { __typename?: 'Mutation', updateConversation?: { __typename?: 'UpdateConversationPayload', conversation?: { __typename?: 'Conversation', rowId: string, lastMessagedAt: any } | null } | null };
+
+export type GetConversationWithMessagesQueryVariables = Exact<{
+  conversationId: Scalars['String']['input'];
+}>;
+
+
+export type GetConversationWithMessagesQuery = { __typename?: 'Query', conversation?: { __typename?: 'Conversation', rowId: string, conversationMessages: { __typename?: 'ConversationMessageConnection', nodes: Array<{ __typename?: 'ConversationMessage', message: any } | null> } } | null };
+
+export type GetProfileIdByUserIdQueryVariables = Exact<{
+  userId: Scalars['String']['input'];
+}>;
+
+
+export type GetProfileIdByUserIdQuery = { __typename?: 'Query', profileByUserId?: { __typename?: 'Profile', rowId: string } | null };
+
+export type CreateConversationForUploadMutationVariables = Exact<{
+  input: CreateConversationInput;
+}>;
+
+
+export type CreateConversationForUploadMutation = { __typename?: 'Mutation', createConversation?: { __typename?: 'CreateConversationPayload', conversation?: { __typename?: 'Conversation', id: string, rowId: string, profileId: string, lastMessagedAt: any, createdAt: any } | null } | null };
+
+export type BulkCreateConversationMessagesMutationVariables = Exact<{
+  input: BulkCreateConversationMessagesInput;
+}>;
+
+
+export type BulkCreateConversationMessagesMutation = { __typename?: 'Mutation', bulkCreateConversationMessages?: { __typename?: 'BulkCreateConversationMessagesPayload', result?: Array<{ __typename?: 'ConversationMessage', id: string, rowId: string, conversationId: string, orderIndex: number } | null> | null } | null };
+
+export type ConversationExistsQueryVariables = Exact<{
+  pConversationId?: InputMaybe<Scalars['String']['input']>;
+}>;
+
+
+export type ConversationExistsQuery = { __typename?: 'Query', conversationExists?: boolean | null };
+
+export type GetUploadedMessageCountQueryVariables = Exact<{
+  conversationId: Scalars['String']['input'];
+}>;
+
+
+export type GetUploadedMessageCountQuery = { __typename?: 'Query', conversationMessages?: { __typename?: 'ConversationMessageConnection', totalCount: number } | null };
+
+export type CreateLlmProviderForUploadMutationVariables = Exact<{
+  input: CreateLlmProviderInput;
+}>;
+
+
+export type CreateLlmProviderForUploadMutation = { __typename?: 'Mutation', createLlmProvider?: { __typename?: 'CreateLlmProviderPayload', llmProvider?: { __typename?: 'LlmProvider', rowId: string } | null } | null };
+
+export type UpdateLlmProviderForUploadMutationVariables = Exact<{
+  input: UpdateLlmProviderInput;
+}>;
+
+
+export type UpdateLlmProviderForUploadMutation = { __typename?: 'Mutation', updateLlmProvider?: { __typename?: 'UpdateLlmProviderPayload', llmProvider?: { __typename?: 'LlmProvider', rowId: string } | null } | null };
+
+export type GetLlmProvidersByProfileIdQueryVariables = Exact<{
+  profileId: Scalars['String']['input'];
+}>;
+
+
+export type GetLlmProvidersByProfileIdQuery = { __typename?: 'Query', llmProviders?: { __typename?: 'LlmProviderConnection', nodes: Array<{ __typename?: 'LlmProvider', rowId: string, type: string, name: string, baseUrl?: string | null, modelId: string, supportsImages: boolean, contextWindow?: number | null, temperature?: number | null, resourceName?: string | null, region?: string | null } | null> } | null };
+
+export type GetScheduledJobsByProfileIdQueryVariables = Exact<{
+  profileId: Scalars['String']['input'];
+}>;
+
+
+export type GetScheduledJobsByProfileIdQuery = { __typename?: 'Query', scheduledJobs?: { __typename?: 'ScheduledJobConnection', nodes: Array<{ __typename?: 'ScheduledJob', rowId: string, name: string, query: string, scheduleType: string, scheduleTime?: string | null, scheduleInterval?: number | null, enabled: boolean, llmProviderId?: string | null, createdAt: any, updatedAt: any, lastRunAt?: any | null } | null> } | null };
+
+export type CreateScheduledJobMutationVariables = Exact<{
+  input: CreateScheduledJobInput;
+}>;
+
+
+export type CreateScheduledJobMutation = { __typename?: 'Mutation', createScheduledJob?: { __typename?: 'CreateScheduledJobPayload', scheduledJob?: { __typename?: 'ScheduledJob', rowId: string } | null } | null };
+
+export type UpdateScheduledJobMutationVariables = Exact<{
+  input: UpdateScheduledJobInput;
+}>;
+
+
+export type UpdateScheduledJobMutation = { __typename?: 'Mutation', updateScheduledJob?: { __typename?: 'UpdateScheduledJobPayload', scheduledJob?: { __typename?: 'ScheduledJob', rowId: string } | null } | null };
+
+export type DeleteScheduledJobMutationVariables = Exact<{
+  rowId: Scalars['String']['input'];
+}>;
+
+
+export type DeleteScheduledJobMutation = { __typename?: 'Mutation', deleteScheduledJob?: { __typename?: 'DeleteScheduledJobPayload', deletedScheduledJobId?: string | null } | null };
+
+export class TypedDocumentString<TResult, TVariables>
+  extends String
+  implements DocumentTypeDecoration<TResult, TVariables>
+{
+  __apiType?: NonNullable<DocumentTypeDecoration<TResult, TVariables>['__apiType']>;
+  private value: string;
+  public __meta__?: Record<string, any> | undefined;
+
+  constructor(value: string, __meta__?: Record<string, any> | undefined) {
+    super(value);
+    this.value = value;
+    this.__meta__ = __meta__;
+  }
+
+  override toString(): string & DocumentTypeDecoration<TResult, TVariables> {
+    return this.value;
+  }
+}
+
+export const GetRemoteLlmProvidersDocument = new TypedDocumentString(`
+    query GetRemoteLlmProviders($profileId: String!) {
+  llmProviders(condition: {profileId: $profileId}) {
+    nodes {
+      rowId
+      type
+      name
+      baseUrl
+      modelId
+      supportsImages
+      contextWindow
+      temperature
+      resourceName
+      region
+      createdAt
+      updatedAt
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<GetRemoteLlmProvidersQuery, GetRemoteLlmProvidersQueryVariables>;
+export const DeleteRemoteLlmProviderDocument = new TypedDocumentString(`
+    mutation DeleteRemoteLlmProvider($rowId: String!) {
+  deleteLlmProvider(input: {rowId: $rowId}) {
+    deletedLlmProviderId
+  }
+}
+    `) as unknown as TypedDocumentString<DeleteRemoteLlmProviderMutation, DeleteRemoteLlmProviderMutationVariables>;
+export const GetProfileByUserIdDocument = new TypedDocumentString(`
+    query GetProfileByUserId($userId: String!) {
+  profileByUserId(userId: $userId) {
+    rowId
+    firstName
+    lastName
+    avatarUrl
+  }
+}
+    `) as unknown as TypedDocumentString<GetProfileByUserIdQuery, GetProfileByUserIdQueryVariables>;
+export const UpdateProfileByUserIdDocument = new TypedDocumentString(`
+    mutation UpdateProfileByUserId($userId: String!, $patch: ProfilePatch!) {
+  updateProfileByUserId(input: {userId: $userId, patch: $patch}) {
+    profile {
+      rowId
+      firstName
+      lastName
+      avatarUrl
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<UpdateProfileByUserIdMutation, UpdateProfileByUserIdMutationVariables>;
+export const GetConversationsForHistoryDocument = new TypedDocumentString(`
+    query GetConversationsForHistory($profileId: String!, $first: Int = 50, $after: Cursor) {
+  conversations(
+    condition: {profileId: $profileId}
+    first: $first
+    after: $after
+    orderBy: LAST_MESSAGED_AT_DESC
+  ) {
+    nodes {
+      rowId
+      lastMessagedAt
+      conversationMessages(first: 2, orderBy: ORDER_INDEX_DESC) {
+        nodes {
+          message
+        }
+      }
+    }
+    pageInfo {
+      endCursor
+      hasNextPage
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<GetConversationsForHistoryQuery, GetConversationsForHistoryQueryVariables>;
+export const DeleteConversationDocument = new TypedDocumentString(`
+    mutation DeleteConversation($rowId: String!) {
+  deleteConversation(input: {rowId: $rowId}) {
+    deletedConversationId
+  }
+}
+    `) as unknown as TypedDocumentString<DeleteConversationMutation, DeleteConversationMutationVariables>;
+export const CreateConversationWithMessageDocument = new TypedDocumentString(`
+    mutation CreateConversationWithMessage($conversationId: String!, $profileId: String!, $message: JSON!) {
+  createConversation(
+    input: {conversation: {rowId: $conversationId, profileId: $profileId, lastMessagedAt: "now()"}}
+  ) {
+    conversation {
+      rowId
+    }
+  }
+  createConversationMessage(
+    input: {conversationMessage: {rowId: $conversationId, conversationId: $conversationId, orderIndex: 0, message: $message}}
+  ) {
+    conversationMessage {
+      rowId
+      orderIndex
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<CreateConversationWithMessageMutation, CreateConversationWithMessageMutationVariables>;
+export const AppendConversationMessageDocument = new TypedDocumentString(`
+    mutation AppendConversationMessage($messageId: String!, $conversationId: String!, $orderIndex: Int!, $message: JSON!) {
+  createConversationMessage(
+    input: {conversationMessage: {rowId: $messageId, conversationId: $conversationId, orderIndex: $orderIndex, message: $message}}
+  ) {
+    conversationMessage {
+      rowId
+      orderIndex
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<AppendConversationMessageMutation, AppendConversationMessageMutationVariables>;
+export const UpdateConversationLastMessagedAtDocument = new TypedDocumentString(`
+    mutation UpdateConversationLastMessagedAt($conversationId: String!) {
+  updateConversation(
+    input: {rowId: $conversationId, patch: {lastMessagedAt: "now()"}}
+  ) {
+    conversation {
+      rowId
+      lastMessagedAt
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<UpdateConversationLastMessagedAtMutation, UpdateConversationLastMessagedAtMutationVariables>;
+export const GetConversationWithMessagesDocument = new TypedDocumentString(`
+    query GetConversationWithMessages($conversationId: String!) {
+  conversation(rowId: $conversationId) {
+    rowId
+    conversationMessages(first: 100, orderBy: ORDER_INDEX_ASC) {
+      nodes {
+        message
+      }
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<GetConversationWithMessagesQuery, GetConversationWithMessagesQueryVariables>;
+export const GetProfileIdByUserIdDocument = new TypedDocumentString(`
+    query GetProfileIdByUserId($userId: String!) {
+  profileByUserId(userId: $userId) {
+    rowId
+  }
+}
+    `) as unknown as TypedDocumentString<GetProfileIdByUserIdQuery, GetProfileIdByUserIdQueryVariables>;
+export const CreateConversationForUploadDocument = new TypedDocumentString(`
+    mutation CreateConversationForUpload($input: CreateConversationInput!) {
+  createConversation(input: $input) {
+    conversation {
+      id
+      rowId
+      profileId
+      lastMessagedAt
+      createdAt
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<CreateConversationForUploadMutation, CreateConversationForUploadMutationVariables>;
+export const BulkCreateConversationMessagesDocument = new TypedDocumentString(`
+    mutation BulkCreateConversationMessages($input: BulkCreateConversationMessagesInput!) {
+  bulkCreateConversationMessages(input: $input) {
+    result {
+      id
+      rowId
+      conversationId
+      orderIndex
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<BulkCreateConversationMessagesMutation, BulkCreateConversationMessagesMutationVariables>;
+export const ConversationExistsDocument = new TypedDocumentString(`
+    query ConversationExists($pConversationId: String) {
+  conversationExists(pConversationId: $pConversationId)
+}
+    `) as unknown as TypedDocumentString<ConversationExistsQuery, ConversationExistsQueryVariables>;
+export const GetUploadedMessageCountDocument = new TypedDocumentString(`
+    query GetUploadedMessageCount($conversationId: String!) {
+  conversationMessages(condition: {conversationId: $conversationId}, first: 0) {
+    totalCount
+  }
+}
+    `) as unknown as TypedDocumentString<GetUploadedMessageCountQuery, GetUploadedMessageCountQueryVariables>;
+export const CreateLlmProviderForUploadDocument = new TypedDocumentString(`
+    mutation CreateLlmProviderForUpload($input: CreateLlmProviderInput!) {
+  createLlmProvider(input: $input) {
+    llmProvider {
+      rowId
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<CreateLlmProviderForUploadMutation, CreateLlmProviderForUploadMutationVariables>;
+export const UpdateLlmProviderForUploadDocument = new TypedDocumentString(`
+    mutation UpdateLlmProviderForUpload($input: UpdateLlmProviderInput!) {
+  updateLlmProvider(input: $input) {
+    llmProvider {
+      rowId
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<UpdateLlmProviderForUploadMutation, UpdateLlmProviderForUploadMutationVariables>;
+export const GetLlmProvidersByProfileIdDocument = new TypedDocumentString(`
+    query GetLlmProvidersByProfileId($profileId: String!) {
+  llmProviders(condition: {profileId: $profileId}) {
+    nodes {
+      rowId
+      type
+      name
+      baseUrl
+      modelId
+      supportsImages
+      contextWindow
+      temperature
+      resourceName
+      region
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<GetLlmProvidersByProfileIdQuery, GetLlmProvidersByProfileIdQueryVariables>;
+export const GetScheduledJobsByProfileIdDocument = new TypedDocumentString(`
+    query GetScheduledJobsByProfileId($profileId: String!) {
+  scheduledJobs(condition: {profileId: $profileId}, first: 100) {
+    nodes {
+      rowId
+      name
+      query
+      scheduleType
+      scheduleTime
+      scheduleInterval
+      enabled
+      llmProviderId
+      createdAt
+      updatedAt
+      lastRunAt
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<GetScheduledJobsByProfileIdQuery, GetScheduledJobsByProfileIdQueryVariables>;
+export const CreateScheduledJobDocument = new TypedDocumentString(`
+    mutation CreateScheduledJob($input: CreateScheduledJobInput!) {
+  createScheduledJob(input: $input) {
+    scheduledJob {
+      rowId
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<CreateScheduledJobMutation, CreateScheduledJobMutationVariables>;
+export const UpdateScheduledJobDocument = new TypedDocumentString(`
+    mutation UpdateScheduledJob($input: UpdateScheduledJobInput!) {
+  updateScheduledJob(input: $input) {
+    scheduledJob {
+      rowId
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<UpdateScheduledJobMutation, UpdateScheduledJobMutationVariables>;
+export const DeleteScheduledJobDocument = new TypedDocumentString(`
+    mutation DeleteScheduledJob($rowId: String!) {
+  deleteScheduledJob(input: {rowId: $rowId}) {
+    deletedScheduledJobId
+  }
+}
+    `) as unknown as TypedDocumentString<DeleteScheduledJobMutation, DeleteScheduledJobMutationVariables>;

@@ -1,0 +1,75 @@
+{
+  "id": "2026-08-21_release-wave-encryption-heals-itself",
+  "date": "2026-08-21",
+  "ring": "SR-00, SR-02",
+  "branch": "feat/queen-supervisor",
+  "title": "The latch that wrote the Queen's chat to plaintext, and the quarantine that finally reads back",
+  "severity": "high",
+  "mnl_stage": "L",
+  "agent": "Queen",
+
+  "problem": "After the 08:50Z relaunch the fixed binary held (write_refused stayed 0), but three signals kept firing: encrypt_fallback wrote the Queen's own transcript as plaintext 9 times, decrypt_failed burst 313 times across 32 conversations, and keychain stalls armed cooldowns whose messages described a global scope that had not existed for a day. Twelve conversations were resting unencrypted forever, and the reconcile pass raised 8 disagreements of which half asserted conclusions nobody measured.",
+
+  "root_cause": "One latch and three unmeasured causes. TriOSEncryption.symmetricKey() could not tell a read that COMPLETED with a deliberate refusal (launch gate, sub-millisecond) from a read that hung: both fell into the timeout branch, and a fast refusal armed the 60s stall cooldown - keeping encryption refused for 55s after the launch gate had lifted. Every save in that window wrote plaintext; every load returned [] and let the UI rebuild history over a slot whose real bytes sat quarantined. Nothing ever read a quarantined blob back, and nothing re-encrypted a plaintext fallback that no one wrote to again.",
+
+  "findings": [
+    "The 9 encrypt_fallback events were all the Queen's chat and none measured an encryption failure: they were key reads refused during the launch gate or the falsely-armed cooldown, collapsed by ConversationEncryption into 'Failed to seal conversation data'.",
+    "The cassette FAIL 'trios-test ran but queen.branch.committed never appeared' was printed about a process that was alive and progressing under load; the harness's fixed 120s cliff was the failure, and the suite passed on an idle rerun.",
+    "KeychainSecrets' stall messages claimed 'every keychain read is refused for 60s' (per-item since commit 1e31e50a8) and 'did not answer in 2s' (callers pass deadline: 8.0). Both false relative to the code that emitted them.",
+    "waitForReadSlot's fixed 2.6s no longer outlasted 8s holders - the exact defect its own comment records fixing once for 2s holders.",
+    "The reconcile pass's 'nobody is looking at it' was false for #1132-r2 (sibling record on the same branch in awaitingReview), #1147-a (accepted sibling's content IS HEAD's), and #1128-r5 (its commit is in HEAD patch-for-patch under another SHA); '#1280's branch is gone' was false too - it is alive on origin.",
+    "A sibling checkout is a shared mutable dependency: another agent rebuilt ~/trinity's QueenUILib with SDK macosx26.5 mid-round and every CLT build (SDK 15.2) started failing to load it. TRIOS_VENDORED=1 is the escape hatch; the vendored halves in Frameworks-dev/ survived.",
+    "make board's first run printed the DEV registry as the release: chat-probe declares VARIANT ?= dev further down the Makefile, so $(VARIANT) in a new target silently inherited it.",
+    "The wire disproved the first fix within two minutes of relaunch: 8 write_refused because the deferred load marked the Queen's slot unreadable and no successful read ever cleared the flag - it latched past the launch gate exactly the way the cooldowns had. The repair became three measured-now gates: load-success clears the flag, a readable slot folds disk history in front of the save (rejoined), and a genuinely unreadable slot preserves its bytes to a spare quarantine slot (suffixes 2-9) before the write proceeds (preserved_then_written). Proven on the second relaunch: write_refused 0, the Queen's 55KB preserved, all 8 outage saves landed as marked plaintext with the honest key-locked reason.",
+    "Startup conversation list passes always run inside the launch-gate/stall window and stop the moment loads start succeeding, so read-triggered healing (reencrypted/recovered) never fires at startup - it waits for the first real read after the key answers. Measured across three launches; a next cycle could add a one-shot post-recovery sweep."
+  ],
+
+  "fix": "TriOSEncryption.symmetricKey now keeps the thrown error from the background read and, when the read completed, rethrows it WITHOUT arming the stall cooldown - the cooldown arms only on a genuine timeout. ConversationEncryption passes keyUnavailableLocked through instead of renaming it. ConversationPersister: load() checks the plaintext marker before attempting decryption, distinguishes decrypt_deferred (key refused now, bytes preserved, folds back later) from decrypt_failed (key answered, ciphertext did not open), re-encrypts plaintext-fallback slots on read when the key answers (conversation.persist.reencrypted), and recoverQuarantineIfPossible folds a decryptable quarantined blob back in front of the current history, deduplicated by message id, keeping the original bytes under a recovered key (conversation.persist.recovered). KeychainSecrets: keychain.read.settled logs the orphaned call's final OSStatus and elapsed time; read/list cooldown re-checked after winning the slot; readInFlight clears are generation-guarded on both paths; waitForReadSlot derives its bound from the current holder's deadline; write cooldown is per-item; stall messages state the real deadline and per-item scope. QueenReconciliation: three new non-urgent findings (landedElsewhere via git cherry patch-ids, heldBySibling via registry siblings, branchOnlyOnRemote via origin refs) with correction .none each. Cassette wait loop measures progress (log growth resets a 120s idle clock, 600s backstop) and each failure message states which condition was measured.",
+
+  "files_changed": [
+    "rings/SR-00/TriOSEncryption.swift",
+    "rings/SR-02/ConversationEncryption.swift",
+    "rings/SR-02/ConversationPersister.swift",
+    "rings/SR-00/KeychainSecrets.swift",
+    "rings/SR-00/QueenReconciliation.swift",
+    "rings/SR-02/QueenBranchCommitter.swift",
+    "rings/SR-02/ChatViewModel.swift",
+    "tests/swift/ChatSSEEndToEndTest.swift",
+    "Makefile",
+    "tools/forensics.py",
+    "tools/dashboard.py",
+    "README.md",
+    "CLAUDE.md"
+  ],
+
+  "prevention": [
+    "A timeout branch must be reachable only on a timeout. If a completion path can fall into it, the message will one day describe a hang that was an answer - keep the thrown error, do not try? it away.",
+    "Every quarantine needs a documented reader. Bytes copied aside with no path that copies them back are not preserved, they are warehoused.",
+    "A fallback that degrades security (plaintext at rest) needs a healing path on the READ side, because the write side may never come back for a dormant record.",
+    "Before reusing a Makefile variable in a new target, grep for `?=` on it below your target: assignment order does not matter to make, and chat-probe's `VARIANT ?= dev` silently owned the name.",
+    "A sibling checkout is a shared mutable dependency. When a module suddenly fails to load with an SDK mismatch, another agent rebuilt it; vendored halves (TRIOS_VENDORED=1) are the isolation boundary, not a workaround.",
+    "Signal watch: make signals compares what the running binary emits against the ceilings; a fix is proven by decrypt_deferred replacing decrypt_failed and by write_refused staying 0, not by the suite passing."
+  ],
+
+  "corrections_to_earlier_claims": [
+    "The briefing said queen.reconcile.disagrees fires 8 times per tick; measured, it fired 8 times in ONE startup pass (one event per stale record, 6 issues), and not per tick.",
+    "My first make board run reported dev's registry as the release board; the target now pins LOG_VARIANT=release and the skill records the trap."
+  ],
+
+  "related_episodes": [
+    "2026-08-21_unmeasured-cause-and-the-bricked-queen-chat"
+  ],
+
+  "tags": [
+    "unmeasured-cause",
+    "encryption",
+    "keychain",
+    "quarantine-recovery",
+    "plaintext-healing",
+    "reconcile",
+    "patch-id",
+    "cassette-flake",
+    "make-targets",
+    "release-wave"
+  ]
+}

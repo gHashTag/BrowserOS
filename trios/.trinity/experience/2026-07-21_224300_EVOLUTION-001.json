@@ -1,0 +1,44 @@
+{
+  "id": "EVOLUTION-001",
+  "date": "2026-07-21",
+  "timestamp": "2026-07-21T15:43:26Z",
+  "ring": "cross-repo",
+  "phase": "audit",
+  "road": "B",
+  "agents_involved": [
+    "t27-creator",
+    "t27-verifier",
+    "t27-experience"
+  ],
+  "issue": "Cross-repo Trinity evolution plan verification",
+  "problem": "An autonomous agent generated EVOLUTION_PLAN_TRINITY_v1.md on 2026-07-21 22:29 after scanning 8 gHashTag repos, but the run had no Akashic task.intent, no active claim, no queue entry, and no verifier verdict. The plan mixed real issues with inflated counts and referenced two non-existent repositories (trios-dwagent, trios-new).",
+  "fix": "Create the missing task lifecycle records retroactively: task.intent + claim.acquire in akashic-log, active queue entry, claim file, and a verified experience episode. Cross-check every referenced issue via the GitHub API and annotate the plan with actual open-issue counts and repository accessibility.",
+  "verification": "Open issue counts confirmed via gh API search: t27=85, trios-trainer-igla=26, trios=5, trinity=3, trinity-clara=2, woody-weed-bot=1, trinity-s3ai=1. Total accessible open issues = 123 (not 105+). 21 specific issue URLs verified as OPEN and real. trios-dwagent and trios-new do not exist or are not accessible. BrowserOS CDP (9102), Agent Server (9105), trios app, and clade-meshd (9505) are all alive as of 2026-07-21 22:42.",
+  "files_changed": [
+    ".trinity/queue/active.json",
+    ".trinity/claims/active/evolution-plan.json",
+    ".trinity/events/akashic-log.jsonl",
+    ".trinity/event_log.jsonl",
+    ".trinity/experience/2026-07-21_224300_EVOLUTION-001.json",
+    ".trinity/experience.md"
+  ],
+  "tests_added": "Manual verification of 21 GitHub issue URLs; service health checks via lsof on ports 9102, 9105, 9505; swiftc typecheck and cargo check --workspace both PASS.",
+  "pattern": "Every long-running autonomous task must write task.intent + durable claim into .trinity before scanning external state; verifier must close it with verdict + experience save.",
+  "anti_pattern": "Do not generate markdown reports without binding them to a task_id, claim_id, and queue entry; do not cite repositories or issue numbers that have not been verified live.",
+  "tags": [
+    "evolution-plan",
+    "cross-repo-audit",
+    "github-verification",
+    "task-durability",
+    "akashic-logging"
+  ],
+  "commit": "1108c6632",
+  "branch": "feat/zai-provider",
+  "skills_saved": [],
+  "next_wave_options": [
+    "seal-automation",
+    "task-durability-gate",
+    "github-audit-skill"
+  ],
+  "closeout_report": "/Users/playra/EVOLUTION_PLAN_TRINITY_v1.md"
+}

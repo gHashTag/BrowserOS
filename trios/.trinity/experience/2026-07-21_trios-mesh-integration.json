@@ -1,0 +1,23 @@
+{
+  "timestamp": "2026-07-21T17:10:00+07:00",
+  "action": "trios-mesh-integration",
+  "branch": "feat/zai-provider",
+  "summary": "Connected gHashTag/tri-net (trios-mesh) into trios as RUST-13 submodule.",
+  "changes": [
+    "Added git submodule trios/rings/RUST-13/trios-mesh pointing to gHashTag/tri-net main",
+    "Wired trios-mesh into trios Cargo workspace",
+    "Fixed build.rs type bug and disabled broken auto-discovered binaries",
+    "Excluded stub gen/rust modules; inlined wire spec implementation",
+    "101 cargo tests pass; full workspace clippy clean; ./build.sh passes"
+  ],
+  "issues": [
+    "tri-net main branch build.rs and gen/rust stubs were broken and required trios-side patches",
+    "Submodule push failed due to missing GitHub auth; fixes live in local feat/trios-integration branch and patch file",
+    "BrowserOS Server was DOWN during e2e (pre-existing environment, not caused by integration)"
+  ],
+  "next": [
+    "Push trios-mesh feat/trios-integration branch to gHashTag/tri-net",
+    "Re-enable gen/rust modules once t27c produces valid Rust",
+    "Re-implement trios_meshd and smoke-m1 binaries against the cleaned-up API"
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "task_id": "CHAT-STATUS-IN-COMPOSER-001",
+  "claim_id": "E1AE2485-4688-433C-94FA-B9B2235AE042",
+  "timestamp": "2026-07-22T17:31:27Z",
+  "action": "spec_tdd_build_verify_learn",
+  "result": "clean",
+  "problem": "The chat status occupied a separate glass bar above the composer, duplicated model and token information, and split one interaction area into two surfaces.",
+  "solution": "Removed the standalone status view and embedded model selection, adaptive token usage, recovery export, Trinity and BrowserOS connection state, CDP detail, and the send action into one responsive composer toolbar. Compact mode condenses labels while expanded mode exposes the full provider, model, token breakdown, Recovery label, and CDP port.",
+  "verification": {
+    "red_test": "PASS",
+    "composer_status_style_tests": "PASS",
+    "legacy_status_style_tests": "PASS",
+    "swift_build": "PASS",
+    "compiled_swift_files": 87,
+    "code_signature": "PASS",
+    "visual_compact": "PASS",
+    "visual_expanded": "PASS",
+    "standalone_status_removed": "PASS",
+    "diff_check": "PASS",
+    "live_health": {
+      "status": "ok",
+      "cdpConnected": true
+    },
+    "runtime_launch": "PASS",
+    "pid": 29897
+  },
+  "lesson": "Operational details that directly govern message submission belong inside the composer action row. One responsive toolbar removes duplicated state, preserves vertical space, and keeps model, usage, recovery, connectivity, and send controls in the user's active interaction context."
+}

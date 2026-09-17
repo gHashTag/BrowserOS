@@ -1,0 +1,42 @@
+{
+  "title": "Encrypted MemoryStore SQLite database at rest",
+  "cycle": 12,
+  "date": "2026-07-26T00:39:35+07:00",
+  "rings": ["SR-00", "SR-01"],
+  "agents": ["claude"],
+  "road": "B",
+  "problem": "MemoryStore kept durable agent memories and TODO plans in a plaintext SQLite database at ~/Library/Application Support/Trinity S3AI/AgentMemory/agent-memory.sqlite3. Any process with user access could read every memory body and plan goal, including recalled snippets that might contain sensitive context.",
+  "root_cause": "MemoryStore opened and closed a plaintext SQLite file directly. There was no encryption boundary around the database on disk, and the WAL journal mode created additional plaintext -wal/-shm files.",
+  "fix": "Added TriOSEncryption(keyName: \"memory\") shared named key. Created EncryptedMemoryStore helper that manages an AES-256-GCM encrypted snapshot (agent-memory.sqlite3.enc). Updated MemoryStore to decrypt the snapshot into a temporary working file on open, run SQLite with journal_mode=DELETE/synchronous=FULL, and re-encrypt + securely delete the working file on close. Added automatic migration from a legacy plaintext agent-memory.sqlite3. Bumped schema version to 2. Fixed MemoryStoreFTSTests broken PersistentMemoryStore reference and added MemoryStoreEncryptionTests covering ciphertext indistinguishability, round-trip recall, and legacy migration.",
+  "files": [
+    "trios/rings/SR-00/TriOSEncryption.swift",
+    "trios/rings/SR-01/EncryptedMemoryStore.swift",
+    "trios/rings/SR-01/MemoryStore.swift",
+    "trios/tests/TriOSKitTests/MemoryStoreFTSTests.swift",
+    "trios/tests/TriOSKitTests/MemoryStoreEncryptionTests.swift",
+    "trios/tests/swift/ChatSSEEndToEndTest.swift",
+    ".claude/plans/trios-cycle12-memory-encryption-plan.md",
+    ".claude/plans/trios-cycle12-memory-encryption-report.md"
+  ],
+  "tests": {
+    "build_sh": "PASS (chat integration tests PASS; swift test auto-skipped because XCTest is unavailable in this toolchain)",
+    "clade_build": "PASS",
+    "clade_audit": "0 findings",
+    "clade_seal": "SEAL VALID",
+    "clade_e2e": "PASS",
+    "health": "{\"status\":\"ok\",\"cdpConnected\":true}",
+    "swift_test": "SKIPPED (XCTest not available in CommandLineTools-only environment)"
+  },
+  "variants": {
+    "A": "File-level encrypted snapshot — encrypt/decrypt the whole SQLite file on close/open. Self-contained, no new dependencies, but working copy is plaintext while store is open. — implemented",
+    "B": "SQLCipher native SQLite encryption — strongest at-rest story and WAL-compatible, but requires building/linking libsqlcipher and conflicts with the current swiftc -lsqlite3 direct build path.",
+    "C": "Per-conversation encrypted memory shards — split memory/plan tables into separate encrypted SQLite files per conversationId for blast-radius control; adds multi-database fan-out complexity."
+  },
+  "lessons": [
+    "File-level encryption is landable immediately when native SQLite encryption is blocked by the build environment; the resting state is protected and legacy databases migrate transparently.",
+    "WAL mode is incompatible with file-level snapshots because -wal/-shm files leak plaintext outside the encrypted snapshot; switch to DELETE journal mode with synchronous=FULL.",
+    "Schema migration for an unchanged table layout can be just a user_version bump, keeping migrations trivial while still versioning the encrypted-store era.",
+    "Securely deleting the transient working file (overwrite + unlink) is best-effort; the real long-term fix is native page encryption (SQLCipher) so there is no plaintext working copy.",
+    "A small helper enum (EncryptedMemoryStore) isolates file-system and CryptoKit details from the actor, preserving the existing AgentMemoryStoreProtocol contract."
+  ]
+}

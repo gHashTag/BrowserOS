@@ -1,0 +1,66 @@
+{
+  "title": "Cycle 22: Local auth observability + proactive refresh + recovery UI",
+  "date": "2026-07-25",
+  "category": "security",
+  "weak_spots": [
+    "No visibility into local-auth token health or refresh history",
+    "Reactive-only refresh means first request after sleep may fail with 403",
+    "No audit trail for token lifecycle events",
+    "No manual recovery UI when token refresh fails",
+    "Blunt LocalAuthError.fetchFailed had no status code"
+  ],
+  "competitors": [
+    "SwiftAI Boilerplate AsyncStream AuthState + proactive 60s-before-expiry refresh",
+    "TokenEater AppErrorState enum + menu-bar recovery banner + silent keychain reads",
+    "omi AuthSessionCoordinator single-flight refresh + definitive death classifier",
+    "Ory token lifecycle management + refresh-token rotation + family invalidation",
+    "onelake-explorer-macos Sign In Again menu-bar action"
+  ],
+  "implemented_variant": "A",
+  "variants": [
+    {
+      "id": "A",
+      "name": "Observability + proactive refresh + recovery UI",
+      "implemented": true,
+      "summary": "LocalAuthMonitor tracks state/metadata/audit log; provider refreshes proactively after 5 min; Queen status UI shows health and Refresh/Reset actions."
+    },
+    {
+      "id": "B",
+      "name": "Server-side token metadata + TTL",
+      "implemented": false,
+      "summary": "BrowserOS exposes issuedAt/expiresIn; TriOS refreshes at 75% TTL and shows countdown. Needs server changes."
+    },
+    {
+      "id": "C",
+      "name": "Biometric-gated high-value actions",
+      "implemented": false,
+      "summary": "Protect Keychain item with SecAccessControl; require biometric for reset. Strongest anti-exfiltration but prompts user."
+    }
+  ],
+  "files_changed": [
+    "rings/SR-01/LocalAuthMonitor.swift",
+    "rings/SR-01/LocalAuthProvider.swift",
+    "rings/SR-01/LocalAuthUIManager.swift",
+    "rings/SR-01/SSETransport.swift",
+    "rings/SR-02/A2ARegistryClient.swift",
+    "BR-OUTPUT/QueenStatusViewModel.swift",
+    "BR-OUTPUT/QueenQuickActionsSheet.swift",
+    "main.swift",
+    "tests/TriOSKitTests/LocalAuthProviderTests.swift",
+    "tests/TriOSKitTests/LocalAuthMonitorTests.swift"
+  ],
+  "verification": {
+    "clade_build": "PASS",
+    "clade_audit": "0 findings",
+    "clade_seal": "VALID",
+    "clade_e2e": "PASS",
+    "app_health": "{\"status\":\"ok\",\"cdpConnected\":true}"
+  },
+  "lessons": [
+    "Keep audit logs token-free by design: store event names and reasons, never the secret value.",
+    "Actor-isolated monitor + MainActor UIManager separates telemetry from UI control without exposing the provider globally.",
+    "Proactive refresh should be threshold-injectable so tests can force/stop it deterministically.",
+    "Status components need a consistent action parameter name; mismatching actionLabel vs action caused a swiftc error."
+  ],
+  "related_cycles": [21, 20, 19, 18]
+}

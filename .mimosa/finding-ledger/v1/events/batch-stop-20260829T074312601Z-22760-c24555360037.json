@@ -1,0 +1,94 @@
+{
+  "schemaVersion": "mimosa-finding-ledger-batch/v1",
+  "batchId": "stop-20260829T074312601Z-22760-c24555360037",
+  "runId": "20260829T074312601Z-22760-c24555360037",
+  "runStatus": "inconclusive",
+  "coverage": {
+    "status": "partial",
+    "reasons": [
+      {
+        "code": "bash_discovery_incomplete",
+        "stage": "bash-discovery",
+        "target": "trios/.worktrees/prod/queen-5002/trios/agent-server/apps/agent/entrypoints/app/ai-settings/ProviderTemplatesSection.tsx",
+        "detail": "project enumeration exceeded 5000 reviewable files",
+        "affectsCompletion": true
+      },
+      {
+        "code": "baseline_partial",
+        "stage": "baseline",
+        "target": "trios/.worktrees/prod/queen-5002/trios/agent-server/apps/agent/entrypoints/app/ai-settings/ProviderTemplatesSection.tsx",
+        "detail": "baseline exceeded 5000 candidate files",
+        "affectsCompletion": true
+      },
+      {
+        "code": "scanner_failed",
+        "stage": "scan",
+        "target": "trios/agent-server/apps/server/tests/api/request-auth.test.ts",
+        "detail": "spawnSync /Users/playra/.nvm/versions/node/v22.22.0/bin/node ETIMEDOUT",
+        "affectsCompletion": true
+      },
+      {
+        "code": "scanner_failed",
+        "stage": "scan",
+        "target": "trios/agent-server/apps/server/src/api/utils/request-auth.ts",
+        "detail": "spawnSync /Users/playra/.nvm/versions/node/v22.22.0/bin/node ETIMEDOUT",
+        "affectsCompletion": true
+      },
+      {
+        "code": "scanner_failed",
+        "stage": "scan",
+        "target": "trios/agent-server/apps/server/src/api/utils/require-local-auth.ts",
+        "detail": "spawnSync /Users/playra/.nvm/versions/node/v22.22.0/bin/node ETIMEDOUT",
+        "affectsCompletion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "bash-discovery",
+        "target": "trios/.worktrees/prod/queen-5002/trios/agent-server/apps/agent/entrypoints/app/ai-settings/ProviderTemplatesSection.tsx",
+        "detail": "bash_discovery_incomplete: project enumeration exceeded 5000 reviewable files",
+        "affectsCompletion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "baseline",
+        "target": "trios/.worktrees/prod/queen-5002/trios/agent-server/apps/agent/entrypoints/app/ai-settings/ProviderTemplatesSection.tsx",
+        "detail": "baseline_partial: baseline exceeded 5000 candidate files",
+        "affectsCompletion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "scan",
+        "target": "trios/agent-server/apps/server/tests/api/request-auth.test.ts",
+        "detail": "scanner_failed: spawnSync /Users/playra/.nvm/versions/node/v22.22.0/bin/node ETIMEDOUT",
+        "affectsCompletion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "scan",
+        "target": "trios/agent-server/apps/server/src/api/utils/request-auth.ts",
+        "detail": "scanner_failed: spawnSync /Users/playra/.nvm/versions/node/v22.22.0/bin/node ETIMEDOUT",
+        "affectsCompletion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "scan",
+        "target": "trios/agent-server/apps/server/src/api/utils/require-local-auth.ts",
+        "detail": "scanner_failed: spawnSync /Users/playra/.nvm/versions/node/v22.22.0/bin/node ETIMEDOUT",
+        "affectsCompletion": true
+      }
+    ]
+  },
+  "source": {
+    "component": "zcode-hook",
+    "operationId": "Stop"
+  },
+  "revision": "f6b494ed42acdf8f6f3316abed7094a60ce594e9",
+  "diffHash": "d172a75d227bd15b5a528f76e7ee42d2e176af5a62986f0851720833a9196bf8",
+  "rulesVersion": "unavailable",
+  "sessionHash": "0fde83bfae4e4e2cce03467ccebfdac95f0d5d7ec1f0c92bb1d6c388ca5b7493",
+  "reportRef": ".mimosa/reports/task-review-sess_2c244a44-c950-44f1-91c3-11aa8d7a76e9-20260829T074312601Z-22760-c24555360037.json",
+  "events": [],
+  "observedFindingIds": [],
+  "verifiedFiles": [],
+  "recordedAt": "2026-08-29T07:43:12.890Z"
+}

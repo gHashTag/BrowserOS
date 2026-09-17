@@ -1,0 +1,25 @@
+{
+  "task_id": "QUEEN-BG-001",
+  "timestamp": "2026-07-25T00:22:27+07:00",
+  "domain": "UI/Lifecycle",
+  "agent_chain": ["claude"],
+  "issue_url": "https://github.com/gHashTag/trios/issues/T27-EPIC-001",
+  "root_cause": "Queen background agents (A2A heartbeat, SSE stream, self-improvement audit) were owned by ChatViewModel, so any conversation switch or panel lifecycle event risked cancelling them. ViewModels must never own process-scoped background work.",
+  "fix_pattern": "Introduce an app-level @MainActor QueenBackgroundService singleton that owns A2A registration/heartbeat/stream and the audit loop. Decouple A2AMessageRouter via an A2AMessageRouterDelegate protocol so the router can feed any UI or service. Wire ChatViewModel as a weak delegate for live Queen-chat updates. Configure and start/stop the service in AppDelegate.",
+  "files_changed": [
+    "rings/SR-02/QueenBackgroundService.swift",
+    "rings/SR-02/ChatViewModel.swift",
+    "BR-OUTPUT/A2AMessageRouter.swift",
+    "main.swift"
+  ],
+  "tests_added": [],
+  "lessons": [
+    "Never host long-lived background agents inside a ViewModel; use an app-level singleton with Task-based loops.",
+    "Decouple network routers from UI via delegate protocols so the same router can serve a service and a view.",
+    "After rebuilding trios.app, always kill the old process and relaunch with `open trios.app` to keep the menu-bar logo alive."
+  ],
+  "tests": {
+    "build": "PASS",
+    "e2e": "PASS"
+  }
+}

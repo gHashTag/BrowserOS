@@ -1,0 +1,42 @@
+{
+  "id": "2026-08-22_board-lifecycle-night",
+  "date": "2026-08-22",
+  "ring": "SR-00, SR-02, agent-server, forge",
+  "branch": "feat/queen-supervisor",
+  "title": "The board-lifecycle night: every record got a disposition, and the dead ends got closed where candidates are born",
+  "severity": "medium",
+  "mnl_stage": "L",
+  "agent": "Queen supervisor (30m loop)",
+
+  "problem": "Both boards carried years-in-hours of accumulated records with no dispositions: 8 release failed, 40 dev failed, review queues holding boundaries, and dismissed issues re-dispatched by any lane with budget because candidates come from open forge issues.",
+
+  "findings": [
+    "/dismiss proved itself in one round: the previously-undrivable (.failed,.cancelled) transition filed 4 release + 31 dev records, each with a written reason; archive stamps followed single-shot on the next sweeps.",
+    "The two-step reject-then-cancel races sibling records: dev #1132-r3 finished twenty minutes after a mistargeted cancel while the state counter matched expectations. Verify by record id.",
+    "A dismissal teaches choose nothing: dev dispatched #1131 attempts 12 and 13 within one hour, then hopped to #1132. Closing the issues on the forge with verdict comments dropped the candidate count 23->22->21 and the lane moved to genuinely open work (#1151).",
+    "The macosx26.5 SDK stamps were our own bees all along: the agent server launches without DEVELOPER_DIR, so worker shells resolve swiftc to full Xcode - caught live compiling drill1151 with -sdk MacOSX26.5. Fixed at the root (scrubbed env defaults DEVELOPER_DIR to CLT) with build.sh's typecheck probe as second line.",
+    "'Auto-accept skipped: unknown' was a hand-maintained mirror of policy guards that never learned the committedSHA condition. The policy now names its own refusal (autoAcceptDisqualification); the mirror is deleted.",
+    "gate_administrative proved itself in both lanes (#74 release, #75 dev): a cla-only red names its check and stands down instead of waking a bee into an unwinnable fix.",
+    "The #1151 bee is the first to DRIVE ITS DRILL - the proof-by-run its #1131/#1132 predecessors never attempted across 13 attempts each."
+  ],
+
+  "fix": "/dismiss command; forge closures for #1131 and #1132 with evidence-bearing comments and reopening conditions; DEVELOPER_DIR=CLT default in the scrubbed worker env; autoAcceptDisqualification; consolidated skills.",
+
+  "prevention": [
+    "Every dismissal of a dead-end issue pairs with a forge closure, or any budgeted lane re-grinds it; verify the candidate count drops on the next choose pass.",
+    "After any two-step verdict, verify the target record BY ID and check for a still-running runner before trusting counters.",
+    "A zero in a lane's token counts means a stale server process, not a broken pipeline - check the server's start time against the emission commit.",
+    "Toolchain policy belongs in the worker env, not in hope: a bee's shell resolves tools exactly like any shell."
+  ],
+
+  "corrections_to_earlier_claims": [
+    "I attributed the SDK stamps to a neighbouring agent for a full day; the culprit was measured to be our own bees within one minute of looking at a live process list."
+  ],
+
+  "related_episodes": [
+    "2026-08-22_first-real-money-day",
+    "2026-08-21_release-wave-encryption-heals-itself"
+  ],
+
+  "tags": ["dismiss", "forge-closure", "board-lifecycle", "sdk-root-cause", "verify-by-record", "unmeasured-cause"]
+}

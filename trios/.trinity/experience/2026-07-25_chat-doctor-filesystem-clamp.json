@@ -1,0 +1,22 @@
+{
+  "id": "2026-07-25_chat-doctor-filesystem-clamp",
+  "date": "2026-07-25",
+  "ring": "BrowserOS server",
+  "phase": "verify",
+  "road": "A",
+  "agents_involved": ["T", "V"],
+  "issue": "/doctor skill fails in TriOS chat with 'BrowserOS Error: Tool returned an error'",
+  "problem": "BrowserOS chat agent loading the /doctor skill called filesystem_read on build logs and state files larger than 500 lines. The tool threw 'Requested lines 1-N exceed the 500-line limit', aborting the agent turn.",
+  "root_cause": "filesystem_read enforced a hard 500-line maximum by throwing an error. Agent turns that touch large files (or skills that read them) cannot recover from this error, and the generic error message gives the user no path forward.",
+  "fix": "1. Changed filesystem_read to clamp reads to MAX_READ_LINES (500) instead of throwing. 2. Always append a continuation hint when more lines exist so the agent can paginate. 3. Added idempotency guards to TaskQueueService.shutdown() and ChatHistoryService.shutdown() to survive SIGTERM being handled by multiple listeners.",
+  "files_changed": [
+    "packages/browseros-agent/apps/server/src/tools/filesystem/read.ts",
+    "packages/browseros-agent/apps/server/tests/tools/filesystem/read.test.ts",
+    "packages/browseros-agent/apps/server/src/api/services/task-queue-service.ts",
+    "packages/browseros-agent/apps/server/src/api/services/chat-history-service.ts"
+  ],
+  "verification": "build: PASS (cargo run --bin clade-build) | e2e: PASS (cargo run --bin clade-e2e) | bun test read.test.ts: PASS | server: restarted on 9105, health ok, TriOS reconnected",
+  "pattern": "When a filesystem tool has a hard line/char limit, prefer clamping the result plus a continuation hint over throwing. This preserves context-window protection while letting LLM agents paginate and recover.",
+  "anti_pattern": "Do NOT throw a hard error when a file exceeds an internal read limit unless the caller explicitly requested an out-of-bounds range. Do NOT call pool.end() from multiple signal handlers without an idempotency guard.",
+  "tags": ["BrowserOS", "filesystem_read", "tool_limits", "agent_recovery", "skills", "shutdown", "pg-pool"]
+}

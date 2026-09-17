@@ -1,0 +1,21 @@
+{"refreshCount":1,"timestamp":"2026-08-19T08:58:48Z","state":"cached","retry403Count":0,"event":"fetch.success","reason":null}
+{"refreshCount":1,"timestamp":"2026-08-19T08:58:48Z","state":"cached","retry403Count":0,"event":"fetch.success","reason":null}
+{"refreshCount":1,"timestamp":"2026-08-19T08:58:48Z","state":"cached","retry403Count":1,"event":"403.retry","reason":null}
+{"refreshCount":1,"timestamp":"2026-08-19T08:58:48Z","state":"failed","retry403Count":1,"event":"failure","reason":"http_503"}
+{"refreshCount":0,"timestamp":"2026-08-19T08:58:48Z","state":"unknown","retry403Count":0,"event":"reset","reason":null}
+{"refreshCount":1,"timestamp":"2026-08-19T08:58:48Z","state":"cached","retry403Count":0,"event":"fetch.success","reason":null}
+{"refreshCount":1,"timestamp":"2026-08-19T08:58:48Z","state":"cached","retry403Count":0,"event":"fetch.success","reason":null}
+{"refreshCount":1,"timestamp":"2026-08-19T08:58:48Z","state":"cached","retry403Count":0,"event":"fetch.success","reason":null}
+{"refreshCount":1,"timestamp":"2026-08-19T08:58:48Z","state":"cached","retry403Count":0,"event":"fetch.success","reason":null}
+{"refreshCount":1,"timestamp":"2026-08-19T08:58:48Z","state":"cached","retry403Count":0,"event":"fetch.success","reason":null}
+{"refreshCount":0,"timestamp":"2026-08-19T08:58:48Z","state":"failed","retry403Count":0,"event":"failure","reason":"fetchFailed(statusCode: Optional(503))"}
+{"refreshCount":1,"timestamp":"2026-08-19T08:58:48Z","state":"cached","retry403Count":0,"event":"fetch.success","reason":null}
+{"refreshCount":1,"timestamp":"2026-08-19T08:58:48Z","state":"cached","retry403Count":0,"event":"refresh.success","reason":null}
+{"refreshCount":0,"timestamp":"2026-08-19T08:58:48Z","state":"failed","retry403Count":0,"event":"family.revoked","reason":null}
+{"refreshCount":1,"timestamp":"2026-08-19T08:58:48Z","state":"cached","retry403Count":0,"event":"fetch.success","reason":null}
+{"refreshCount":0,"timestamp":"2026-08-19T08:58:48Z","state":"unknown","retry403Count":0,"event":"reset","reason":null}
+{"refreshCount":1,"timestamp":"2026-08-19T08:58:48Z","state":"cached","retry403Count":0,"event":"fetch.success","reason":null}
+{"refreshCount":1,"timestamp":"2026-08-19T08:58:48Z","state":"cached","retry403Count":0,"event":"fetch.success","reason":null}
+{"refreshCount":1,"timestamp":"2026-08-19T08:58:48Z","state":"cached","retry403Count":0,"event":"fetch.success","reason":null}
+{"reason":null,"timestamp":"2026-08-19T08:58:57Z","event":"403.retry","state":"cached","retry403Count":2,"refreshCount":1}
+{"reason":null,"timestamp":"2026-08-19T08:58:57Z","event":"403.retry","state":"cached","retry403Count":3,"refreshCount":1}

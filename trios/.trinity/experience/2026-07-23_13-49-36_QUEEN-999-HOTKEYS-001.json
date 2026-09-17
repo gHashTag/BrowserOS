@@ -1,0 +1,39 @@
+{
+  "task_id": "QUEEN-999-HOTKEYS-001",
+  "claim_id": "FACBA585-AF93-4776-A49C-7622655D1CB4",
+  "timestamp": "2026-07-23T13:49:36Z",
+  "action": "spec_tdd_code_build_runtime_verify_learn",
+  "result": "clean",
+  "problem": "The 27-petal Queen menu had no complete keyboard map, and a local event monitor could capture stale SwiftUI navigation state and keep intercepting digit shortcuts after a screen opened.",
+  "solution": "Added one tested menu shortcut policy for Command, Option, and Control digit rows, moved navigation into a reference-backed observable state, restricted routing to the visible main menu, updated hosted-route metadata, and generated matching tooltip labels.",
+  "verification": {
+    "red_test": "PASS",
+    "shortcut_policy_tests": {
+      "status": "PASS",
+      "count": 5
+    },
+    "queen_tests": {
+      "status": "PASS",
+      "count": 54
+    },
+    "trios_tab_map_test": "PASS",
+    "trios_build": {
+      "status": "PASS",
+      "compiled_swift_files": 103
+    },
+    "code_signature": "PASS",
+    "runtime_command_1_chat": ".trinity/e2e/queen_hotkey_cmd1_chat_fixed.png",
+    "runtime_option_6_git": ".trinity/e2e/queen_hotkey_option6_git.png",
+    "runtime_control_1_files": ".trinity/e2e/queen_hotkey_control1.png",
+    "runtime_chat_passthrough": ".trinity/e2e/queen_hotkey_passthrough_chat_fixed.png",
+    "runtime_git_passthrough": ".trinity/e2e/queen_hotkey_passthrough_git.png",
+    "browseros_health": {
+      "status": "ok",
+      "cdpConnected": true
+    },
+    "runtime_launch": "PASS",
+    "pid": 4427,
+    "diff_check": "PASS"
+  },
+  "lesson": "Escaping local event monitors must read navigation from reference-backed state. Capturing SwiftUI value state can preserve the initial menu visibility and create shortcut conflicts inside destination screens."
+}

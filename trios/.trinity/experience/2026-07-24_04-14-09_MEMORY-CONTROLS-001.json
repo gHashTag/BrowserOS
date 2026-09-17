@@ -1,0 +1,28 @@
+{
+  "task_id": "MEMORY-CONTROLS-001",
+  "claim_id": "2621A8A0-22B7-4E85-AA5C-3F2857AFD10C",
+  "timestamp": "2026-07-24T04:14:09Z",
+  "action": "spec_tdd_build_runtime_review_handoff",
+  "result": "code_build_review_pass_runtime_gate",
+  "problem": "Transport EOF without finish, abort, or error was reported as a successful agent turn, completing the TODO plan and persisting partial assistant output as durable memory.",
+  "solution": "Specified an explicit terminal stream contract, added a deterministic failing scenario, then guarded the shared ChatViewModel stream consumer so unterminated EOF uses the existing failure lifecycle and never writes memory.",
+  "verification": {
+    "tdd_red": "PASS_EXPECTED_4_FAILURES",
+    "chat_sse_e2e": "PASS_18_SCENARIOS",
+    "build": "PASS_97_SWIFT_FILES",
+    "signature": "PASS",
+    "app_launch": "PASS_PID_21569",
+    "agent_v": "CLEAN_NO_BLOCKING_FINDINGS",
+    "diff_check": "PASS",
+    "xctest": "SKIPPED_TOOLCHAIN_XCTEST_UNAVAILABLE",
+    "browseros_health": "GATED_KEYCHAIN_AUTHORIZATION",
+    "runtime_gate_evidence": "SecurityAgent is active and the Trios main thread is blocked in KeychainSecrets.read -> SecItemCopyMatching before ServerManager.startIfNeeded."
+  },
+  "residual_risks": [
+    "Live BrowserOS health and visual UI checks remain pending until the user decides the macOS Keychain authorization prompt.",
+    "The regression scenario does not yet reopen SQLite or assert the exact published error string.",
+    "The terminal observation is a Boolean and assumes the parser continues to map every raw terminal event."
+  ],
+  "landing": "NOT_REQUESTED",
+  "claim_status": "ACTIVE_UNTIL_RUNTIME_GATE_RESOLVES"
+}

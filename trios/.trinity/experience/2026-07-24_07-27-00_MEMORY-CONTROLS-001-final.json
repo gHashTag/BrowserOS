@@ -1,0 +1,31 @@
+{
+  "timestamp": "2026-07-24T07:27:00Z",
+  "task_id": "MEMORY-CONTROLS-001",
+  "claim_id": "2621A8A0-22B7-4E85-AA5C-3F2857AFD10C",
+  "action": "final_release_and_handoff",
+  "result": "CLEAN_LOCAL_NOT_LANDED",
+  "problem": "Transport EOF without an explicit terminal SSE event could complete the planner and persist a partial assistant response as successful memory.",
+  "solution": "Required an explicit terminal event at the shared ChatViewModel stream boundary, routed unterminated EOF through the existing failure lifecycle, preserved partial chat history, and prevented planner completion and memory writes.",
+  "verification": {
+    "tdd_red": "PASS_EXPECTED_4_FAILURES",
+    "chat_sse_e2e": "PASS_18_SCENARIOS",
+    "full_build": "PASS_97_SWIFT_FILES",
+    "signature": "PASS",
+    "fresh_app_pid": 58983,
+    "production_health": "PASS_HTTP_200_CDP_CONNECTED",
+    "fresh_runtime_e2e": "PASS",
+    "fresh_ui": "PASS_ACCESSIBILITY_AND_SCREENSHOT",
+    "agent_v": "APPROVE_COMPLETE_RELEASE",
+    "skill_tdd": "PASS_RED_GREEN",
+    "skill_validation": "PASS"
+  },
+  "reusable_skill": "/Users/playra/.codex/skills/running-reliability-waves",
+  "residual_risks": [
+    "The regression scenario does not directly assert the exact published ChatViewModel error text.",
+    "The terminal observation remains a Boolean rather than a typed transport outcome.",
+    "XCTest is unavailable in the current toolchain.",
+    "Known compiler warnings remain outside this increment."
+  ],
+  "landing": "NOT_REQUESTED",
+  "commit": "NOT_CREATED"
+}

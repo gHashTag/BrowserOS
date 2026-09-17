@@ -1,0 +1,42 @@
+{
+  "title": "Stale-While-Revalidate Predictive Warmup — Cycle 25",
+  "date": "2026-07-24",
+  "loop": "025",
+  "road": "B",
+  "ring": "SR-00 / SR-02 / BR-OUTPUT",
+  "agents": ["claude"],
+  "problem": "Cycles 22-24 built predictive warmup caching, background scheduling, adaptive TTL/interval, and persisted volatility history, but the chat send path still fell back to synchronous provider probes whenever the cached winner expired. There was no graceful staleness window, no coalesced background refresh, and no UI visibility into staleness.",
+  "root_cause": "PredictiveWarmupCache only served fresh entries; ModelConfigurationStore had no max-staleness preference and no refresher actor; ChatViewModel blocked on runAdaptiveWarmup when the cache TTL expired; ModelsTabView could not show whether a winner was stale or refreshing.",
+  "fix": "Added winnerOrStale(tier:strictQuotaGating:maxStaleness:) to PredictiveWarmupCache so a recently-expired winner can be served within a bounded window. Added PredictiveWarmupRefresher actor that coalesces overlapping background refreshes into a single in-flight Task. Extended ModelConfigurationStore with predictiveWarmupMaxStaleness (UserDefaults, default 120 s, clamped 0...600), cachedOrStaleWarmupWinner applying the same breaker/quota checks to stale entries, isCachedWarmupWinnerStale / isWarmupCacheRefreshing, and refreshWarmupCacheInBackground. Wired ChatViewModel.sendMessage to use the stale-aware lookup, apply the winner immediately, trigger a coalesced background refresh when stale, and distinguish [↻ stale] vs [↻] in the system banner. Added a max-staleness stepper, stale-winner indicator, and refreshing indicator to ModelsTabView.adaptiveWarmupSection. Added PredictiveWarmupRefresherTests and extended PredictiveWarmupCacheTests with stale-while-revalidate coverage.",
+  "files": [
+    "trios/rings/SR-00/PredictiveWarmupCache.swift",
+    "trios/rings/SR-00/PredictiveWarmupRefresher.swift",
+    "trios/rings/SR-00/ModelConfigurationStore.swift",
+    "trios/rings/SR-02/ChatViewModel.swift",
+    "trios/BR-OUTPUT/ModelsTabView.swift",
+    "trios/tests/TriOSKitTests/PredictiveWarmupCacheTests.swift",
+    "trios/tests/TriOSKitTests/PredictiveWarmupRefresherTests.swift",
+    ".claude/plans/trios-cycle25-stale-while-revalidate-loop-025.md",
+    ".claude/plans/trios-cycle25-stale-while-revalidate-loop-025-report.md"
+  ],
+  "tests": {
+    "bash build.sh": "PASS",
+    "cargo test --workspace": "PASS",
+    "cargo clippy --workspace": "PASS",
+    "cargo run --bin clade-audit": "0 findings",
+    "cargo run --bin clade-seal": "SEAL VALID",
+    "cargo run --bin clade-e2e": "PASS",
+    "open trios.app": "relaunched, /health ok, menu-bar logo present"
+  },
+  "next_options": [
+    "Failure-kind-aware volatility — record auth/rate-limit/network/context-length failure kinds and adjust TTL/interval/max-staleness per kind",
+    "Per-conversation provider/model pinning — constrain adaptive warmup and failover within user-pinned boundaries per chat thread",
+    "Predictive warmup budget cap — track probe spend and cap daily/weekly budget, deprioritizing probes when close"
+  ],
+  "learnings": [
+    "Serving a stale cached winner immediately while refreshing asynchronously removes synchronous probe latency without sacrificing safety, as long as the same breaker/quota gates apply to stale entries.",
+    "A dedicated coalescing actor with a single Task prevents duplicate background refreshes and probe-spend amplification on rapid sends.",
+    "Using a lazy var for the refresher avoids Swift initialization-order errors when the actor needs a reference to the store during init.",
+    "Background refresh should update the cache for future sends only, not switch the active model mid-response, to keep UI and volatility attribution deterministic."
+  ]
+}

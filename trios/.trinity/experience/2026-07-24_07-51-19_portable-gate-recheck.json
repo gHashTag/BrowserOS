@@ -1,0 +1,24 @@
+{
+  "timestamp": "2026-07-24T07:51:19Z",
+  "task_id": "TRIOS-PORTABLE-LAND-001",
+  "claim_id": "989F8151-6640-44B4-AFE1-FEEB17078EF2",
+  "action": "portable_landing_gate_recheck",
+  "result": "BLOCKED",
+  "evidence": {
+    "command": "Read instructions, claim, queue, latest handoff, dirty tree, branch topology, Trinity dependency status, and mesh commit reachability",
+    "exit_code": 0,
+    "artifact": "feat/zai-provider@cd87482c2ead",
+    "facts": [
+      "No new user selection exists for the three mutually exclusive portability designs.",
+      "The canonical integration branch remains dev and no master branch is used.",
+      "The Trinity checkout still has a modified Queen package manifest and untracked Queen integration APIs.",
+      "No remote branch contains mesh commit 27a76f21e3935b8ffe2e89e517a1f2821673c25f.",
+      "The product dirty tree is unchanged from the prior gate audit."
+    ]
+  },
+  "residual_risks": [
+    "A clean-machine source build remains unreproducible.",
+    "Commit, push, and merge remain unsafe until one dependency design is selected.",
+    "Portable tracked agent skill and handoff packaging remain pending behind the design gate."
+  ]
+}

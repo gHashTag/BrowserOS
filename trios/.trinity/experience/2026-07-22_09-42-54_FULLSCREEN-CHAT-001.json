@@ -1,0 +1,20 @@
+{
+  "task_id": "FULLSCREEN-CHAT-001",
+  "claim_id": "3BA24664-639A-44A6-B7EA-4A1ED458A187",
+  "timestamp": "2026-07-22T09:42:54Z",
+  "action": "build_verify_learn",
+  "result": "clean",
+  "problem": "TriOS kept the narrow companion-panel chat layout at desktop and full-screen widths, leaving no persistent task history and producing an excessively wide conversation surface.",
+  "solution": "An adaptive workspace now switches at 760 points to a ChatGPT-like layout with a collapsible searchable task-history sidebar and a centered 900-point conversation column. The compact layout and the existing ChatPanelView remain the single chat implementation.",
+  "verification": {
+    "layout_tests": "PASS",
+    "swift_build": "PASS",
+    "compiled_swift_files": 63,
+    "code_signature": "PASS",
+    "live_health": {"status": "ok", "cdpConnected": true},
+    "diff_check": "PASS",
+    "visual_fullscreen_capture": "/private/tmp/trios-fullscreen-chat.png",
+    "visual_compact_capture": "/private/tmp/trios-compact-final.png"
+  },
+  "lesson": "A desktop chat should adapt around one canonical conversation view. History navigation belongs in a width-aware workspace shell, while message rendering, streaming, and the composer remain shared across compact and full-screen modes."
+}

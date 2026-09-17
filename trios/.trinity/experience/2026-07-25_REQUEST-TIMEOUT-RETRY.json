@@ -1,0 +1,44 @@
+{
+  "title": "REQUEST-TIMEOUT-RETRY",
+  "date": "2026-07-25",
+  "ring": ["SR-01", "SR-02", "BrowserOS server"],
+  "agents": ["claude"],
+  "road": "A",
+  "summary": "Fixed reported request timeouts by adding Swift client retry with exponential backoff across SSE, A2A, and MCP calls, surfacing detailed errors in the chat UI, and hardening BrowserOS server DB services against transient PostgreSQL connection crashes.",
+  "problem": "User reported request timeouts and asked for automatic refetch/retry plus detailed error messages.",
+  "root_cause": [
+    "Bun server crashed from unhandled pg 'Connection terminated unexpectedly' errors in PgAgentStore and pg.Pool clients.",
+    "Swift clients (SSE, A2A, MCP) had no retry policy, so any transient network or server failure caused a long hang and a generic timeout message."
+  ],
+  "fix": [
+    "Created rings/SR-01/NetworkRetryPolicy.swift with configurable NetworkRetrier (maxAttempts=3, exponential backoff).",
+    "Wrapped SSETransport.sendMessage, A2ARegistryClient data calls, and TriosMCPClient.callTool in the retrier.",
+    "Expanded TransportError, A2AError, MCPError with URL, statusCode, body sample, and attempt count.",
+    "Added ChatViewModel.formatRequestError to unwrap RetryError, URLError, and transport errors into detailed chat UI messages.",
+    "Added pg pool/client 'error' event handlers in chat-history-service.ts, task-queue-service.ts, and pg-agent-store.ts to prevent process crashes.",
+    "Added query retry wrappers in chat-history-service.ts and task-queue-service.ts for connection-terminated/timeout/socket errors."
+  ],
+  "files_changed": [
+    "rings/SR-01/NetworkRetryPolicy.swift",
+    "rings/SR-01/SSETransport.swift",
+    "rings/SR-02/A2ARegistryClient.swift",
+    "rings/SR-02/ChatViewModel.swift",
+    "BR-OUTPUT/TriosMCPClient.swift",
+    "packages/browseros-agent/apps/server/src/api/services/a2a/pg-agent-store.ts",
+    "packages/browseros-agent/apps/server/src/api/services/chat-history-service.ts",
+    "packages/browseros-agent/apps/server/src/api/services/task-queue-service.ts"
+  ],
+  "tests": [
+    "curl POST /chats, POST /tasks, GET /a2a/agents all return OK",
+    "./build.sh PASS with no Swift 6 concurrency warnings",
+    "bash tests/swift/run_queen_autonomous_test.sh PASS",
+    "trios.app relaunched; menu-bar logo present"
+  ],
+  "learnings": [
+    "Idle PostgreSQL connection teardown must be caught at both pool.on('error') and client.on('error') in Bun services; unhandled events crash the entire process and manifest as client-side timeouts.",
+    "Swift 6 Sendable closures require captured URLRequest values to be copied to let constants before passing to @Sendable retry blocks to avoid 'captured var in concurrently-executing code' warnings.",
+    "When users see 'timeout', they often need two things: (1) retry transparently so transient failures recover automatically, and (2) if recovery fails, show the URL, code, attempts, and raw body so the underlying cause is visible.",
+    "A shared NetworkRetrier with retryable error predicates keeps SSE, A2A, and MCP retry logic consistent and testable."
+  ],
+  "related_episodes": ["2026-07-25_BROWSEROS-BACKEND-ACTIVATION"]
+}

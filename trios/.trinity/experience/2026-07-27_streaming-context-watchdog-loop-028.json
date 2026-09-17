@@ -1,0 +1,42 @@
+{
+  "date": "2026-07-27",
+  "title": "Streaming Context Watchdog — Cycle 28",
+  "ring": "SR-00 / SR-01 / SR-02 / BR-OUTPUT",
+  "agent": "claude",
+  "road": "B",
+  "problem": "Cycle 27 added pre-send context-length routing, but once a request was in flight the assistant response could still grow until it hit maxOutputTokens or the remaining context budget mid-stream. The streaming pipeline had no watchdog: it would keep appending tokens, silently truncate, or fail with an opaque provider error. There was no warning as the response approached the limit, no pause to let the user choose how to continue, and no way to continue on a larger model or summarize the partial output.",
+  "root_cause": "ChatViewModel.executeStream consumed SSE deltas unconditionally. ModelContextService existed but was only consulted before sending. ConversationState had no .awaitingContextDecision state, so the UI could not show action buttons while paused. ModelConfigurationStore had no persisted toggle for watchdog behavior.",
+  "fix": "Added StreamingContextWatchdog actor with cheap utf8.count/4 token estimates, configurable warning/pause ratios (80%/95% output, 90%/98% total), and StreamingContextDecision .ok/.approachingLimit/.limitReached with .continueOnLargerModel/.summarizeSoFar/.stopHere actions. Extended ConversationState with .awaitingContextDecision and updated ConversationStateMachine transitions. Wired executeStream to beginStream with the model profile and pendingEstimatedInputTokens, feed text/reasoning deltas to the watchdog, and pause the stream on .limitReached while preserving accumulated partial text. Added continueStreamOnLargerModel, summarizeStreamSoFar, and stopStreamAndKeepPartial actions. Added ModelConfigurationStore.isStreamingContextWatchdogEnabled (default true, persisted) and a toggle in ModelsTabView. Added a paused-stream action bar in ChatPanelView. Extended ModelContextService with largerModelCandidates ranking and ModelConfigurationStore.selectLargerModelCandidate. Added StreamingContextWatchdogTests covering ok, warning, output pause, total-context pause, re-pause, reset, and ratio clamping.",
+  "files": [
+    "trios/rings/SR-00/StreamingContextWatchdog.swift",
+    "trios/rings/SR-00/ModelContextService.swift",
+    "trios/rings/SR-00/ModelConfigurationStore.swift",
+    "trios/rings/SR-01/ChatEvents.swift",
+    "trios/rings/SR-02/ConversationStateMachine.swift",
+    "trios/rings/SR-02/ChatViewModel.swift",
+    "trios/BR-OUTPUT/ChatPanelView.swift",
+    "trios/BR-OUTPUT/ModelsTabView.swift",
+    "trios/tests/TriOSKitTests/StreamingContextWatchdogTests.swift",
+    ".claude/plans/trios-cycle28-streaming-context-watchdog-loop-028.md",
+    ".claude/plans/trios-cycle28-streaming-context-watchdog-loop-028-report.md",
+    ".trinity/specs/streaming-context-watchdog.md"
+  ],
+  "tests": {
+    "build_sh": "PASS",
+    "cargo_test_workspace": "101 passed",
+    "cargo_clippy": "PASS",
+    "clade_audit": "0 findings",
+    "clade_seal": "SEAL VALID",
+    "clade_e2e": "PASS",
+    "swift_test": "UNAVAILABLE (CommandLineTools-only environment)"
+  },
+  "episode": ".trinity/experience/2026-07-27_streaming-context-watchdog-loop-028.json",
+  "plan": ".claude/plans/trios-cycle28-streaming-context-watchdog-loop-028.md",
+  "report": ".claude/plans/trios-cycle28-streaming-context-watchdog-loop-028-report.md",
+  "next_options": [
+    "Mid-stream summary memory — persist the partial summary produced by Summarize so far as durable memory",
+    "Adaptive watchdog thresholds — learn per-(provider, model) effective output limits from finish_reason=length and adjust pause ratios",
+    "Streaming token budget UI — show a live output/token budget progress bar next to the streaming indicator"
+  ],
+  "claim": "claim-STREAMING-WATCHDOG-028"
+}

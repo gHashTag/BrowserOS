@@ -1,0 +1,24 @@
+{
+    "date": "2026-07-27",
+    "title": "Pin-Aware Send-Button Guardrails - Cycle 39 Closure",
+    "ring": "SR-02 / BR-OUTPUT",
+    "agents": "claude",
+    "road": "B",
+    "problem": "Cycle 38 made the Models tab reflect a per-conversation provider/model/baseURL pin, but the composer send button still behaved as if the global default were in charge. When the pinned model could not fit the draft or the requested output budget, the user got a generic disabled state or silent clamping with no mention of the pin and no inline escape hatch.",
+    "root_cause": "ChatViewModel already knew the pinned tuple via conversationModelConstraint, but it never compared that tuple's advertised profile against the current draft or output budget. ChatPanelView only gated sending on isDraftContextLimitExceeded and offered no one-tap way to clear the pin from the composer.",
+    "fix": "Added pinnedSendLimitReason and isPinnedModelSendBlocked to ChatViewModel. The reason is built from the pinned model's advertised profile, the draft token estimate, and the effective requested output tokens, naming the provider and model and distinguishing context-window vs output-ceiling violations. Wired the flag into ChatPanelView.sendButtonDisabled and sendButtonHelpText so the disabled tooltip explains the pin. Added a blue Clear pin & send capsule that calls clearConversationModelOverride() and immediately triggers sendMessage(), keeping the user in the composer flow.",
+    "files": [
+        "trios/rings/SR-02/ChatViewModel.swift",
+        "trios/BR-OUTPUT/ChatPanelView.swift",
+        "trios/.claude/plans/trios-cycle39-pin-aware-send-button-guardrails.md",
+        "trios/.claude/plans/trios-cycle39-pin-aware-send-button-guardrails-report.md",
+        "trios/.trinity/experience/2026-07-27_pin-aware-send-button-guardrails-loop-039.json"
+    ],
+    "tests": "TRIOS_SKIP_CHAT_E2E=1 ./build.sh PASS; cargo test -p trios-mesh PASS (101 tests); TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-build PASS; TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-audit PASS (0 hard-gate findings); TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-seal SEAL VALID. swift test unavailable in CommandLineTools-only environment. Chat integration tests skipped because a pre-existing memory database schema version 4 assertion in the e2e harness fails in this environment.",
+    "next_options": [
+        "Conversation-level learned-limit reset - add a menu action to clear the learned context/output ceilings for the current conversation only, without resetting the global StreamingContextLimitLearner history.",
+        "Output-budget progress during streaming - render a live progress indicator inside the streaming assistant message showing consumed output tokens vs. the effective budget/ceiling, with color bands and approaching-limit warnings.",
+        "Pin-aware draft context badge - extend the composer draft utilization badge to explicitly read Pinned model: X% of usable context with a pin icon, making it clear the bands are evaluated against the pinned tuple."
+    ],
+    "claim": null
+}

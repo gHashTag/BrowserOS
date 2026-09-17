@@ -1,0 +1,45 @@
+{
+  "schemaVersion": "mimosa-finding-history/v1",
+  "runId": "20260829T074312601Z-22760-c24555360037",
+  "runStatus": "inconclusive",
+  "errors": [
+    "bash-discovery:trios/.worktrees/prod/queen-5002/trios/agent-server/apps/agent/entrypoints/app/ai-settings/ProviderTemplatesSection.tsx: bash_discovery_incomplete: project enumeration exceeded 5000 reviewable files",
+    "baseline:trios/.worktrees/prod/queen-5002/trios/agent-server/apps/agent/entrypoints/app/ai-settings/ProviderTemplatesSection.tsx: baseline_partial: baseline exceeded 5000 candidate files",
+    "scan:trios/agent-server/apps/server/tests/api/request-auth.test.ts: scanner_failed: spawnSync /Users/playra/.nvm/versions/node/v22.22.0/bin/node ETIMEDOUT",
+    "scan:trios/agent-server/apps/server/src/api/utils/request-auth.ts: scanner_failed: spawnSync /Users/playra/.nvm/versions/node/v22.22.0/bin/node ETIMEDOUT",
+    "scan:trios/agent-server/apps/server/src/api/utils/require-local-auth.ts: scanner_failed: spawnSync /Users/playra/.nvm/versions/node/v22.22.0/bin/node ETIMEDOUT"
+  ],
+  "target": ".",
+  "revision": "f6b494ed42acdf8f6f3316abed7094a60ce594e9",
+  "diffHash": "d172a75d227bd15b5a528f76e7ee42d2e176af5a62986f0851720833a9196bf8",
+  "rulesVersion": "unavailable",
+  "recordedAt": "2026-08-29T07:43:12.601Z",
+  "timing": {
+    "startedAt": "2026-08-29T07:43:10.168Z",
+    "completedAt": "2026-08-29T07:43:12.601Z",
+    "durationMs": 2433
+  },
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "total": 0,
+    "modelCalls": 0,
+    "measurement": "known-zero"
+  },
+  "findings": {
+    "total": 0,
+    "bySeverity": {},
+    "byStatus": {}
+  },
+  "coverage": {
+    "status": "partial",
+    "reasonCounts": {
+      "bash_discovery_incomplete": 1,
+      "baseline_partial": 1,
+      "scanner_failed": 3,
+      "project_check_failed": 5
+    }
+  },
+  "evidenceBoundary": "static_only",
+  "immutableReport": ".mimosa/reports/task-review-sess_2c244a44-c950-44f1-91c3-11aa8d7a76e9-20260829T074312601Z-22760-c24555360037.json"
+}

@@ -1,0 +1,22 @@
+{
+  "timestamp": "2026-07-24T08:11:52Z",
+  "task_id": "TRIOS-PORTABLE-LAND-001",
+  "claim_id": "989F8151-6640-44B4-AFE1-FEEB17078EF2",
+  "action": "scroll_geometry_and_request_contract_tdd_red",
+  "result": "EXPECTED_RED",
+  "evidence": {
+    "command": "bash tests/swift/run_chat_sse_e2e.sh",
+    "exit_code": 1,
+    "artifact": "desired scroll-policy API test before production implementation",
+    "facts": [
+      "Compilation failed only because ChatScrollPolicy and the consumable SmoothScrollManager API do not yet exist in the compiled application dependency closure.",
+      "The test defines near-bottom, away-from-bottom, short-content, request-sequence, and animation-policy contracts.",
+      "The existing UI manager remains outside the testable ring closure and still has no ScrollViewProxy consumer."
+    ]
+  },
+  "root_cause": "The UI stores an offset as if it were viewport height and emits an internal trigger that no view observes.",
+  "residual_risks": [
+    "Production scroll behavior is intentionally unchanged at this RED checkpoint.",
+    "Terminal streaming flags remain a separate blocker."
+  ]
+}

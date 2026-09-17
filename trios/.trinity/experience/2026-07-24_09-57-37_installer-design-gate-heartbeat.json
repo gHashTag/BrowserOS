@@ -1,0 +1,23 @@
+{
+  "timestamp": "2026-07-24T09:57:37Z",
+  "task_id": "TRIOS-PORTABLE-LAND-001",
+  "claim_id": "989F8151-6640-44B4-AFE1-FEEB17078EF2",
+  "action": "one_command_installer_design_gate_and_automation_sync",
+  "result": "BLOCKED",
+  "evidence": {
+    "command": "Read current instructions, claim, queue, handoff, dirty tree and refs; update heartbeat automation to the user's selected one-command strategy",
+    "exit_code": 0,
+    "artifact": "def368fc98eec80a6c6617d32b06df1690f883ac",
+    "facts": [
+      "The user selected cross-repository one-command source installation.",
+      "The design currently waits for the managed source location choice.",
+      "The automation no longer asks the user to reselect the already chosen release strategy.",
+      "No product or installer code, commit, push, or merge was performed.",
+      "Foreign dirty and untracked work remains untouched."
+    ]
+  },
+  "residual_risks": [
+    "The full installer design is not yet user-approved.",
+    "Published Queen and mesh inputs remain unavailable."
+  ]
+}

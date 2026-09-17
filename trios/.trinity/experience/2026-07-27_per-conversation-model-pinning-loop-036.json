@@ -1,0 +1,25 @@
+{
+    "date": "2026-07-27",
+    "title": "Per-Conversation Model/Provider Pinning — Cycle 36 Closure",
+    "ring": "SR-00 / SR-01 / SR-02 / BR-OUTPUT",
+    "agents": "claude",
+    "road": "B",
+    "problem": "Cycle 35 made the composer draft budget-aware and Cycle 34 gave each conversation its own requestedOutputTokens and contextWindowMargin, but the active provider/model/baseURL remained a single global selection. Switching between chat threads forced the user to manually re-select the right provider and model every time.",
+    "root_cause": "ModelConfigurationStore persisted exactly one selectedProvider, selectedModel, and baseURL. ChatViewModel loaded per-conversation settings for budget and margin, but ConversationSettings had no provider/model fields and there was no path to apply a conversation-specific selection on switch.",
+    "fix": "Extended ConversationSettings in trios/rings/SR-01/ChatProtocols.swift with optional provider, baseURL, and model fields (nil means use the global default). Added effective accessors, hasConversationModelOverride, setConversationModelOverride(provider:baseURL:model:), and clearConversationModelOverride() to ChatViewModel. On performConversationSwitch, applyConversationModelOverrideIfNeeded() calls modelStore.applySelection without mutating the persisted global default, so switching away leaves the global selection intact. The composer draft context status uses the effective model/provider. Added a This conversation section to ChatPanelView.composerStatusControl with Pin current model to conversation and Clear conversation pin actions. The composer label shows a pin emoji and the help tooltip distinguishes global vs. pinned scope. ConversationPersister already encrypts ConversationSettings via ConversationEncryption.shared; new Codable fields roundtrip automatically.",
+    "files": [
+        "trios/rings/SR-01/ChatProtocols.swift",
+        "trios/rings/SR-02/ChatViewModel.swift",
+        "trios/BR-OUTPUT/ChatPanelView.swift",
+        "trios/tests/TriOSKitTests/ConversationEncryptionTests.swift",
+        "trios/.claude/plans/trios-cycle36-per-conversation-model-pinning-report.md",
+        "trios/.trinity/experience/2026-07-27_per-conversation-model-pinning-loop-036.json"
+    ],
+    "tests": "TRIOS_SKIP_CHAT_E2E=1 ./build.sh PASS; cargo test -p trios-mesh PASS (101 tests); TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-build PASS; TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-audit PASS (0 hard-gate findings); TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-seal SEAL VALID. swift test unavailable in CommandLineTools-only environment. trios.app should be relaunched from the user terminal with `open trios.app` because the agent shell lacks Aqua/GUI access.",
+    "next_options": [
+        "Conversation-level learned-limit reset — add a menu action to clear the learned context/output ceilings for the current conversation only, without resetting the global StreamingContextLimitLearner history.",
+        "Output-budget progress during streaming — render a live progress indicator inside the streaming assistant message showing consumed output tokens vs. the effective budget/ceiling, with color bands and approaching-limit warnings.",
+        "Pinned-model warmup/failover guardrails — when a conversation has a pinned provider/model/baseURL, constrain adaptive warmup and cross-provider failover to that tuple, and surface a banner when the global default is being overridden by a conversation pin."
+    ],
+    "claim": null
+}

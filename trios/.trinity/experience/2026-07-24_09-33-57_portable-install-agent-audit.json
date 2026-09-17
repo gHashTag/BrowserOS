@@ -1,0 +1,22 @@
+{
+  "timestamp": "2026-07-24T09:33:57Z",
+  "task_id": "TRIOS-PORTABLE-LAND-001",
+  "claim_id": "989F8151-6640-44B4-AFE1-FEEB17078EF2",
+  "action": "independent_portable_install_audit",
+  "result": "BLOCKED_BY_UNPUBLISHED_DEPENDENCIES",
+  "evidence": {
+    "reviewer": "portable_install_audit",
+    "facts": [
+      "origin/dev was the canonical remote trunk before local landing.",
+      "Published Trinity does not provide the QueenUILib product or the Integration APIs imported by TriOS.",
+      "The trios-mesh gitlink 27a76f21e3935b8ffe2e89e517a1f2821673c25f is not advertised by its remote.",
+      "The app depends on the BrowserOS companion source tree and is not a self-contained copied bundle.",
+      "The current ad-hoc signature is valid for development but is not a notarized distribution identity.",
+      "Keychain ThisDeviceOnly secrets and the memory database cannot be migrated independently."
+    ]
+  },
+  "residual_risks": [
+    "A remote-only clean install will fail until Queen and mesh commits are published or vendored.",
+    "Binary distribution still needs a stable runtime layout, Developer ID signing, and notarization."
+  ]
+}

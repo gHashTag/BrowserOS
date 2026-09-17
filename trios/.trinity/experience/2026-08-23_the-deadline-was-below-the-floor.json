@@ -1,0 +1,52 @@
+{
+  "id": "2026-08-23_the-deadline-was-below-the-floor",
+  "date": "2026-08-23",
+  "ring": "SR-00",
+  "branch": "feat/queen-supervisor",
+  "title": "Seven rounds tuned machinery around a two-second deadline nobody had checked against the operation it bounds",
+  "severity": "high",
+  "agent": "Queen",
+  "problem": "Every launch for weeks produced keychain.read.stalled, and the longest incident held the app for 286 seconds. Seven rounds treated it as contention, cooldown, pile-up or queue saturation. The cost of the operation being timed had never been measured.",
+  "root_cause": "A cold Keychain data read costs seconds to minutes, per item, per process, on first touch. The caller's deadline is two seconds. Measured across all nine generic-password items this app owns: first touch min 1.682s, median 4.684s, max 120.902s, total 161.910s; the same nine warm in the same process total 0.031s. Seven of nine cannot meet the deadline on a cold start. A timeout below the floor is not a timeout; it is a scheduled failure with a plausible message attached.",
+  "findings": [
+    "The expensive call is kSecReturnData, not kSecReturnAttributes. Attributes answer from metadata in about 0.2ms even during a launch; only the data read consults the ACL.",
+    "The cost is per ITEM, not per process. Three distinct items in one fresh process: 65.410s, 4.435s, 3.940s on pass one; 0.070s, 0.011s, 0.012s on pass two.",
+    "Code signing makes no measurable difference: the same probe signed with the app's own identity and unsigned both show the first-touch cost.",
+    "The live split-clock line settles the queue question outright: slot_wait=0.001s against query_time=83.370s. The GCD queue was never the problem.",
+    "The 286-second incident is the sum of these costs plus cooldowns, not a hung securityd. An external probe issuing the identical enumeration during a trios launch answered in 0.2ms."
+  ],
+  "fix": "No behavioural change this round - the finding invalidates the premise of the previous fixes rather than adding another. make keychain-floor makes the measurement repeatable on any machine, reads every item the app owns twice in one process, and reports how many first touches exceed the caller deadline. It prints timings, statuses and byte counts only, never secret material. The read and enumeration paths also now report query_time and slot_wait beside elapsed, so a future stall says which clock it was.",
+  "files_changed": [
+    "tools/keychain_floor.swift",
+    "Makefile",
+    "rings/SR-00/KeychainSecrets.swift",
+    ".claude/skills/unmeasured-cause/SKILL.md"
+  ],
+  "prevention": [
+    "Before tuning any timeout, retry count or cooldown, measure the operation's floor in the conditions the caller sees. If the floor is above the bound, everything downstream of the bound is a consequence rather than a defect.",
+    "Reproducing the WRONG operation quickly is worse than not reproducing it. An attribute read returning in 0.2ms produced a confident wrong conclusion that the block was trios-specific.",
+    "Instrumentation written to confirm a hypothesis is worth shipping even when it refutes it. The clock split was built to prove a queue wait and disproved one.",
+    "First-touch costs hide from every steady-state measurement. Any probe that loops must report pass one separately from the rest."
+  ],
+  "corrections_to_earlier_claims": [
+    "'The block is entirely inside the trios process, not in securityd' - wrong. It reproduces in a plain external binary. I had probed attribute reads, which are not the operation that stalls.",
+    "'elapsed hid a GCD queue wait' - wrong. The live line shows slot_wait=0.001s against query_time=83.370s.",
+    "Rounds five through seven each proposed a fix for the pile-up as though the pile-up were the cause. The pile-up is real and the guards are sound, but it is a consequence of a deadline set below the operation's floor."
+  ],
+  "not_verified": [
+    "Why a first touch costs what it does. The measurement is solid and the mechanism is not identified - ACL evaluation is the hypothesis and it has not been proved.",
+    "keychain.read.not_restacked, keychain.enumeration.not_restacked and keychain.read.starved_out still have no live occurrence.",
+    "make check did not return a verdict this round; it sat in the harness-lock queue. The e2e portion ran clean at 54 suites, 0 failures."
+  ],
+  "related_episodes": [
+    "2026-08-23_all-three-listings-stacked-and-a-starved-queue-billed-the-keychain",
+    "2026-08-23_the-cooldown-paced-the-pileup-it-was-meant-to-prevent"
+  ],
+  "tags": [
+    "unmeasured-cause",
+    "keychain",
+    "timeout-below-floor",
+    "first-touch-cost",
+    "measurement-tooling"
+  ]
+}

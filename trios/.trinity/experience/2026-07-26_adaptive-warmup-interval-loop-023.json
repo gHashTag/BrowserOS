@@ -1,0 +1,73 @@
+{
+  "title": "Adaptive Warmup Interval and Staleness Tuning — Cycle 23 Closure",
+  "date": "2026-07-26",
+  "project": "trios",
+  "ring": "SR-00 / SR-02 / BR-OUTPUT",
+  "agents": ["claude"],
+  "road": "B",
+  "summary": "Closed Cycle 23 by adding an adaptive layer on top of the Cycle 22 predictive warmup cache/scheduler. A new WarmupVolatilityTracker actor records per-(provider, baseURL, model) success/failure outcomes and recommends TTL and scheduler interval based on recent failure rate. PredictiveWarmupCache now supports per-record TTL and remaining-ttl queries; PredictiveWarmupScheduler can restart with a new interval at runtime. ModelConfigurationStore owns the published TTL/interval settings (persisted to UserDefaults) and runs an adaptive warmup cadence. ChatViewModel records real send outcomes back into the volatility tracker. UI steppers and cache-freshness/failure-rate badges were added to ModelsTabView. All Trinity gates passed and trios.app relaunched with the logo present.",
+  "files_created": [
+    "trios/rings/SR-00/WarmupVolatilityTracker.swift",
+    "trios/tests/TriOSKitTests/WarmupVolatilityTrackerTests.swift",
+    ".claude/plans/trios-cycle23-adaptive-warmup-interval-loop-023.md",
+    ".claude/plans/trios-cycle23-adaptive-warmup-interval-loop-023-report.md"
+  ],
+  "files_modified": [
+    "trios/rings/SR-00/PredictiveWarmupCache.swift",
+    "trios/rings/SR-00/PredictiveWarmupScheduler.swift",
+    "trios/rings/SR-00/ModelConfigurationStore.swift",
+    "trios/rings/SR-02/ChatViewModel.swift",
+    "trios/BR-OUTPUT/ModelsTabView.swift",
+    "trios/tests/TriOSKitTests/PredictiveWarmupCacheTests.swift",
+    "trios/tests/TriOSKitTests/PredictiveWarmupSchedulerTests.swift",
+    "trios/.trinity/experience.md"
+  ],
+  "commands_run": [
+    "bash build.sh",
+    "cargo test --workspace",
+    "cargo clippy --workspace",
+    "cargo run --bin clade-audit",
+    "cargo run --bin clade-seal",
+    "cargo run --bin clade-e2e",
+    "open trios.app"
+  ],
+  "results": {
+    "swift_build": "PASS",
+    "swift_integration_tests": "PASS",
+    "cargo_test_workspace": "PASS",
+    "cargo_clippy_workspace": "PASS",
+    "clade_audit": "0 hard-gate findings",
+    "clade_seal": "SEAL VALID",
+    "clade_e2e": "PASS",
+    "trios_app": "relaunched, menu-bar logo present"
+  },
+  "learnings": [
+    "Adaptive TTL should be driven by actual observed outcomes, not by static configuration, or the cache will expire many times before the next scheduled refresh.",
+    "A bounded rolling window per candidate keeps memory use constant and lets the system respond to recent volatility without overreacting to ancient failures.",
+    "Restarting the scheduler with a new interval is safer when it first stops the old Task cleanly and resets the sleep boundary.",
+    "Closing the feedback loop in ChatViewModel (recording whether the cached winner succeeded or failed) is what makes the volatility tracker useful; otherwise it stays at zero forever.",
+    "UI controls need immediate SwiftUI .onChange handlers that persist to UserDefaults; published defaults must be loaded from UserDefaults at init to avoid resetting on every cold start."
+  ],
+  "remaining_weak_spots": [
+    "Volatility history is in-memory only; app restarts reset the tracker.",
+    "Chat still waits synchronously if no fresh cached winner exists; stale-while-revalidate is not implemented.",
+    "There is no per-conversation provider/model pinning; adaptive suggestions may propose a model the user did not intend for a given thread."
+  ],
+  "next_options": [
+    {
+      "id": "cycle-24-volatility-persistence",
+      "label": "Persist volatility history to agent-memory",
+      "description": "Store per-candidate outcome windows in encrypted agent-memory.sqlite3 so the tracker survives restarts and can learn across sessions."
+    },
+    {
+      "id": "cycle-24-stale-while-revalidate",
+      "label": "Stale-while-revalidate send path",
+      "description": "Allow ChatViewModel to return a slightly stale cached winner immediately while kicking off an async refresh, cutting synchronous probe latency to zero."
+    },
+    {
+      "id": "cycle-24-conversation-pinning",
+      "label": "Per-conversation provider/model pinning",
+      "description": "Add a thread-level model/provider preference so adaptive warmup only pre-warms and falls back within user-defined boundaries."
+    }
+  ]
+}
