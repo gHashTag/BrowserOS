@@ -866,6 +866,87 @@ export function resolveWorkerProvider(
   return null
 }
 
+/**
+ * Every credential lane a one-shot REVIEW may use right now, across every
+ * connected pool and every legacy provider that holds a key.
+ *
+ * Additive, and it reads the allocator's own inputs rather than restating
+ * them: the pools, the keys, the lanes per credential and the durable
+ * `key_index` numbering are exactly the ones `resolveWorkerProvider` hands to
+ * bees. A lane is offered only while its credential carries fewer requests than
+ * its lane count - so a review never becomes the third concurrent request on a
+ * z.ai key already carrying two bees, which measured 2026-09-15 is refused in
+ * under half a second with `1302`, and a refusal there would be blamed on the
+ * review rather than on the arithmetic.
+ *
+ * Legacy providers after the first are offered too, with no occupancy: bees
+ * only ever run on the FIRST provider that holds a key, so a second vendor's
+ * key is idle by construction - and it is exactly the second model the
+ * adversarial reviewer (#1127) wants. Rehearsal is never offered: a recorded
+ * stream cannot judge anything.
+ */
+export function reviewLaneCandidates(
+  takenKeyIndices: number[] = [],
+): WorkerProvider[] {
+  const busy = (index: number) =>
+    takenKeyIndices.filter((taken) => taken === index).length
+  const out: WorkerProvider[] = []
+  if (configuredWorkerBaseUrl()) {
+    for (const pool of configuredEndpointPools()) {
+      const local = pool.provider === 'ollama'
+      const keys = local
+        ? [keysFor(GENERIC_WORKER_KEY_ENV)[0] || 'local']
+        : pool.keys
+      const laneCount = local ? 1 : configuredRemoteLanesPerCredential()
+      keys.forEach((key, position) => {
+        const durableIndex = (pool.number - 1) * POOL_KEY_STRIDE + position
+        const occupancy = busy(durableIndex)
+        if (occupancy >= laneCount) return
+        out.push({
+          provider: pool.provider,
+          model: pool.model,
+          baseUrl: pool.baseUrl,
+          apiKey: key,
+          keyIndex: durableIndex,
+          keyCount: keys.length,
+          poolNumber: pool.number,
+          laneIndex: occupancy,
+          laneCount,
+          contextWindow: pool.contextWindow,
+        })
+      })
+    }
+    return out
+  }
+  let first = true
+  for (const candidate of WORKER_PROVIDERS) {
+    const keys = keysFor(candidate.envVar)
+    if (keys.length === 0) continue
+    const laneCount = workerLanesFor(candidate.provider)
+    keys.forEach((key, index) => {
+      const occupancy = first ? busy(index) : 0
+      if (occupancy >= laneCount) return
+      out.push({
+        provider: candidate.provider,
+        // The worker model override names a model of the bees' provider;
+        // sent to a second vendor it is a 404 blamed on the review.
+        model: first
+          ? process.env.TRIOS_QUEEN_WORKER_MODEL || candidate.model
+          : candidate.model,
+        apiKey: key,
+        // Only the bees' own provider shares the durable index space; a
+        // second vendor's index would collide with a bee's and mean nothing.
+        keyIndex: first ? index : undefined,
+        keyCount: keys.length,
+        laneIndex: occupancy,
+        laneCount,
+      })
+    })
+    first = false
+  }
+  return out
+}
+
 /** One line naming what is missing, and who can supply it. */
 export function missingProviderRefusal(): string {
   const endpoint = configuredWorkerBaseUrl()
@@ -1031,6 +1112,27 @@ export function baseRef(): string {
  * empty list that came from a clean branch by reading the record.
  */
 export async function committedFiles(issue: number): Promise<string[]> {
+  const result = await committedFilesResult(issue)
+  return result.ok ? result.files : []
+}
+
+/**
+ * The same diff, with the failure kept apart from the empty branch.
+ *
+ * `committedFiles` returns `[]` for both, and the review could therefore not
+ * release an EMPTY attempt without also releasing a BROKEN diff. Measured on
+ * the live board 2026-09-17: of ~180 cards in review only ~41 were live waits,
+ * and most of those were attempts that committed nothing at all - turns killed
+ * by deploy restarts (188 of 541 dispatches in 24h never finished), z.ai
+ * 1302/429 ending a turn within seconds, edits left uncommitted in a reused
+ * worktree. Such an attempt is safe to hand back at once. A diff that FAILED is
+ * not: the branch may carry a finished commit nobody could read, and releasing
+ * it would cut a fresh bee over it. So the two answers are two shapes here,
+ * and `committedFiles` stays the thin wrapper every other caller already uses.
+ */
+export async function committedFilesResult(
+  issue: number,
+): Promise<{ ok: true; files: string[] } | { ok: false; error: string }> {
   const base = baseRef()
   const root = workspaceRoot()
   const out = await run(
@@ -1040,6 +1142,7 @@ export async function committedFiles(issue: number): Promise<string[]> {
     60_000,
   )
   if (out.code !== 0) {
+    const error = out.out.trim().slice(0, 300)
     logger.warn('The committed-file diff failed; no file can be named', {
       issue,
       base,
@@ -1047,14 +1150,98 @@ export async function committedFiles(issue: number): Promise<string[]> {
       root,
       code: out.code,
       // `run` merges the two streams, so git's diagnosis is in `out`.
-      error: out.out.trim().slice(0, 300),
+      error,
     })
-    return []
+    return { ok: false, error: error || `git diff exited ${out.code}` }
   }
-  return out.out
-    .split('\n')
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0)
+  return {
+    ok: true,
+    files: out.out
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0),
+  }
+}
+
+/** A full commit id, or null. `run` trims, so a good answer is exactly 40 hex. */
+function shaFrom(out: { code: number; out: string }): string | null {
+  if (out.code !== 0) return null
+  const sha = out.out.trim()
+  return /^[0-9a-f]{40,64}$/.test(sha) ? sha : null
+}
+
+/**
+ * The commit a bee's branch points at, or null when it cannot be read.
+ *
+ * Half of the reviewer's cache key: an adversarial review is a paid model call,
+ * and a `wait` row is re-read every round. A verdict about a head that has not
+ * moved is still a verdict about the same work, so it is reused rather than
+ * bought again.
+ */
+export async function branchHeadSha(issue: number): Promise<string | null> {
+  return shaFrom(
+    await run(
+      'git',
+      ['rev-parse', '--verify', `queen-${issue}^{commit}`],
+      workspaceRoot(),
+      30_000,
+    ),
+  )
+}
+
+/** The commit the base ref points at - the other half of the cache key. */
+export async function baseHeadSha(): Promise<string | null> {
+  return shaFrom(
+    await run(
+      'git',
+      ['rev-parse', '--verify', `${baseRef()}^{commit}`],
+      workspaceRoot(),
+      30_000,
+    ),
+  )
+}
+
+/**
+ * What the branch changed, as a patch a reviewer can cite line by line.
+ *
+ * Bounded, and the bound is SAID: a patch silently cut at N characters reads
+ * as a patch that ends there, and a reviewer told nothing would judge the
+ * missing half as absent work. The marker names how much was dropped so the
+ * reviewer answers could-not-check for what it cannot see. Null when the diff
+ * fails, for the same reason `committedFilesResult` keeps failure apart.
+ */
+export async function branchPatch(
+  issue: number,
+  maxChars: number,
+): Promise<string | null> {
+  const out = await run(
+    'git',
+    ['diff', '--no-color', `${baseRef()}...queen-${issue}`],
+    workspaceRoot(),
+    60_000,
+  )
+  if (out.code !== 0) return null
+  if (out.out.length <= maxChars) return out.out
+  const dropped = out.out.length - maxChars
+  return `${out.out.slice(0, maxChars)}\n[truncated ${dropped} chars]`
+}
+
+/**
+ * How many uncommitted paths the issue's worktree holds, or null when there is
+ * no worktree or git cannot read it.
+ *
+ * An attempt that committed nothing may still have EDITED something - the
+ * measured case is a turn that ran out before `git commit`. The count goes on
+ * the record so an operator can tell "did nothing" from "did not commit", and
+ * nothing is cleaned: a redispatch reuses this worktree (`prepareWorktree`), so
+ * the next bee finds the leftovers where the last one stopped.
+ */
+export async function worktreeDirtCount(issue: number): Promise<number | null> {
+  const path = `${workspaceRoot()}/.worktrees/queen-${issue}`
+  if (!pathExists(path)) return null
+  const dirty = await run('git', ['status', '--porcelain'], path, 60_000)
+  if (dirty.code !== 0) return null
+  return dirty.out.split('\n').filter((l) => l.trim().length > 0).length
 }
 
 /** The same measurement, counted. One rule, asked two ways. */
