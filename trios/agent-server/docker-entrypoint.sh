@@ -95,18 +95,22 @@ if [ -d "$REPO_DIR/.git" ]; then
       # in worktrees; this tree is only ever read). They are set aside, never
       # discarded: `git stash` keeps them recoverable, `reset --hard` would not,
       # and nothing here is allowed to destroy work it did not write.
-      dirty=$($AS_USER "git -C '$REPO_DIR' status --porcelain" | wc -l | tr -d ' ')
+      dirty=$($AS_USER "git -C '$REPO_DIR' status --porcelain --untracked-files=no" | wc -l | tr -d ' ')
       echo "[entrypoint] checkout blocked by $dirty uncommitted path(s); stashing them"
       # The exit code of the stash is not the question - the first run of this
       # said "stash failed" under a "Saved working directory" line. What matters
       # is whether the tree came out CLEAN, so that is what is read, and when it
       # did not, the paths still in the way are printed instead of guessed at.
-      $AS_USER "git -C '$REPO_DIR' stash push --include-untracked \
+      # TRACKED FILES ONLY. `--include-untracked` made git try to stash
+      # `.worktrees/`, the directory every bee's worktree lives in, and it
+      # answered "Aborting" - so the stash saved nothing and the retry refused
+      # with the same paths. Untracked files never block `checkout -B` anyway.
+      $AS_USER "git -C '$REPO_DIR' stash push \
         --message 'entrypoint stashed a dirty root checkout'" >/dev/null 2>&1 || true
-      left=$($AS_USER "git -C '$REPO_DIR' status --porcelain" | wc -l | tr -d ' ')
+      left=$($AS_USER "git -C '$REPO_DIR' status --porcelain --untracked-files=no" | wc -l | tr -d ' ')
       if [ "$left" != "0" ]; then
-        echo "[entrypoint] $left path(s) still dirty after the stash:"
-        $AS_USER "git -C '$REPO_DIR' status --porcelain" | head -10
+        echo "[entrypoint] $left tracked path(s) still dirty after the stash:"
+        $AS_USER "git -C '$REPO_DIR' status --porcelain --untracked-files=no" | head -10
       fi
       $AS_USER "git -C '$REPO_DIR' checkout -B '$TRIOS_REPO_REF' FETCH_HEAD" \
         || echo "[entrypoint] checkout still failed; continuing on the existing tree"
