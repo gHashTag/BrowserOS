@@ -16,6 +16,7 @@ import {
   type CriterionRun,
   commandSafety,
   criteriaWitness,
+  type ExecResult,
   isSafeCommand,
   measureCriteria,
   measurementLines,
@@ -1035,5 +1036,427 @@ describe('the reviewer may cite a measurement', () => {
       expect(at).toBeGreaterThan(begin)
       expect(at).toBeLessThan(end)
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The second review round: what the machine may and may not conclude.
+
+/** A checkout with a `t27c` on PATH that behaves as the script says. */
+function checkoutWithCompiler(script: string): string {
+  const dir = mkdtempSync(join(tmpdir(), 'queen-criteria-diag-'))
+  mkdirSync(join(dir, 'bin'))
+  mkdirSync(join(dir, 'checkout', 'specs'), { recursive: true })
+  writeFileSync(join(dir, 'checkout', 'specs', 'a.t27'), 'fn a() {}\n')
+  writeFileSync(join(dir, 'bin', 't27c'), `#!/bin/sh\n${script}\n`)
+  chmodSync(join(dir, 'bin', 't27c'), 0o755)
+  process.env.PATH = `${join(dir, 'bin')}:/usr/bin:/bin`
+  return dir
+}
+
+const execResult = (over: Partial<ExecResult> = {}): ExecResult => ({
+  code: 0,
+  stdout: '',
+  stderr: '',
+  timedOut: false,
+  capped: false,
+  ...over,
+})
+
+describe('a criterion may assert a compiler diagnostic', () => {
+  const savedPath = process.env.PATH
+  afterEach(() => {
+    process.env.PATH = savedPath
+  })
+
+  it('does not charge the bee for a command that printed what the issue demands', async () => {
+    // The real t27c: `t27c parse <bad spec>` prints the diagnostic and exits
+    // 1, which is the criterion satisfied, not the work refuted.
+    const dir = checkoutWithCompiler(
+      'echo "Error: Parse error: unexpected token"; exit 1',
+    )
+    const [diagnostic] = await runCriterionChecks(
+      [
+        {
+          cmd: "t27c parse specs/a.t27 2>&1 | grep -c 'Parse error'",
+          op: 'equals',
+          expected: '1',
+        },
+      ],
+      { checkoutDir: join(dir, 'checkout') },
+    )
+    expect(diagnostic.output).toBe('1')
+    expect(diagnostic.status).toBe('unrunnable')
+    expect(diagnostic.reason).toContain('t27c parse specs/a.t27 failed')
+    // Nothing unmet, so nothing is charged and nothing is shown as a finding.
+    expect(
+      criteriaWitness([{ number: 1, criterion: 'x', checks: [diagnostic] }]),
+    ).toEqual([])
+
+    // THE CONTROL, #3939's hole: a criterion satisfied by ABSENCE is still
+    // refuted by the compiler's exit, because an error message can print the
+    // passing answer on its own.
+    const [absence] = await runCriterionChecks(
+      [
+        {
+          cmd: "t27c gen specs/a.t27 2>&1 | grep -c 'not yet implemented'",
+          op: 'equals',
+          expected: '0',
+        },
+      ],
+      { checkoutDir: join(dir, 'checkout') },
+    )
+    expect(absence.status).toBe('failed')
+  })
+})
+
+describe('the scratch prefix is refused unless it is spelled', () => {
+  it('reads the same word the rewrite will', async () => {
+    expect(commandSafety('echo a > /tmp/t27-ok').safe).toBe(true)
+    expect(commandSafety('cat /tmp/t27-ok').safe).toBe(true)
+    for (const cmd of [
+      'echo a > /tmp/t27"-"dq',
+      'echo a > /tmp/t27\\-esc',
+      "echo a > /tmp/'t27-'sq",
+      'cat /tmp/t27"-"dq',
+    ]) {
+      const verdict = commandSafety(cmd)
+      expect(verdict.safe).toBe(false)
+      expect(verdict.reason).toContain('quotes or escapes')
+    }
+
+    // And the runner never hands such a command to bash: the write would land
+    // in the container's real /tmp, outside the private directory, at a name
+    // the criterion chose.
+    const argv: string[][] = []
+    const exec = async (request: { argv: string[] }) => {
+      argv.push(request.argv)
+      return execResult()
+    }
+    const runs = await runCriterionChecks(
+      [
+        { cmd: 'echo a > /tmp/t27"-"dq', op: 'equals', expected: '' },
+        { cmd: 'echo a > /tmp/t27-ok', op: 'equals', expected: '' },
+      ],
+      { checkoutDir: '/checkout', scratchDir: '/private/scratch', exec },
+    )
+    expect(runs[0].status).toBe('unrunnable')
+    expect(argv).toEqual([['bash', '-c', 'echo a > /private/scratch/t27-ok']])
+  })
+})
+
+describe('a harness fault is not a fact about the work', () => {
+  it('answers unrunnable when the private directory could not be made', async () => {
+    const dir = '/tmp/queen-criteria-fake'
+    const argv: string[][] = []
+    const exec = async (request: { argv: string[] }) => {
+      argv.push(request.argv)
+      const [program] = request.argv
+      if (program === 'mktemp') return execResult({ stdout: `${dir}\n` })
+      if (program === 'mkdir') {
+        return execResult({
+          code: 1,
+          stderr: 'mkdir: /tmp/queen-criteria-fake/scratch: no such directory',
+        })
+      }
+      // The bee produced nothing to the missing directory, so the pipeline
+      // prints nothing - which, compared, reads as the bee's failure.
+      if (program === 'bash') {
+        return execResult({ code: 1, stderr: 'No such file or directory' })
+      }
+      return execResult()
+    }
+    const measured = await measureCriteria(
+      4251,
+      'a'.repeat(40),
+      [
+        '1. `t27c gen specs/a.t27 > /tmp/t27-gen.zig && grep -c "stub" /tmp/t27-gen.zig` prints `0`',
+      ],
+      { exec, repoRoot: '/repo', tmpRoot: '/tmp' },
+    )
+    expect(measured.ok).toBe(true)
+    if (!measured.ok) return
+    const [check] = measured.criteria[0].checks
+    expect(check.status).toBe('unrunnable')
+    expect(check.reason).toContain('no private directory')
+    expect(argv.some((a) => a[0] === 'bash')).toBe(false)
+  })
+})
+
+describe('a measurement tag means the criterion, not the check', () => {
+  it('tags only the criteria the machine settled', () => {
+    const runs: CriterionRun[] = [
+      {
+        number: 1,
+        criterion: 'half of it ran',
+        checks: [
+          check('grep -c a specs/a.t27', 'passed', '1'),
+          check('wc -l specs/a.t27', 'unrunnable', '', {
+            reason: 'the measurement budget for this commit is spent',
+          }),
+        ],
+      },
+      {
+        number: 2,
+        criterion: 'all of it ran',
+        checks: [check('grep -c b specs/a.t27', 'passed', '1')],
+      },
+    ]
+    const lines = measurementLines(runs)
+    // Criterion 1 is not in `measuredPassed`, so a met citing M1 would be
+    // rejected: it must not be offered as M1 in the first place.
+    expect(criteriaWitness(runs).map((l) => l.number)).toEqual([2])
+    expect(lines.filter((l) => l.includes('[M1]'))).toEqual([])
+    expect(lines.some((l) => l.includes('criterion 1 passed:'))).toBe(true)
+    expect(lines.some((l) => l.includes('criterion 1 not run:'))).toBe(true)
+    expect(lines.some((l) => l.includes('[M2] criterion 2 passed:'))).toBe(true)
+  })
+})
+
+describe('a pass is measured against the merge base too', () => {
+  it('says which criteria were already true before the branch', async () => {
+    const issue = 9301
+    const { root, baseSha, headSha } = beeRepository(issue, {
+      'specs/a.t27': 'fn a() {}\ntest "a" {}\n',
+    })
+    const criteria = [
+      '1. `grep -c "^test " specs/a.t27` prints `1` (today: 0)',
+      '2. the name still exists: `grep -c "fn a" specs/a.t27` prints `1`',
+    ]
+    const tmpRoot = mkdtempSync(join(tmpdir(), 'queen-criteria-base-'))
+    const measured = await measureCriteria(issue, headSha, criteria, {
+      repoRoot: root,
+      tmpRoot,
+      baseSha,
+    })
+    expect(measured.ok).toBe(true)
+    if (!measured.ok) return
+    expect(measured.criteria.map((c) => c.checks[0].status)).toEqual([
+      'passed',
+      'passed',
+    ])
+    // The work the commit did, and the guard that was true all along.
+    expect(measured.criteria[0].basePassed).toBe(false)
+    expect(measured.criteria[1].basePassed).toBe(true)
+    expect(measurementLines(measured.criteria)).toContainEqual(
+      expect.stringContaining('criterion 2 ALSO passed at the merge base'),
+    )
+    // Both worktrees removed, nothing left in the temporary root.
+    const worktrees = git(root, 'worktree', 'list', '--porcelain')
+      .split('\n')
+      .filter((l) => l.startsWith('worktree '))
+    expect(worktrees).toHaveLength(2)
+    expect(readdirSync(tmpRoot)).toEqual([])
+  })
+})
+
+/** A board of several finished rows, for what one sweep may spend. */
+function sweepPoolOf(rows: Row[]) {
+  const pool = {
+    query: async (sql: string, params: unknown[] = []) => {
+      const text = String(sql)
+      if (text.includes('FROM queen_dispatch d')) {
+        const open = rows.filter(
+          (r) => r.review_state == null || r.review_state === 'wait',
+        )
+        return { rowCount: open.length, rows: open }
+      }
+      if (text.includes('SET criteria_fingerprint')) {
+        const row = rows.find((r) => r.issue === params[0])
+        if (row) {
+          row.criteria_fingerprint = params[1]
+          row.criteria_runs = JSON.parse(String(params[2]))
+        }
+      } else if (text.includes('review_state = $2')) {
+        const row = rows.find((r) => r.issue === params[0])
+        if (row) {
+          row.review_state = params[1]
+          row.review_note = params[2]
+        }
+      }
+      return { rowCount: 0, rows: [] }
+    },
+  } as unknown as Pool
+  return { pool }
+}
+
+describe('one sweep may not measure for ever', () => {
+  it('spends a measurement budget, and never ahead of the review it feeds', async () => {
+    const rows = [7101, 7102, 7103, 7104].map((issue) =>
+      finishedRow({ issue, conversation_id: `0000000${issue}` }),
+    )
+    const { pool } = sweepPoolOf(rows)
+    const { deps, measured, calls } = fakes({
+      measurementsPerRound: () => 2,
+      reviewsPerRound: () => 3,
+    })
+    const reviewed = await reviewFinishedDispatches(pool, deps)
+    expect(measured.map((m) => m.issue)).toEqual([7101, 7102])
+    // A row the budget did not reach is not shown to a reviewer that could
+    // only answer could-not-check about a command: it waits, unspent.
+    expect(calls).toHaveLength(2)
+    expect(reviewed.acted.slice(2)).toEqual(['#7103:wait', '#7104:wait'])
+    expect(String(rows[2].review_note)).toContain('not measured this round')
+
+    // And a row that cannot buy a review does not pay for a measurement: the
+    // measurement is evidence FOR the review, and the sweep runs in front of
+    // the dispatcher.
+    const fresh = [7201, 7202, 7203].map((issue) =>
+      finishedRow({ issue, conversation_id: `0000000${issue}` }),
+    )
+    const second = sweepPoolOf(fresh)
+    const budgeted = fakes({
+      measurementsPerRound: () => 9,
+      reviewsPerRound: () => 1,
+    })
+    await reviewFinishedDispatches(second.pool, budgeted.deps)
+    expect(budgeted.measured.map((m) => m.issue)).toEqual([7201])
+  })
+
+  it('does not cache a measurement that established nothing', async () => {
+    const row = finishedRow()
+    const { pool } = sweepPool(row)
+    const nothing: CriterionRun[] = CRITERIA.map((criterion, i) => ({
+      number: i + 1,
+      criterion,
+      checks: [
+        check(`t27c spec-status ${SPEC}`, 'unrunnable', '', {
+          reason: 'a program could not be started: t27c: command not found',
+        }),
+      ],
+    }))
+    const { deps, measured } = fakes({ runs: nothing })
+    await reviewFinishedDispatches(pool, deps)
+    expect(measured).toHaveLength(1)
+    // A repaired image must be able to measure this same commit again.
+    expect(row.criteria_fingerprint ?? null).toBeNull()
+    row.review_state = 'wait'
+    await reviewFinishedDispatches(pool, deps)
+    expect(measured).toHaveLength(2)
+  })
+})
+
+describe('what a measurement may and may not settle', () => {
+  it.if(present)(
+    'lets a terse refusal stand against a passing measurement',
+    async () => {
+      const row = finishedRow()
+      const { pool } = sweepPool(row)
+      const { deps } = fakes({
+        answer: ['## VERDICT', '- 1. M1: met', '- 2. not done: unmet'].join(
+          '\n',
+        ),
+      })
+      // Not accept: the adversary said no about the criterion the machine
+      // passed. Too terse to charge the bee for, so it is a person's.
+      expect((await reviewFinishedDispatches(pool, deps)).acted).toEqual([
+        `#${ISSUE}:escalate`,
+      ])
+      expect(row.send_backs).toBe(0)
+
+      // The control: the same refusal with a reason is a send-back, as before.
+      const stated = finishedRow()
+      const second = sweepPool(stated)
+      const reasoned = fakes({
+        answer: [
+          '## VERDICT',
+          '- 1. M1: met',
+          `- 2. ${SPEC} has no test at all: unmet`,
+        ].join('\n'),
+      })
+      expect(
+        (await reviewFinishedDispatches(second.pool, reasoned.deps)).acted,
+      ).toEqual([`#${ISSUE}:sendBack`])
+      expect(stated.send_backs).toBe(1)
+    },
+  )
+
+  it.if(present)(
+    'will not accept on criteria that were already true at the merge base',
+    async () => {
+      const answer = [
+        '## VERDICT',
+        '- 1. the patch does not show me: could-not-check',
+        '- 2. the patch does not show me: could-not-check',
+      ].join('\n')
+      const base = sweepPool(finishedRow())
+      const baseTrue = runsWith('passed', 'passed').map((run) => ({
+        ...run,
+        basePassed: true,
+      }))
+      expect(
+        (
+          await reviewFinishedDispatches(
+            base.pool,
+            fakes({ answer, runs: baseTrue }).deps,
+          )
+        ).acted,
+      ).toEqual([`#${ISSUE}:escalate`])
+
+      // The control: the same answer over criteria this commit made true is the
+      // accept the measurement exists to make possible.
+      const earned = sweepPool(finishedRow())
+      const madeTrue = runsWith('passed', 'passed').map((run) => ({
+        ...run,
+        basePassed: false,
+      }))
+      expect(
+        (
+          await reviewFinishedDispatches(
+            earned.pool,
+            fakes({ answer, runs: madeTrue }).deps,
+          )
+        ).acted,
+      ).toEqual([`#${ISSUE}:accept`])
+    },
+  )
+
+  it.if(present)(
+    "does not make one criterion's command a citation for another",
+    async () => {
+      // The patch the reviewer was shown does not contain specs/a.t27 - only
+      // criterion 1's measured COMMAND names it.
+      const elsewhere = [
+        'diff --git a/src/other.ts b/src/other.ts',
+        '+const x = 1',
+      ].join('\n')
+      const { pool } = sweepPool(finishedRow())
+      const { deps } = fakes({
+        runs: runsWith('passed', 'passed').slice(0, 1),
+        branchPatch: async () => elsewhere,
+        answer: [
+          '## VERDICT',
+          '- 1. M1: met',
+          `- 2. ${SPEC} adds the test: met`,
+        ].join('\n'),
+      })
+      expect((await reviewFinishedDispatches(pool, deps)).acted).toEqual([
+        `#${ISSUE}:escalate`,
+      ])
+    },
+  )
+})
+
+describe('the criteria are numbered once', () => {
+  it('drops the label an issue bullet carries', () => {
+    // gHashTag/t27#4246, whose bullets are 1., 1b., 2., 3.
+    const criteria = storedCriteria(4246)
+    const message = reviewerMessage({
+      repo: 'gHashTag/t27',
+      issue: 4246,
+      criteria,
+      files: ['specs/ternary/clocked_counter.t27'],
+      patch: PATCH,
+      machine: [],
+      base: 'origin/master',
+    })
+    const fence = message.match(
+      /BEGIN UNTRUSTED CRITERIA (\w+)\n([\s\S]*?)\nEND UNTRUSTED CRITERIA \1/,
+    )
+    const inside = (fence?.[2] ?? '').split('\n')
+    expect(inside).toHaveLength(4)
+    expect(inside[1].startsWith('2. `t27c gen ')).toBe(true)
+    expect(inside[2].startsWith('3. `python3 tools/')).toBe(true)
+    expect(inside.some((l) => /^\d+\. \d+[a-z]?\./.test(l))).toBe(false)
   })
 })

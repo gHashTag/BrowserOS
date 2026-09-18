@@ -77,10 +77,12 @@ import {
 } from './queen-report-lines'
 import {
   chooseReviewerLane,
+  criterionText,
   defaultReviewDeps,
   hasStatedReason,
   judgeReviewerText,
   markReviewerLaneFailed,
+  measurementsPerRound,
   REVIEW_PATCH_MAX_CHARS,
   REVIEWER_SYSTEM_PROMPT,
   type ReviewDeps,
@@ -1973,7 +1975,16 @@ function criteriaBlock(criteria: string[], source: string): string[] {
           'it is not.',
         ]
       : []
-  return [provenance, ...tail, '', ...criteria.map((c, i) => `${i + 1}. ${c}`)]
+  // ONE NUMBERING, THE SLOT'S. An issue whose bullets carry their own labels
+  // - gHashTag/t27#4246 writes `1.`, `1b.`, `2.`, `3.` - rendered as "3. 2.
+  // `python3 tools/...`", and a worker or a reviewer that answers with the
+  // number the criterion itself shows addresses a slot it never read.
+  return [
+    provenance,
+    ...tail,
+    '',
+    ...criteria.map((c, i) => `${i + 1}. ${criterionText(c)}`),
+  ]
 }
 
 /**
@@ -2443,6 +2454,12 @@ export async function reviewFinishedDispatches(
   // The reviewer's lane budget for this sweep, and the keys running bees hold,
   // read once and only if a review is actually bought.
   let reviewsLeft = deps.reviewsPerRound()
+  // The measurement's own budget, and the wall clock it may not outlive. The
+  // sweep is awaited before the round reaps stalled dispatches and before the
+  // board read that hands out work, so an unbounded sweep is a swarm that
+  // dispatches nothing while its lease looks healthy.
+  let measurementsLeft = deps.measurementsPerRound?.() ?? measurementsPerRound()
+  const measurementDeadline = Date.now() + MEASUREMENT_SWEEP_MS
   let takenKeys: number[] | null = null
   const repo = process.env.TRIOS_GITHUB_REPO || 'gHashTag/trios'
 
@@ -2711,6 +2728,7 @@ export async function reviewFinishedDispatches(
     // round measures nothing twice.
     let criteriaRuns: CriterionRun[] = []
     let criteriaCached = false
+    let measurementSkipped = ''
     if (
       files.length > 0 &&
       branchHead !== null &&
@@ -2731,8 +2749,33 @@ export async function reviewFinishedDispatches(
       ) {
         criteriaRuns = row.criteria_runs
         criteriaCached = true
+      } else if (
+        // NOT AHEAD OF THE BUDGET IT FEEDS. The measurement is evidence for a
+        // review, and a row that cannot buy a review this round used to pay
+        // for the measurement anyway: a ten-row probe made ten measurements
+        // and three reviews, seven of them logging "the review budget for
+        // this round is spent" AFTER their worktree had been cut and
+        // removed. A cached answer needs no budget, so it still measures.
+        reviewsLeft <= 0 &&
+        !(
+          row.reviewer_fingerprint === fingerprint &&
+          typeof row.reviewer_text === 'string' &&
+          row.reviewer_text.length > 0
+        )
+      ) {
+        measurementSkipped = 'the review budget for this round is spent'
+      } else if (measurementsLeft <= 0) {
+        measurementSkipped = 'the measurement budget for this round is spent'
+      } else if (Date.now() >= measurementDeadline) {
+        measurementSkipped = 'the round has measured for as long as it may'
       } else {
-        const measured = await deps.measureCriteria(issue, branchHead, promised)
+        measurementsLeft -= 1
+        const measured = await deps.measureCriteria(
+          issue,
+          branchHead,
+          promised,
+          base,
+        )
         if (!measured.ok) {
           // Nothing measured is nothing decided, and nothing is cached: the
           // next round tries again.
@@ -2742,19 +2785,37 @@ export async function reviewFinishedDispatches(
           })
         } else {
           criteriaRuns = measured.criteria
-          await pool
-            .query(
-              `UPDATE queen_dispatch
+          // AN ENVIRONMENT FAULT IS NOT A MEASUREMENT. Every check coming
+          // back unrunnable - t27c missing from a half-built image, a mount
+          // that is not there yet, a spent budget - established nothing, and
+          // caching it under the commit's fingerprint froze that emptiness:
+          // the image was repaired ten minutes later and nothing re-measured,
+          // because the key still matched. The reviewer then answered
+          // could-not-check on commands it could not run and correct,
+          // finished work escalated to a person, in a batch, across a whole
+          // sweep. A run that settled nothing is retried next round, exactly
+          // as a failed one already is.
+          const established = criteriaCounts(criteriaRuns).checks > 0
+          if (!established) {
+            logger.warn('Queen measured the criteria and established nothing', {
+              issue,
+              criteria: criteriaRuns.length,
+            })
+          } else {
+            await pool
+              .query(
+                `UPDATE queen_dispatch
                   SET criteria_fingerprint = $2, criteria_runs = $3::jsonb
                 WHERE issue = $1`,
-              [issue, fingerprint, JSON.stringify(criteriaRuns)],
-            )
-            .catch((error) => {
-              logger.warn('Queen could not cache the criteria measurement', {
-                issue,
-                error: error instanceof Error ? error.message : String(error),
+                [issue, fingerprint, JSON.stringify(criteriaRuns)],
+              )
+              .catch((error) => {
+                logger.warn('Queen could not cache the criteria measurement', {
+                  issue,
+                  error: error instanceof Error ? error.message : String(error),
+                })
               })
-            })
+          }
         }
       }
     }
@@ -2765,6 +2826,14 @@ export async function reviewFinishedDispatches(
     const measuredPassed = criteriaLines
       .filter((line) => line.met)
       .map((line) => line.number)
+    // ...AND THE ONES THAT WERE ALREADY TRUE. A criterion that passes at the
+    // merge base too says "this is true", never "this commit made it true",
+    // and t27 criteria are routinely guard-shaped ("the name still exists",
+    // "does not print NOPARSE") or stale. Those passes are still shown and
+    // still counted, but they cannot carry an accept on their own below.
+    const measuredBaseTrue = criteriaRuns
+      .filter((run) => run.basePassed === true)
+      .map((run) => run.number)
     const counts = criteriaCounts(criteriaRuns)
 
     // Every machine line, the compiler's and the criteria's. They obey the
@@ -2836,6 +2905,16 @@ export async function reviewFinishedDispatches(
           }),
           cached: true,
         }
+      } else if (measurementSkipped !== '') {
+        // MEASURE FIRST, THEN ASK. A row whose mechanical criteria went
+        // unmeasured for a budget would be shown to a reviewer that can only
+        // answer could-not-check about a command, and a review that
+        // establishes nothing escalates finished work to a person
+        // (`beyondThePatch`). The budget is meant to spread the round's cost,
+        // not to send correct work to the operator, so the row waits exactly
+        // as one past the review budget does: nothing spent, nothing charged,
+        // measured next round.
+        reviewerSkipped = `the criteria were not measured this round (${measurementSkipped})`
       } else if (reviewsLeft <= 0) {
         reviewerSkipped = 'the review budget for this round is spent'
       } else {
@@ -2911,11 +2990,21 @@ export async function reviewFinishedDispatches(
                 continue
               }
               lastTransient = false
+              // THE COMPILER'S LINES ONLY, as `reviewerMessage` is given
+              // them. `citesEvidence` harvests every file-shaped token out of
+              // a met machine line and makes it citable for EVERY criterion,
+              // which is sound for a witness line (it can only name a .t27
+              // file the branch changed) and not for a criteria line, which
+              // embeds the criterion's own command and so can name any path
+              // in the tree - including one whose diff was cut from the patch
+              // the reviewer was shown. A measurement establishes a criterion
+              // through `citesMeasurement`, which is scoped to its own
+              // number, and through `establishedByMeasurement` below.
               const judged = judgeReviewerText(
                 answer.text,
                 reviewCriteria.length,
                 visible,
-                machineAll,
+                witnessLines,
                 measuredPassed,
               )
               if (judged.unanswered.length > 0) {
@@ -2993,7 +3082,22 @@ export async function reviewFinishedDispatches(
           // command is what the issue's author could write down, and a
           // reviewer can still find why it does not cover the criterion.
           refuted.push({ criterion, reason: answer.reason })
-        } else if (promised.length > 0 && measuredPassed.includes(i + 1)) {
+        } else if (
+          // A MEASUREMENT OUTRANKS SILENCE, NEVER A REFUSAL. This branch used
+          // to catch every `unmet` whose reason was shorter than eight
+          // alphanumerics - "no tests", "stub only", "not done" - and count
+          // it MET because the command passed. Measured against the release
+          // queend: `- 2. not done: unmet` over two passing measurements
+          // produced accept with no send-back and no person, while the same
+          // answer with a longer reason produced a send-back. The adversary
+          // saying no about the very criterion the machine passed is the
+          // self-grading inversion #1127 exists to end; a terse refusal falls
+          // through to `unestablished`, counted unmet and charged to nobody,
+          // exactly as it did before the measurement existed.
+          answer?.verdict !== 'unmet' &&
+          promised.length > 0 &&
+          measuredPassed.includes(i + 1)
+        ) {
           // Not "beyond the patch": the Queen ran it. Counted met, so a
           // could-not-check here neither escalates nor sends the bee back.
           establishedByMeasurement.push(i + 1)
@@ -3154,6 +3258,28 @@ export async function reviewFinishedDispatches(
       unestablished.length > 0
     if (beyondThePatch) state = 'escalate'
 
+    // NOTHING THE COMMIT DID. Every criterion that carried this accept was
+    // established by a measurement alone - the reviewer established none of
+    // them itself - and every one of those commands ALSO passed at the merge
+    // base. That is an issue whose spec was implemented on master before the
+    // bee started, or one whose criteria are all guards ("the name still
+    // exists"), and one unrelated edit is enough to reach it: `files.length`
+    // is non-zero, every command passes at the head, the reviewer can only
+    // answer could-not-check off the patch, and the branch would be accepted
+    // with no send-back and nobody looking. Before the measurement existed
+    // this was a person's escalation, and it goes back to being one. A
+    // reviewer that established a criterion ITSELF is judgement, not
+    // arithmetic, and is left alone.
+    const acceptedOnBaseTruthAlone =
+      reviewer !== null &&
+      state === 'accept' &&
+      establishedByMeasurement.length > 0 &&
+      establishedByMeasurement.every((n) => measuredBaseTrue.includes(n)) &&
+      !reviewCriteria.some(
+        (_, i) => reviewer?.answers.get(i + 1)?.verdict === 'met',
+      )
+    if (acceptedOnBaseTruthAlone) state = 'escalate'
+
     const freeAttempt = state === 'sendBack' && !countsAgainstTheIssue
     const freeAttempts = freeAttempt
       ? priorFreeAttempts + 1
@@ -3209,6 +3335,10 @@ export async function reviewFinishedDispatches(
       criteriaFailed: counts.failed,
       criteriaUnrunnable: counts.unrunnable,
       criteriaCached,
+      // Why a row was not measured this round, and which of its passes were
+      // already true before the branch existed.
+      criteriaSkipped: measurementSkipped,
+      criteriaBaseTrue: measuredBaseTrue.length,
     })
     if (unwitnessed) {
       logger.warn(
@@ -3234,35 +3364,42 @@ export async function reviewFinishedDispatches(
           `commit ${reviewerMisses} rounds running (last: ${reviewerSkipped || 'no answer'}). ` +
           "A commit is never accepted on the worker's word, so a person must " +
           'judge it or repair the reviewer lane.'
-        : beyondThePatch && reviewer
-          ? `An adversarial reviewer (${reviewer.provider}/${reviewer.model}) ` +
-            'read the commit, refuted nothing, and could not establish:\n' +
-            unestablished
-              .map(
-                (u, i) =>
-                  `  ${i + 1}. ${u.criterion}${u.reason ? ` - ${u.reason}` : ''}`,
-              )
-              .join('\n') +
-            (patchTruncated
-              ? `\nThe patch it was shown was cut at ${REVIEW_PATCH_MAX_CHARS} characters.`
-              : '') +
-            '\nA reviewer that only reads the patch cannot run tests or see ' +
-            'beyond it, and sending the bee back cannot change that, so a ' +
-            'person with a checkout decides.'
-          : state === 'sendBack' || deadLetter
-            ? reviewer
-              ? reviewedSendBackMessage(
-                  String(answer?.note ?? ''),
-                  reviewer,
-                  refuted,
-                  unestablished,
-                  admitted,
-                  machineFailed,
+        : acceptedOnBaseTruthAlone
+          ? 'Every criterion that would have carried this accept was ' +
+            'established only by running its own command, and every one of ' +
+            `those commands already passed at the merge base (${measuredBaseTrue.join(', ')}). ` +
+            'Nothing measured shows this commit did the work, and the ' +
+            'reviewer established none of them from the patch, so a person ' +
+            'with a checkout decides.'
+          : beyondThePatch && reviewer
+            ? `An adversarial reviewer (${reviewer.provider}/${reviewer.model}) ` +
+              'read the commit, refuted nothing, and could not establish:\n' +
+              unestablished
+                .map(
+                  (u, i) =>
+                    `  ${i + 1}. ${u.criterion}${u.reason ? ` - ${u.reason}` : ''}`,
                 )
-              : sendBackMessage(String(answer?.note ?? ''), failed, unjudged)
-            : heldForReviewer
-              ? `Waiting for the adversarial reviewer before judging a commit on the worker's word (${reviewerSkipped || 'no reviewer verdict yet'}).`
-              : policyNote
+                .join('\n') +
+              (patchTruncated
+                ? `\nThe patch it was shown was cut at ${REVIEW_PATCH_MAX_CHARS} characters.`
+                : '') +
+              '\nA reviewer that only reads the patch cannot run tests or see ' +
+              'beyond it, and sending the bee back cannot change that, so a ' +
+              'person with a checkout decides.'
+            : state === 'sendBack' || deadLetter
+              ? reviewer
+                ? reviewedSendBackMessage(
+                    String(answer?.note ?? ''),
+                    reviewer,
+                    refuted,
+                    unestablished,
+                    admitted,
+                    machineFailed,
+                  )
+                : sendBackMessage(String(answer?.note ?? ''), failed, unjudged)
+              : heldForReviewer
+                ? `Waiting for the adversarial reviewer before judging a commit on the worker's word (${reviewerSkipped || 'no reviewer verdict yet'}).`
+                : policyNote
     const note = deadLetter
       ? `${freeAttempts} consecutive attempts produced nothing judgeable ` +
         '(no commit, or no criterion anyone could establish), so this is ' +
@@ -3292,6 +3429,17 @@ export async function reviewFinishedDispatches(
 
 /** Lanes one review may try before the round moves on. */
 export const REVIEWER_LANE_TRIES = 3
+
+/**
+ * How long one sweep may spend measuring criteria, all rows together.
+ *
+ * A second bound beside the per-round count, because the count alone bounds
+ * the number of worktrees and not the time: a row whose commands each sit on
+ * the 60 s ceiling can spend five minutes on its own. `runRound` awaits this
+ * sweep before it reaps and before it dispatches, so the number that matters
+ * is how long the swarm is willing to hand out no work at all.
+ */
+export const MEASUREMENT_SWEEP_MS = 4 * 60 * 1000
 
 /**
  * Rounds a bought review may fail to arrive for one commit before a person is

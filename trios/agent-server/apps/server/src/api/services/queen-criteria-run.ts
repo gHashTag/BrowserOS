@@ -124,7 +124,13 @@ export function parseCriterionChecks(criterion: string): CriterionCheck[] {
 }
 
 type Token =
-  | { kind: 'word'; value: string; quoted: boolean }
+  | {
+      kind: 'word'
+      value: string
+      quoted: boolean
+      /** The word exactly as it was written, quotes and escapes included. */
+      raw: string
+    }
   | { kind: 'op'; op: '|' | '&&' | '>' | '2>&1' }
 
 /** The programs a criterion may start a pipeline segment with. */
@@ -194,11 +200,13 @@ function tokenize(
 ): { ok: true; tokens: Token[] } | { ok: false; reason: string } {
   const tokens: Token[] = []
   let buf = ''
+  let raw = ''
   let inWord = false
   let quoted = false
   const flush = () => {
-    if (inWord) tokens.push({ kind: 'word', value: buf, quoted })
+    if (inWord) tokens.push({ kind: 'word', value: buf, quoted, raw })
     buf = ''
+    raw = ''
     inWord = false
     quoted = false
   }
@@ -215,6 +223,7 @@ function tokenize(
     if (text) {
       if ('reason' in text) return fail(text.reason)
       buf += text.value
+      raw += cmd.slice(i, text.end)
       inWord = true
       quoted = true
       i = text.end
@@ -234,6 +243,7 @@ function tokenize(
     if ('\n\r\0'.includes(c)) return fail('a newline')
     if (';<()`$*?[]{}~#!'.includes(c)) return fail(`an unquoted ${c}`)
     buf += c
+    raw += c
     inWord = true
     i++
   }
@@ -317,8 +327,30 @@ function readOperator(
   return null
 }
 
+/**
+ * Whether a word that decodes to the scratch prefix also SPELLS it.
+ *
+ * The validators read a token's decoded value while `runOneCheck` redirects
+ * the write by replacing the literal `/tmp/t27-` in the raw command text. A
+ * spelling that decodes to the scratch prefix without containing it
+ * literally - `/tmp/t27"-"x`, `/tmp/t27\-x`, `/tmp/'t27-'x` - therefore
+ * passed the validator and reached bash UNREWRITTEN, so the command read and
+ * wrote the container's real `/tmp` at a name the criterion chose: a
+ * predictable path every process with that uid can see, outside the private
+ * directory this module promises, surviving the measurement's `rm -rf`, and
+ * shared between two issues measured under the same name. Refusing the
+ * spelling is what keeps the validator and the rewrite from disagreeing.
+ */
+function scratchSpelledPlainly(raw: string): boolean {
+  return raw.includes(SCRATCH_PREFIX)
+}
+
 /** Why an argument is refused, or '' when it is not. */
-function argumentProblem(value: string, program: string): string {
+function argumentProblem(
+  token: { value: string; raw: string },
+  program: string,
+): string {
+  const { value, raw } = token
   const candidates = [value]
   const eq = value.indexOf('=')
   if (eq >= 0) candidates.push(value.slice(eq + 1))
@@ -328,6 +360,9 @@ function argumentProblem(value: string, program: string): string {
   for (const candidate of candidates) {
     if (candidate.startsWith('/') && !SCRATCH_TARGET.test(candidate)) {
       return `an absolute path outside ${SCRATCH_PREFIX} (${value})`
+    }
+    if (SCRATCH_TARGET.test(candidate) && !scratchSpelledPlainly(raw)) {
+      return `${SCRATCH_PREFIX} spelled with quotes or escapes (${value})`
     }
   }
   if (/(^|[/=])\.\.($|\/)/.test(value)) {
@@ -343,7 +378,11 @@ function argumentProblem(value: string, program: string): string {
 
 /** Why a `>` target is refused, or '' when it is the scratch prefix. */
 function redirectProblem(target: Token | undefined): string {
-  if (target?.kind === 'word' && SCRATCH_TARGET.test(target.value)) return ''
+  if (target?.kind === 'word' && SCRATCH_TARGET.test(target.value)) {
+    return scratchSpelledPlainly(target.raw)
+      ? ''
+      : `${SCRATCH_PREFIX} spelled with quotes or escapes (${target.value})`
+  }
   return `a redirect to anything but ${SCRATCH_PREFIX}<name> (${
     target?.kind === 'word' ? target.value : 'nothing'
   })`
@@ -426,7 +465,7 @@ export function commandSafety(cmd: string): CommandSafety {
       expectProgram = false
       continue
     }
-    const problem = argumentProblem(token.value, program)
+    const problem = argumentProblem(token, program)
     if (problem) return refused(problem)
     args.push(token.value)
   }
@@ -721,8 +760,45 @@ async function runOneCheck(
       ran.code,
     )
   }
+  const compared = compareOutput(check, ran, context.maxBytes)
   const compiler = await compilerAlone(safety.t27cCalls, context)
   if (compiler) {
+    // A CRITERION MAY DEMAND A DIAGNOSTIC. The solo run exists for the answer
+    // an ERROR can print by accident: `... | grep -c 'not yet implemented'`
+    // prints `0` when generation fails, which is the passing answer (#3939),
+    // and `wc -l` prints nothing at all. Every such hole has the same shape -
+    // the criterion is satisfied by ABSENCE, so an empty or broken output
+    // satisfies it - and those the compiler's exit still refutes.
+    //
+    // A criterion satisfied by PRESENCE is the opposite case, and in a
+    // compiler repository it is ordinary: "the parser must reject this spec",
+    // `t27c parse specs/bad.t27 2>&1 | grep -c "Parse error"` prints `1`,
+    // with the real binary exiting 1 exactly as the criterion asserts. That
+    // was deterministically judged unmet and charged to the bee, which cannot
+    // fix it - making the compiler exit 0 makes the grep print 0 - so every
+    // redispatch failed the same way until the ceiling handed correct work to
+    // a person. The machine says it cannot tell, and the reviewer judges it
+    // as it did before the measurement existed.
+    const satisfiedByAbsence =
+      check.op === 'notContains' ||
+      (check.op === 'atLeast' && Number(check.expected) <= 0) ||
+      (check.op === 'equals' &&
+        (check.expected.trim() === '' || check.expected.trim() === '0'))
+    if (
+      compiler.status === 'failed' &&
+      compared.status === 'passed' &&
+      !satisfiedByAbsence
+    ) {
+      return checkResult(
+        check,
+        'unrunnable',
+        `${compiler.reason}, but the command printed what the criterion ` +
+          'demands: the machine cannot tell a broken spec from a criterion ' +
+          'that asks for the diagnostic',
+        stdout,
+        ran.code,
+      )
+    }
     return checkResult(
       check,
       compiler.status,
@@ -731,7 +807,6 @@ async function runOneCheck(
       ran.code,
     )
   }
-  const compared = compareOutput(check, ran, context.maxBytes)
   return checkResult(check, compared.status, compared.reason, stdout, ran.code)
 }
 
@@ -839,6 +914,17 @@ export interface CriterionRun {
   number: number
   criterion: string
   checks: CheckRun[]
+  /**
+   * Whether the same checks already passed at the MERGE BASE.
+   *
+   * A pass at the head says "true on this commit", not "this commit made it
+   * true", and t27 criteria are routinely guard-shaped ("the name still
+   * exists", "does not print NOPARSE") or stale (the spec was implemented on
+   * master before the issue was dispatched). Undefined when the base was not
+   * measured - no base sha, nothing passed at the head, or the budget ran out
+   * before the base run.
+   */
+  basePassed?: boolean
 }
 
 export type CriteriaMeasurement =
@@ -848,6 +934,13 @@ export type CriteriaMeasurement =
 export interface MeasureOptions {
   /** The repository the bee's branch lives in. Default `workspaceRoot()`. */
   repoRoot?: string
+  /**
+   * The commit the branch was cut from. When it is given, every criterion
+   * that PASSED at the head is run again there, and the answer is recorded as
+   * `basePassed` - so the sweep can tell a criterion this commit satisfied
+   * from one that was already true before the bee started.
+   */
+  baseSha?: string | null
   /** Where the temporary directory is made. Default `os.tmpdir()`. */
   tmpRoot?: string
   exec?: Exec
@@ -906,15 +999,10 @@ export async function measureCriteria(
     }
   }
   const checkout = `${dir}/queen-${issue}-criteria`
+  const baseCheckout = `${dir}/queen-${issue}-base`
   const scratch = `${dir}/scratch`
-  let added = false
-  try {
-    await exec({
-      argv: ['mkdir', scratch],
-      cwd: root,
-      timeoutMs: 15_000,
-      maxBytes: 4_096,
-    })
+  const added: string[] = []
+  const cutWorktree = async (at: string, sha: string): Promise<string> => {
     const add = await exec({
       argv: [
         'git',
@@ -925,20 +1013,41 @@ export async function measureCriteria(
         'worktree',
         'add',
         '--detach',
-        checkout,
-        headSha,
+        at,
+        sha,
       ],
       cwd: root,
       timeoutMs: 120_000,
       maxBytes: 16_384,
     })
     if (add.code !== 0) {
-      return {
-        ok: false,
-        error: `git worktree add at ${headSha.slice(0, 12)} failed: ${(add.error ?? add.stderr).trim().slice(0, 200)}`,
-      }
+      return `git worktree add at ${sha.slice(0, 12)} failed: ${(add.error ?? add.stderr).trim().slice(0, 200)}`
     }
-    added = true
+    added.push(at)
+    return ''
+  }
+  try {
+    // THE PRIVATE DIRECTORY A REDIRECT IS POINTED AT. Its result is read: an
+    // unmade directory left every `... > /tmp/t27-gen.zig && grep ...`
+    // criterion printing nothing, which `compareOutput` reads as the bee
+    // failing to produce the file - a harness fault charged to the work as a
+    // real send-back. Without a directory, `runOneCheck` answers unrunnable.
+    const madeScratch = await exec({
+      argv: ['mkdir', scratch],
+      cwd: root,
+      timeoutMs: 15_000,
+      maxBytes: 4_096,
+    })
+    const scratchDir = madeScratch.code === 0 ? scratch : undefined
+    if (!scratchDir) {
+      logger.warn('Queen could not make a criteria scratch directory', {
+        issue,
+        scratch,
+        error: (madeScratch.error ?? madeScratch.stderr).trim().slice(0, 200),
+      })
+    }
+    const failure = await cutWorktree(checkout, headSha)
+    if (failure) return { ok: false, error: failure }
     const budget: CriteriaBudget = {
       commandsLeft: options.maxCommands ?? CRITERIA_MAX_COMMANDS,
       deadline: now() + (options.totalMs ?? CRITERIA_TOTAL_MS),
@@ -950,7 +1059,7 @@ export async function measureCriteria(
         criterion: item.criterion,
         checks: await runCriterionChecks(item.checks, {
           checkoutDir: checkout,
-          scratchDir: scratch,
+          scratchDir,
           timeoutMs: options.timeoutMs,
           exec,
           budget,
@@ -958,11 +1067,30 @@ export async function measureCriteria(
         }),
       })
     }
+
+    await markWhatWasAlreadyTrue(runs, {
+      issue,
+      headSha,
+      baseSha: options.baseSha ?? '',
+      cutWorktree,
+      baseCheckout,
+      run: (checks) =>
+        runCriterionChecks(checks, {
+          checkoutDir: baseCheckout,
+          scratchDir,
+          timeoutMs: options.timeoutMs,
+          exec,
+          budget,
+          now,
+        }),
+      budget,
+      now,
+    })
     return { ok: true, criteria: runs }
   } finally {
-    if (added) {
+    for (const at of added) {
       const removed = await exec({
-        argv: ['git', '-C', root, 'worktree', 'remove', '--force', checkout],
+        argv: ['git', '-C', root, 'worktree', 'remove', '--force', at],
         cwd: root,
         timeoutMs: 60_000,
         maxBytes: 16_384,
@@ -970,7 +1098,7 @@ export async function measureCriteria(
       if (removed.code !== 0) {
         logger.warn('Queen could not remove a criteria worktree; pruning', {
           issue,
-          checkout,
+          checkout: at,
           error: (removed.error ?? removed.stderr).trim().slice(0, 200),
         })
       }
@@ -981,7 +1109,7 @@ export async function measureCriteria(
       timeoutMs: 60_000,
       maxBytes: 4_096,
     })
-    if (added) {
+    if (added.length > 0) {
       await exec({
         argv: ['git', '-C', root, 'worktree', 'prune'],
         cwd: root,
@@ -989,6 +1117,67 @@ export async function measureCriteria(
         maxBytes: 4_096,
       })
     }
+  }
+}
+
+/**
+ * Run the criteria that PASSED at the head again at the merge base, and
+ * record which of them were already true there.
+ *
+ * A criterion that passes at the head says "this is true", never "this commit
+ * made it true", and the sweep turns a passing measurement into `met` - so a
+ * stale issue (the spec implemented on master while the issue queued) or one
+ * whose criteria are all guards ("the name still exists", "does not print
+ * NOPARSE") could carry an accept with no person and no send-back. Only the
+ * criteria that passed are re-run: the rest are unmet whatever the base says.
+ * The head's budget is shared, so this can never double a measurement's cost
+ * ceiling, and a base that could not be cut or could not run every check
+ * leaves `basePassed` undefined - unknown, not proven.
+ */
+async function markWhatWasAlreadyTrue(
+  runs: CriterionRun[],
+  context: {
+    issue: number
+    headSha: string
+    baseSha: string
+    baseCheckout: string
+    cutWorktree: (at: string, sha: string) => Promise<string>
+    run: (checks: CriterionCheck[]) => Promise<CheckRun[]>
+    budget: CriteriaBudget
+    now: () => number
+  },
+): Promise<void> {
+  const passedAtHead = runs.filter(
+    (run) =>
+      run.checks.length > 0 && run.checks.every((c) => c.status === 'passed'),
+  )
+  if (
+    passedAtHead.length === 0 ||
+    !/^[0-9a-f]{40,64}$/.test(context.baseSha) ||
+    context.baseSha === context.headSha ||
+    context.budget.commandsLeft <= 0 ||
+    context.budget.deadline <= context.now()
+  ) {
+    return
+  }
+  const failure = await context.cutWorktree(
+    context.baseCheckout,
+    context.baseSha,
+  )
+  if (failure) {
+    // Not a failed measurement: the head is measured and says what it says.
+    logger.warn('Queen could not measure the criteria at the merge base', {
+      issue: context.issue,
+      error: failure,
+    })
+    return
+  }
+  for (const run of passedAtHead) {
+    const before = await context.run(
+      run.checks.map((c) => ({ cmd: c.cmd, op: c.op, expected: c.expected })),
+    )
+    if (before.some((c) => c.status === 'unrunnable')) continue
+    run.basePassed = before.every((c) => c.status === 'passed')
   }
 }
 
@@ -1065,7 +1254,18 @@ export function criteriaWitness(runs: CriterionRun[]): CriterionWitnessLine[] {
  */
 export function measurementLines(runs: CriterionRun[]): string[] {
   const lines: string[] = []
+  // ONE TAG, ONE MEANING. The tag was printed per CHECK while the sweep
+  // honours it per CRITERION: a criterion whose first command passed and
+  // whose second could not run was shown as a passing `[M3]`, the reviewer
+  // cited M3 exactly as the line above the fence instructs, and
+  // `citesMeasurement` rejected it because 3 was never established - the met
+  // was rewritten to could-not-check and a person was called in about a
+  // criterion whose own command had passed. A check of a criterion the
+  // machine did not settle is still shown, so the reviewer knows it was
+  // tried, but it carries no citable tag.
+  const citable = new Set(criteriaWitness(runs).map((line) => line.number))
   for (const run of runs) {
+    const tag = citable.has(run.number) ? `[M${run.number}] ` : ''
     for (const check of run.checks) {
       const word =
         check.status === 'passed'
@@ -1075,10 +1275,20 @@ export function measurementLines(runs: CriterionRun[]): string[] {
             : 'not run'
       lines.push(
         oneLine(
-          `- [M${run.number}] criterion ${run.number} ${word}: \`${check.cmd}\` ` +
+          `- ${tag}criterion ${run.number} ${word}: \`${check.cmd}\` ` +
             `${opWords(check)}; printed ${JSON.stringify(check.output.slice(0, 160))}` +
             `${check.exitCode === null ? '' : ` (exit ${check.exitCode})`}` +
             `${check.status === 'passed' ? '' : ` - ${check.reason}`}`,
+          700,
+        ),
+      )
+    }
+    if (run.basePassed === true) {
+      lines.push(
+        oneLine(
+          `- criterion ${run.number} ALSO passed at the merge base: it was ` +
+            'true before this branch existed, so it is no evidence that this ' +
+            'commit did the work',
           700,
         ),
       )

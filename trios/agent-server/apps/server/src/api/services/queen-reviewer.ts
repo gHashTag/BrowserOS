@@ -148,6 +148,29 @@ export function reviewsPerRound(env: NodeJS.ProcessEnv = process.env): number {
   return Math.min(parsed, 32)
 }
 
+/**
+ * Criteria measurements one sweep may buy.
+ *
+ * The review has had a budget since the first round of this work; the
+ * measurement had none, and it is the heavier of the two: a temporary
+ * worktree cut from the t27 tree, up to twenty commands under a five-minute
+ * ceiling, and the removal afterwards. The sweep walks every finished row
+ * that is waiting, serially, and `runRound` awaits it BEFORE it reaps stalled
+ * dispatches and before the board read that hands out new work - so an
+ * unbudgeted sweep after a deploy, when every row's cache is empty, holds the
+ * dispatcher for as long as it takes while the lease heartbeat reports
+ * health. Rows past the budget keep the handling they had before the
+ * measurement existed: the reviewer answers could-not-check, and they are
+ * measured next round.
+ */
+export function measurementsPerRound(
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  const parsed = Number(env.TRIOS_QUEEN_MEASUREMENTS_PER_ROUND)
+  if (!Number.isInteger(parsed) || parsed < 0) return 3
+  return Math.min(parsed, 32)
+}
+
 /** What ran the bee, as its dispatch row records it. */
 export interface BeeIdentity {
   provider?: string | null
@@ -384,6 +407,21 @@ export interface ReviewerMessageInput {
  * bee, `1.` onwards, so a reviewer's line `- 3. ...` and a bee's `- 3. ...`
  * name the same criterion.
  */
+/**
+ * A criterion with the label the ISSUE gave it removed.
+ *
+ * `QueenSpecQuality.bullets` keeps a bullet's own `1.`/`1b.` prefix, and every
+ * reader here renumbers by slot - so gHashTag/t27#4246, whose bullets are
+ * `1.`, `1b.`, `2.`, `3.`, rendered as "3. 2. `python3 tools/...`". A
+ * reviewer that answers with the number the criterion itself carries then
+ * addresses a slot it never read, every such line is dropped by the slot
+ * parser, and the whole paid review is discarded as a miss. One numbering,
+ * the slot's, is what the prompt promises the bee and the reviewer alike.
+ */
+export function criterionText(criterion: string): string {
+  return criterion.replace(/^\s*\d{1,3}[a-z]?[.)]\s+/, '')
+}
+
 export function reviewerMessage(input: ReviewerMessageInput): string {
   const truncated =
     input.patch !== null && /\n\[truncated \d+\+? chars\]$/.test(input.patch)
@@ -396,7 +434,7 @@ export function reviewerMessage(input: ReviewerMessageInput): string {
     '',
     ...fenced(
       'CRITERIA',
-      input.criteria.map((c, i) => `${i + 1}. ${c}`).join('\n'),
+      input.criteria.map((c, i) => `${i + 1}. ${criterionText(c)}`).join('\n'),
     ),
     '',
     `## Committed files (${input.files.length})`,
@@ -728,11 +766,17 @@ export interface ReviewDeps {
   branchPatch: (issue: number, maxChars: number) => Promise<string | null>
   worktreeDirtCount: (issue: number) => Promise<number | null>
   witness: (issue: number, files: string[]) => Promise<Witness>
-  /** The dispatch row's criterion commands, run on the commit `headSha`. */
+  /**
+   * The dispatch row's criterion commands, run on the commit `headSha` - and,
+   * for the ones that pass there, at `baseSha` too, so a criterion that was
+   * already true before the branch is told apart from one this commit made
+   * true.
+   */
   measureCriteria: (
     issue: number,
     headSha: string,
     criteria: string[],
+    baseSha?: string | null,
   ) => Promise<CriteriaMeasurement>
   laneCandidates: (takenKeyIndices: number[]) => WorkerProvider[]
   llm: (
@@ -741,6 +785,8 @@ export interface ReviewDeps {
     message: string,
   ) => Promise<ReviewerCallResult>
   reviewsPerRound: () => number
+  /** Criteria measurements one sweep may buy. Optional for injected fakes. */
+  measurementsPerRound?: () => number
 }
 
 export function defaultReviewDeps(): ReviewDeps {
@@ -751,10 +797,11 @@ export function defaultReviewDeps(): ReviewDeps {
     branchPatch,
     worktreeDirtCount,
     witness: witnessSpecs,
-    measureCriteria: (issue, headSha, criteria) =>
-      measureCriteria(issue, headSha, criteria),
+    measureCriteria: (issue, headSha, criteria, baseSha) =>
+      measureCriteria(issue, headSha, criteria, { baseSha }),
     laneCandidates: reviewLaneCandidates,
     llm: (lane, system, message) => defaultReviewerLlm(lane, system, message),
     reviewsPerRound: () => reviewsPerRound(),
+    measurementsPerRound: () => measurementsPerRound(),
   }
 }
