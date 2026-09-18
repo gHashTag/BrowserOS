@@ -71,9 +71,29 @@ if [ -d "$REPO_DIR/.git" ]; then
   # detached head, which refuses every acceptance, and `merge-base` needs
   # history that a depth of one does not have. The clone below is blobless
   # rather than shallow for the same reason - agents need `log` and `blame`.
-  $AS_USER "git -C '$REPO_DIR' fetch origin '$TRIOS_REPO_REF' \
-    && git -C '$REPO_DIR' checkout -B '$TRIOS_REPO_REF' FETCH_HEAD" \
-    || echo "[entrypoint] fetch failed; continuing on the existing checkout"
+  # TWO STEPS, NOT ONE `&&`. Joined, the failure of either printed "fetch
+  # failed", and for three days it was the OTHER one: the fetch succeeded, the
+  # checkout refused with "Your local changes to the following files would be
+  # overwritten", and the tree sat on 0ad96968 while origin/master moved 366
+  # commits ahead. A message that names the wrong half of a command sends every
+  # reader to the wrong place.
+  if $AS_USER "git -C '$REPO_DIR' fetch origin '$TRIOS_REPO_REF'"; then
+    if ! $AS_USER "git -C '$REPO_DIR' checkout -B '$TRIOS_REPO_REF' FETCH_HEAD"; then
+      # Uncommitted files an earlier turn left in the ROOT checkout (bees work
+      # in worktrees; this tree is only ever read). They are set aside, never
+      # discarded: `git stash` keeps them recoverable, `reset --hard` would not,
+      # and nothing here is allowed to destroy work it did not write.
+      dirty=$($AS_USER "git -C '$REPO_DIR' status --porcelain" | wc -l | tr -d ' ')
+      echo "[entrypoint] checkout blocked by $dirty uncommitted path(s); stashing them"
+      $AS_USER "git -C '$REPO_DIR' stash push --include-untracked \
+        --message 'entrypoint stashed a dirty root checkout'" \
+        || echo "[entrypoint] stash failed"
+      $AS_USER "git -C '$REPO_DIR' checkout -B '$TRIOS_REPO_REF' FETCH_HEAD" \
+        || echo "[entrypoint] checkout still failed; continuing on the existing tree"
+    fi
+  else
+    echo "[entrypoint] fetch FAILED; continuing on the existing checkout"
+  fi
 else
   echo "[entrypoint] cloning $TRIOS_REPO_URL@$TRIOS_REPO_REF into $REPO_DIR"
   # Blobless rather than shallow: agents need real history for `git log` and
