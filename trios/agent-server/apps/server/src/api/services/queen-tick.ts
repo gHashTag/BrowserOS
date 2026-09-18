@@ -3319,6 +3319,13 @@ export async function reviewFinishedDispatches(
       reviewerModel: reviewer?.model ?? null,
       reviewerProvider: reviewer?.provider ?? null,
       reviewerSameVendor: reviewer?.sameVendor ?? null,
+      // The bee's own model beside the reviewer's, because `sameVendor` is a
+      // conservative default: with the bee's model missing from the row it
+      // reads `true` (no separation claimed) even when the reviewer ran on
+      // another vendor entirely - #3972 was judged by nemotron over a z.ai bee
+      // and still logged sameVendor=true. The two names let a reader tell
+      // "we could not know" from "it really was the same model".
+      beeModel: (row.model as string | null) ?? null,
       reviewerCached: reviewer?.cached ?? false,
       reviewerSkipped: reviewer ? '' : reviewerSkipped,
       reviewerMisses,
