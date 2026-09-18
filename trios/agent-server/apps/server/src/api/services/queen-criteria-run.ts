@@ -143,6 +143,38 @@ export const CRITERION_PROGRAMS: ReadonlySet<string> = new Set([
   'echo',
 ])
 
+/**
+ * The `t27c` subcommands a criterion may name.
+ *
+ * `t27c --help` lists 180 of them, and they are not all readers. `battery` and
+ * `gates` RUN every `check_*.py` in the tree, `silicon` drives a bitstream
+ * build, `fpga-flash` writes to hardware, `serve` and `bridge` open sockets,
+ * `fmt`, `rename` and `seal` edit files. The tree they would act on is the bee's
+ * own commit, so an allowlist of programs alone hands a bee the ability to run
+ * a script it just wrote by putting `t27c battery` in an issue's criteria.
+ *
+ * So the subcommand is allowlisted too, to the ones that only READ a spec and
+ * print an answer - which is all an acceptance criterion in this repository has
+ * ever needed (measured over the open backlog: spec-status, gen, parse and
+ * typecheck cover every criterion that names the compiler).
+ */
+export const CRITERION_T27C_SUBCOMMANDS: ReadonlySet<string> = new Set([
+  'spec-status',
+  'impl-status',
+  'classify',
+  'parse',
+  'parse-complete',
+  'parse-conform',
+  'typecheck',
+  'gen',
+  'gen-c',
+  'gen-rust',
+  'gen-verilog',
+  'frozen-digest',
+  'version',
+  '--version',
+])
+
 /** The one place a command may write, before the runner rewrites it. */
 const SCRATCH_PREFIX = '/tmp/t27-'
 const SCRATCH_TARGET = /^\/tmp\/t27-[A-Za-z0-9._-]+$/
@@ -378,6 +410,17 @@ export function commandSafety(cmd: string): CommandSafety {
         return refused(
           `${token.value || 'an empty word'} is not an allowed program`,
         )
+      }
+      // The subcommand is part of which program this is: `t27c battery` runs
+      // the tree's own scripts, and the tree is the bee's commit.
+      if (token.value === 't27c') {
+        const sub = tokens[k + 1]
+        if (!sub || sub.kind !== 'word') {
+          return refused('t27c with no subcommand')
+        }
+        if (!CRITERION_T27C_SUBCOMMANDS.has(sub.value)) {
+          return refused(`t27c ${sub.value} is not a read-only subcommand`)
+        }
       }
       program = token.value
       expectProgram = false

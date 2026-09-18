@@ -258,6 +258,37 @@ describe('criteria become checks', () => {
   })
 })
 
+describe('t27c is allowed only where it reads', () => {
+  // `t27c --help` lists 180 subcommands and they are not all readers: `battery`
+  // and `gates` run every `check_*.py` in the tree, and the tree is the bee's
+  // own commit. A program allowlist alone would let a criterion run a script
+  // the bee wrote in the same attempt.
+  it.each([
+    ['t27c battery'],
+    ['t27c gates'],
+    ['t27c silicon'],
+    ['t27c serve'],
+    ['t27c fmt specs/a.t27'],
+    ['t27c seal specs/a.t27'],
+    ['t27c rename specs/a.t27'],
+    ['t27c fpga-flash'],
+    ['t27c'],
+    ['grep -c x specs/a.t27 && t27c battery'],
+  ])('refuses %s', (cmd) => {
+    expect(isSafeCommand(cmd)).toBe(false)
+  })
+
+  it.each([
+    ['t27c spec-status specs/a.t27'],
+    ['t27c gen specs/a.t27 | wc -l'],
+    ['t27c parse specs/a.t27 2>&1 | grep -c x'],
+    ['t27c typecheck specs/a.t27'],
+    ['t27c impl-status'],
+  ])('allows %s', (cmd) => {
+    expect(isSafeCommand(cmd)).toBe(true)
+  })
+})
+
 describe('the filter', () => {
   it.each([
     ['t27c gen specs/a.t27; rm -rf /'],
