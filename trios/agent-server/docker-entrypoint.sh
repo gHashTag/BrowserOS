@@ -59,6 +59,18 @@ else
   echo "[entrypoint] no unprivileged account configured; git runs as the current user"
 fi
 
+# An agent that commits needs an author. Without one git refuses the commit
+# with a message about --global config, which reads as a broken tool rather
+# than a missing setting.
+#
+# BEFORE the fetch, not after: `git stash` writes a commit too, so with the
+# identity still unset it printed "Aborting" and left the tree dirty, which is
+# how eleven paths survived a stash that had just said it saved them.
+if [ -d "$REPO_DIR/.git" ]; then
+  $AS_USER "git -C '$REPO_DIR' config user.name '${GIT_AUTHOR_NAME:-Trinity Bee}' \
+    && git -C '$REPO_DIR' config user.email '${GIT_AUTHOR_EMAIL:-bee@trinity.local}'"
+fi
+
 if [ -d "$REPO_DIR/.git" ]; then
   echo "[entrypoint] checkout present at $REPO_DIR; fetching $TRIOS_REPO_REF"
   # A failed fetch is not a reason to refuse to serve. The checkout on disk is
@@ -114,9 +126,6 @@ else
     || { echo "[entrypoint] clone FAILED; starting without a checkout"; exec "$@"; }
 fi
 
-# An agent that commits needs an author. Without one git refuses the commit
-# with a message about --global config, which reads as a broken tool rather
-# than a missing setting.
 $AS_USER "git -C '$REPO_DIR' config user.name '${GIT_AUTHOR_NAME:-Trinity Bee}' \
   && git -C '$REPO_DIR' config user.email '${GIT_AUTHOR_EMAIL:-bee@trinity.local}'"
 
