@@ -53,6 +53,7 @@ import {
   workerCapacityBreakdown,
 } from '../services/queen-dispatch'
 import { queenLeaseDatabaseUrl } from '../services/queen-lease'
+import { dispatchRowState } from '../services/queen-tick'
 
 interface QueryResult {
   rowCount: number | null
@@ -275,11 +276,44 @@ function pathsOverlap(first: string, second: string): boolean {
  * here - the query excludes it, and its issue is released back to BACKLOG,
  * which is what the Queen does with it too.
  */
-function dispatchColumn(row: Record<string, unknown>): string {
-  const verdict = row.review_state == null ? '' : String(row.review_state)
-  if (verdict === 'accept') return 'done'
-  if (verdict !== '') return 'review'
-  return row.finished_at ? 'review' : 'running'
+/**
+ * AND IT IS DRAWN BY THE QUEEN'S OWN RULE, NOT A RULE OF ITS OWN.
+ *
+ * This was "any verdict but accept is review", with no clock and no valve, and
+ * measured 2026-09-17 the public board showed ~180 cards in review while 30 of
+ * 32 worker lanes sat idle. About 41 of them were live waits. The rest were
+ * send-backs past their idle floor, frozen waits, empty attempts and escalated
+ * rows of issues closed long ago - every one of which the Queen had already
+ * released or finished with. So the state now comes from `dispatchRowState`,
+ * the function the round itself decides with, and the valve constants stay in
+ * queen-tick.ts:
+ *
+ *   failed (empty, failed, cancelled, a released wait or send-back) -> dropped
+ *   awaitingReview, rejected                                          -> review
+ *   accepted                                                          -> done
+ *   running                                                           -> running
+ *
+ * A FINISHED dispatch whose issue is no longer open is done: nobody is going to
+ * judge it again (the review sweep skips closed issues). "No longer open" is
+ * trusted only against a non-empty issue list - the sweep's own guard - because
+ * an empty one means the sync has not run, not that everything closed. A bee
+ * still RUNNING on a closed issue stays in running: it is spending a lane, and
+ * the lane count is the number an operator reads this page for.
+ */
+function dispatchColumn(
+  row: Record<string, unknown>,
+  now: number,
+  openIssues: Set<number> | null,
+): string {
+  const state = dispatchRowState(row, now)
+  if (
+    state !== 'running' &&
+    openIssues !== null &&
+    !openIssues.has(row.issue as number)
+  ) {
+    return 'done'
+  }
+  return columnFor(state)
 }
 
 /** What the dispatch card says under its title. */
@@ -415,7 +449,8 @@ async function build(
       // place that showed was a headline claiming an issue was ready while the
       // Queen's own sentence underneath said there was nothing to choose.
       `SELECT issue, branch, started, detail, finished_at, outcome,
-              review_state, review_note, owned_paths, dispatched_at
+              review_state, review_note, owned_paths, dispatched_at,
+              send_backs
          FROM queen_dispatch
         WHERE started = true
           AND (finished_at IS NULL OR outcome NOT LIKE 'reaped%')
@@ -535,7 +570,7 @@ export function composeCards(input: BoardInput): Card[] {
   const now = input.now ?? Date.now()
   const cards = new Map<number, Card>()
   addRegistryTasks(cards, input.tasks)
-  addInFlight(cards, input.dispatches, input.issues)
+  addInFlight(cards, input.dispatches, input.issues, now)
   addUntakenIssues(cards, input.issues, input.tasks, now, input.dispatches)
   addCriteria(cards, input.issues)
   addLastRoundReasons(cards, input.decision)
@@ -590,7 +625,12 @@ function addInFlight(
   cards: Map<number, Card>,
   rows: Array<Record<string, unknown>>,
   issueRows: Array<Record<string, unknown>>,
+  now: number,
 ): void {
+  const openIssues =
+    issueRows.length > 0
+      ? new Set(issueRows.map((row) => row.number as number))
+      : null
   // The issue list, keyed, so a dispatch can borrow the title and boundary its
   // own row does not carry. Without this the RUNNING column - the one an
   // operator looks at first - showed bare numbers where every other column had
@@ -613,7 +653,7 @@ function addInFlight(
       // Finished is not free. A turn that ended with work sits in review until
       // somebody judges it - but once she HAS judged it, that verdict is the
       // fact worth showing, and it was on no surface in this deployment.
-      column: dispatchColumn(row),
+      column: dispatchColumn(row, now, openIssues),
       paths: prior?.paths?.length
         ? prior.paths
         : (known.get(number)?.paths ?? []),
@@ -638,13 +678,16 @@ function addInFlight(
  * was simultaneously too permissive about paths and too strict about age, on
  * the one screen built to explain why the swarm is stalled.
  */
-/** A cloud dispatch as a task state, from its ending and its verdict. */
-function dispatchState(row: Record<string, unknown>): string {
-  if (!row.finished_at) return 'running'
-  const verdict = String(row.review_state ?? '')
-  if (verdict === 'accept') return 'accepted'
-  if (verdict === 'sendBack') return 'rejected'
-  return 'awaitingReview'
+/**
+ * A cloud dispatch as a task state, from its ending, its verdict and its clock.
+ *
+ * The Queen's own function, for the same reason the column is: this state
+ * decides who is named as a HOLDER, and a released send-back or an empty
+ * attempt named in "held by" is a board saying blocked about files the round
+ * will hand out on its next tick.
+ */
+function dispatchState(row: Record<string, unknown>, now: number): string {
+  return dispatchRowState(row, now)
 }
 
 function addUntakenIssues(
@@ -671,7 +714,7 @@ function addUntakenIssues(
     // Same rule as the round's, and for the same reason: work the Queen has
     // ACCEPTED is terminal and holds nothing. Mapping every finished dispatch
     // to awaitingReview kept accepted work reserving its files for 48 hours.
-    state: dispatchState(row),
+    state: dispatchState(row, now),
     ownedPaths: asPaths(row.owned_paths),
     updatedAt: String(row.finished_at ?? row.dispatched_at ?? ''),
   }))

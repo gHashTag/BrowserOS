@@ -245,23 +245,26 @@ export interface WorkerProvider {
  * its padding, and handing the trimmed form out keeps the count and the
  * selection - which both read this list - from ever disagreeing.
  *
- * The suffix runs to MAX_KEYS_PER_POOL. It used to stop at 16, and 16 was never
- * a measurement: it was where the loop happened to end, equal by coincidence to
- * the policy ceiling on bees. They are different quantities. The ceiling bounds
- * how many bees RUN; this bounds how many credentials the rotation may SPREAD
- * them over, and a free key refuses its third concurrent request in under half
- * a second (`1302`), so a swarm at the ceiling wants more keys than bees, not
- * the same number. A seventeenth variable used to be read by nothing and
- * reported by nothing, which is the zero-length-key trap again: it looks
- * configured and supplies nothing. Widening the list does not widen the swarm -
- * `queenWorkerLimit` still decides that.
+ * The suffixes are READ FROM THE ENVIRONMENT, not counted up to a number. The
+ * loop used to stop at 16 and then at 1024, and both were the same kind of
+ * mistake: a bound that says nothing when it binds. `_17` was read by nothing
+ * while the loop ended at 16, and `_1025` would have been read by nothing
+ * after it. Asking the environment which suffixed names exist has no such
+ * edge - every variable an operator can see in the editor is a variable this
+ * function reads - and it costs the size of the environment rather than the
+ * size of a range.
  *
- * 1024 rather than a round thousand so that this bound can never sit BELOW a
- * worker ceiling expressed as a power of two: with one lane per credential a
- * swarm of N bees needs N keys, and a key bound under the worker bound would be
- * a second, hidden ceiling that reports nothing when it is hit.
+ * Order is the numeric suffix, the unsuffixed name first, so every index a
+ * deployment has already written still names the same key. A suffix must be a
+ * plain integer of two or more (`_2`, `_17`, `_4096`): `_02`, `_1` and `_x`
+ * are not key names and are ignored rather than guessed at.
+ *
+ * What remains is a consequence, not a policy: a pool is cut at
+ * MAX_KEYS_PER_POOL because the durable index of the next pool starts at
+ * POOL_KEY_STRIDE, and that stride is already written in production rows.
+ * Widening the list does not widen the swarm - `queenWorkerLimit` decides that.
  */
-export const MAX_KEYS_PER_POOL = 1024
+export const MAX_KEYS_PER_POOL = 9_999
 
 function keysFor(envVar: string): string[] {
   const keys: string[] = []
@@ -273,8 +276,16 @@ function keysFor(envVar: string): string[] {
     keys.push(trimmed)
   }
   admit(process.env[envVar])
-  for (let i = 2; i <= MAX_KEYS_PER_POOL; i++) {
-    admit(process.env[`${envVar}_${i}`])
+  const prefix = `${envVar}_`
+  const suffixes = Object.keys(process.env)
+    .filter((name) => name.startsWith(prefix))
+    .map((name) => name.slice(prefix.length))
+    .filter((suffix) => /^[1-9]\d*$/.test(suffix) && Number(suffix) >= 2)
+    .map(Number)
+    .sort((a, b) => a - b)
+  for (const suffix of suffixes) {
+    if (keys.length >= MAX_KEYS_PER_POOL) break
+    admit(process.env[`${envVar}_${suffix}`])
   }
   return keys
 }
@@ -311,18 +322,25 @@ function workerLanesFor(provider: string): number {
  * dispatch, and promising less hides capacity that was paid for.
  *
  * So both sides now read the SAME environment variable, with the same default
- * and the same ceiling. That ceiling is 1024 and it is a guard against a typo,
- * not a working value: capacity is decided by connected credentials times
- * lanes and by the number the operator sets. It used to be 16, which sat below
- * the credentials a deployment could connect once endpoint pools existed, and
- * said nothing when it bound. Review cost is still linear in running workers -
- * that is why the operator picks the VALUE by measurement. The Swift side
- * records the full reasoning.
+ * and the same ceiling. That ceiling is WORKER_SANITY_BOUND and it no longer
+ * bounds a real deployment: capacity is decided by connected credentials times
+ * lanes and by the number the operator sets. It was 16, then 1024, and both
+ * times it ended up sitting below credentials a deployment could connect and
+ * saying nothing when it bound. As a guard against a typo 1024 protected
+ * little: an operator who meant 50 and typed 5000 over two thousand connected
+ * lanes got 1024 bees instead of 2000, and either number ends a container
+ * sized for fifty. What actually bounds a mistyped value is the credential
+ * list - dispatch refuses when every lane is taken - so the constant only has
+ * to stop a value that is not a number of bees at all. Review cost is still
+ * linear in running workers, which is why the operator picks the VALUE by
+ * measurement. The Swift side records the full reasoning.
  */
-function queenWorkerLimit(): number {
+export const WORKER_SANITY_BOUND = 1_000_000
+
+export function queenWorkerLimit(): number {
   const parsed = Number(process.env.TRIOS_QUEEN_MAX_WORKERS)
   if (!Number.isInteger(parsed) || parsed < 1) return 4
-  return Math.min(parsed, 1024)
+  return Math.min(parsed, WORKER_SANITY_BOUND)
 }
 
 /**
@@ -515,13 +533,13 @@ function availableKeyIndex(
  * sixteen bees while three working NVIDIA keys sat unused next to them.
  *
  * So the FIRST pool is exactly the variables that already exist, unchanged in
- * name and meaning, and further pools are numbered from 2:
+ * name and meaning, and further pools are numbered from 2, as many as exist:
  *
  *   TRIOS_QUEEN_WORKER_POOL_<n>_BASE_URL   the endpoint (required)
  *   TRIOS_QUEEN_WORKER_POOL_<n>_MODEL      the model THAT endpoint serves (required)
  *   TRIOS_QUEEN_WORKER_POOL_<n>_PROVIDER   openai-compatible (default) or zai
  *   TRIOS_QUEEN_WORKER_POOL_<n>_CONTEXT    that model's context window
- *   TRIOS_QUEEN_WORKER_POOL_<n>_API_KEY, _API_KEY_2 ... (MAX_KEYS_PER_POOL)
+ *   TRIOS_QUEEN_WORKER_POOL_<n>_API_KEY, _API_KEY_2, _API_KEY_3 ... (any number of them)
  *
  * A pool is REMOTE credentials by definition. A local Ollama stays what it was
  * measured to be - one inference slot - and does not join a credential pool,
@@ -534,7 +552,6 @@ function availableKeyIndex(
  * breakdown (#1308) an exact statement: credentials x lanes, bounded by the
  * policy ceiling.
  */
-const MAX_ENDPOINT_POOLS = 8
 const REMOTE_ENDPOINT_PROVIDERS = new Set(['openai-compatible', 'zai'])
 
 /**
@@ -551,6 +568,35 @@ const REMOTE_ENDPOINT_PROVIDERS = new Set(['openai-compatible', 'zai'])
  * one - a test holds the two constants to that.
  */
 export const POOL_KEY_STRIDE = 10_000
+
+/**
+ * The numbers of the pools someone has started to configure, ascending.
+ *
+ * Discovered from the environment for the same reason the key suffixes are:
+ * "up to eight" was a bound nobody chose, and a ninth pool would have been
+ * configured in the editor and read by nothing. The only ceiling left is
+ * arithmetic - `key_index` is a 32-bit column and pool n starts at
+ * (n - 1) * POOL_KEY_STRIDE - so a pool number past MAX_POOL_NUMBER cannot be
+ * named durably and is reported by `endpointPoolProblems` instead of being
+ * silently dropped.
+ */
+export const MAX_POOL_NUMBER = Math.floor(2_147_483_647 / POOL_KEY_STRIDE) - 1
+
+function configuredPoolNumbers(): { usable: number[]; tooLarge: number[] } {
+  const numbers = new Set<number>()
+  for (const name of Object.keys(process.env)) {
+    const match =
+      /^TRIOS_QUEEN_WORKER_POOL_([1-9]\d*)_(BASE_URL|API_KEY(_[1-9]\d*)?)$/.exec(
+        name,
+      )
+    if (match && process.env[name]?.trim()) numbers.add(Number(match[1]))
+  }
+  const sorted = [...numbers].filter((n) => n >= 2).sort((a, b) => a - b)
+  return {
+    usable: sorted.filter((n) => n <= MAX_POOL_NUMBER),
+    tooLarge: sorted.filter((n) => n > MAX_POOL_NUMBER),
+  }
+}
 
 interface EndpointPool {
   /** 1-based; 1 is the pool made of the unnumbered variables. */
@@ -588,7 +634,13 @@ function contextWindowFrom(raw: string | undefined): number {
  */
 export function endpointPoolProblems(): string[] {
   const problems: string[] = []
-  for (let n = 2; n <= MAX_ENDPOINT_POOLS; n++) {
+  const discovered = configuredPoolNumbers()
+  for (const n of discovered.tooLarge) {
+    problems.push(
+      `${poolVariable(n, 'BASE_URL')} names pool ${n}, above the ${MAX_POOL_NUMBER} a durable key index can address`,
+    )
+  }
+  for (const n of discovered.usable) {
     const baseUrl = cleanBaseUrl(process.env[poolVariable(n, 'BASE_URL')])
     const keys = keysFor(poolVariable(n, 'API_KEY'))
     if (!baseUrl && keys.length === 0) continue
@@ -645,7 +697,7 @@ function configuredEndpointPools(): EndpointPool[] {
     },
   ]
   if (provider === 'ollama') return pools
-  for (let n = 2; n <= MAX_ENDPOINT_POOLS; n++) {
+  for (const n of configuredPoolNumbers().usable) {
     const poolUrl = cleanBaseUrl(process.env[poolVariable(n, 'BASE_URL')])
     const poolProvider =
       process.env[poolVariable(n, 'PROVIDER')]?.trim() || 'openai-compatible'
@@ -879,6 +931,87 @@ export function resolveWorkerProvider(
   return null
 }
 
+/**
+ * Every credential lane a one-shot REVIEW may use right now, across every
+ * connected pool and every legacy provider that holds a key.
+ *
+ * Additive, and it reads the allocator's own inputs rather than restating
+ * them: the pools, the keys, the lanes per credential and the durable
+ * `key_index` numbering are exactly the ones `resolveWorkerProvider` hands to
+ * bees. A lane is offered only while its credential carries fewer requests than
+ * its lane count - so a review never becomes the third concurrent request on a
+ * z.ai key already carrying two bees, which measured 2026-09-15 is refused in
+ * under half a second with `1302`, and a refusal there would be blamed on the
+ * review rather than on the arithmetic.
+ *
+ * Legacy providers after the first are offered too, with no occupancy: bees
+ * only ever run on the FIRST provider that holds a key, so a second vendor's
+ * key is idle by construction - and it is exactly the second model the
+ * adversarial reviewer (#1127) wants. Rehearsal is never offered: a recorded
+ * stream cannot judge anything.
+ */
+export function reviewLaneCandidates(
+  takenKeyIndices: number[] = [],
+): WorkerProvider[] {
+  const busy = (index: number) =>
+    takenKeyIndices.filter((taken) => taken === index).length
+  const out: WorkerProvider[] = []
+  if (configuredWorkerBaseUrl()) {
+    for (const pool of configuredEndpointPools()) {
+      const local = pool.provider === 'ollama'
+      const keys = local
+        ? [keysFor(GENERIC_WORKER_KEY_ENV)[0] || 'local']
+        : pool.keys
+      const laneCount = local ? 1 : configuredRemoteLanesPerCredential()
+      keys.forEach((key, position) => {
+        const durableIndex = (pool.number - 1) * POOL_KEY_STRIDE + position
+        const occupancy = busy(durableIndex)
+        if (occupancy >= laneCount) return
+        out.push({
+          provider: pool.provider,
+          model: pool.model,
+          baseUrl: pool.baseUrl,
+          apiKey: key,
+          keyIndex: durableIndex,
+          keyCount: keys.length,
+          poolNumber: pool.number,
+          laneIndex: occupancy,
+          laneCount,
+          contextWindow: pool.contextWindow,
+        })
+      })
+    }
+    return out
+  }
+  let first = true
+  for (const candidate of WORKER_PROVIDERS) {
+    const keys = keysFor(candidate.envVar)
+    if (keys.length === 0) continue
+    const laneCount = workerLanesFor(candidate.provider)
+    keys.forEach((key, index) => {
+      const occupancy = first ? busy(index) : 0
+      if (occupancy >= laneCount) return
+      out.push({
+        provider: candidate.provider,
+        // The worker model override names a model of the bees' provider;
+        // sent to a second vendor it is a 404 blamed on the review.
+        model: first
+          ? process.env.TRIOS_QUEEN_WORKER_MODEL || candidate.model
+          : candidate.model,
+        apiKey: key,
+        // Only the bees' own provider shares the durable index space; a
+        // second vendor's index would collide with a bee's and mean nothing.
+        keyIndex: first ? index : undefined,
+        keyCount: keys.length,
+        laneIndex: occupancy,
+        laneCount,
+      })
+    })
+    first = false
+  }
+  return out
+}
+
 /** One line naming what is missing, and who can supply it. */
 export function missingProviderRefusal(): string {
   const endpoint = configuredWorkerBaseUrl()
@@ -923,7 +1056,17 @@ function run(
   args: string[],
   cwd: string,
   timeoutMs = 120_000,
-): Promise<{ code: number; out: string }> {
+  /**
+   * Stop reading, and kill the group, once this many characters have
+   * arrived. Optional and additive: every existing caller reads its whole
+   * output exactly as before. The reviewer's patch needs it because the
+   * cut it applies afterwards protected the prompt and not the process - a
+   * bee that commits a few hundred MB of generated text would otherwise be
+   * held in full, several times over, inside the server every running bee
+   * streams through.
+   */
+  maxOutChars?: number,
+): Promise<{ code: number; out: string; capped?: boolean }> {
   const quoted = [command, ...args]
     .map((a) => `'${a.replaceAll("'", `'\\''`)}'`)
     .join(' ')
@@ -938,12 +1081,28 @@ function run(
     let killTimer: ReturnType<typeof setTimeout> | undefined
     let hardTimer: ReturnType<typeof setTimeout> | undefined
 
+    let capped = false
     const finish = (code: number, extra = '') => {
       if (settled) return
       settled = true
       if (killTimer) clearTimeout(killTimer)
       if (hardTimer) clearTimeout(hardTimer)
-      resolve({ code, out: (out + extra).trim() })
+      resolve(
+        capped
+          ? { code: 0, out: out.slice(0, maxOutChars), capped: true }
+          : { code, out: (out + extra).trim() },
+      )
+    }
+    const stopAtCap = () => {
+      if (maxOutChars === undefined || capped || out.length < maxOutChars)
+        return
+      capped = true
+      try {
+        if (child.pid) process.kill(-child.pid, 'SIGKILL')
+      } catch {
+        child.kill('SIGKILL')
+      }
+      finish(0)
     }
 
     // SIGKILL on `su` alone leaves the git it spawned alive, and that grandchild
@@ -970,10 +1129,14 @@ function run(
     )
 
     child.stdout.on('data', (d) => {
+      if (capped) return
       out += d
+      stopAtCap()
     })
     child.stderr.on('data', (d) => {
+      if (capped) return
       out += d
+      stopAtCap()
     })
     child.on('error', (e) => finish(-1, String(e)))
     child.on('close', (code) => finish(code ?? -1))
@@ -1044,6 +1207,27 @@ export function baseRef(): string {
  * empty list that came from a clean branch by reading the record.
  */
 export async function committedFiles(issue: number): Promise<string[]> {
+  const result = await committedFilesResult(issue)
+  return result.ok ? result.files : []
+}
+
+/**
+ * The same diff, with the failure kept apart from the empty branch.
+ *
+ * `committedFiles` returns `[]` for both, and the review could therefore not
+ * release an EMPTY attempt without also releasing a BROKEN diff. Measured on
+ * the live board 2026-09-17: of ~180 cards in review only ~41 were live waits,
+ * and most of those were attempts that committed nothing at all - turns killed
+ * by deploy restarts (188 of 541 dispatches in 24h never finished), z.ai
+ * 1302/429 ending a turn within seconds, edits left uncommitted in a reused
+ * worktree. Such an attempt is safe to hand back at once. A diff that FAILED is
+ * not: the branch may carry a finished commit nobody could read, and releasing
+ * it would cut a fresh bee over it. So the two answers are two shapes here,
+ * and `committedFiles` stays the thin wrapper every other caller already uses.
+ */
+export async function committedFilesResult(
+  issue: number,
+): Promise<{ ok: true; files: string[] } | { ok: false; error: string }> {
   const base = baseRef()
   const root = workspaceRoot()
   const out = await run(
@@ -1053,6 +1237,7 @@ export async function committedFiles(issue: number): Promise<string[]> {
     60_000,
   )
   if (out.code !== 0) {
+    const error = out.out.trim().slice(0, 300)
     logger.warn('The committed-file diff failed; no file can be named', {
       issue,
       base,
@@ -1060,20 +1245,904 @@ export async function committedFiles(issue: number): Promise<string[]> {
       root,
       code: out.code,
       // `run` merges the two streams, so git's diagnosis is in `out`.
-      error: out.out.trim().slice(0, 300),
+      error,
     })
-    return []
+    return { ok: false, error: error || `git diff exited ${out.code}` }
   }
-  return out.out
-    .split('\n')
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0)
+  return {
+    ok: true,
+    files: out.out
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0),
+  }
+}
+
+/** A full commit id, or null. `run` trims, so a good answer is exactly 40 hex. */
+function shaFrom(out: { code: number; out: string }): string | null {
+  if (out.code !== 0) return null
+  const sha = out.out.trim()
+  return /^[0-9a-f]{40,64}$/.test(sha) ? sha : null
+}
+
+/**
+ * The commit a bee's branch points at, or null when it cannot be read.
+ *
+ * Half of the reviewer's cache key: an adversarial review is a paid model call,
+ * and a `wait` row is re-read every round. A verdict about a head that has not
+ * moved is still a verdict about the same work, so it is reused rather than
+ * bought again.
+ */
+export async function branchHeadSha(issue: number): Promise<string | null> {
+  return shaFrom(
+    await run(
+      'git',
+      ['rev-parse', '--verify', `queen-${issue}^{commit}`],
+      workspaceRoot(),
+      30_000,
+    ),
+  )
+}
+
+/** The commit the base ref points at - the other half of the cache key. */
+export async function baseHeadSha(): Promise<string | null> {
+  return shaFrom(
+    await run(
+      'git',
+      ['rev-parse', '--verify', `${baseRef()}^{commit}`],
+      workspaceRoot(),
+      30_000,
+    ),
+  )
+}
+
+/**
+ * The commit a bee's branch forked from the base at, or null.
+ *
+ * The other half of the reviewer's cache key, in place of the base head. The
+ * patch a reviewer reads is `base...branch`, which git measures from exactly
+ * this commit - so the base moving on (every `git fetch` a round or a dispatch
+ * does) changes nothing the reviewer was shown, and keying on the base HEAD
+ * re-bought an identical review each time it did.
+ */
+export async function mergeBaseSha(issue: number): Promise<string | null> {
+  return shaFrom(
+    await run(
+      'git',
+      ['merge-base', baseRef(), `queen-${issue}`],
+      workspaceRoot(),
+      30_000,
+    ),
+  )
+}
+
+/**
+ * What the branch changed, as a patch a reviewer can cite line by line.
+ *
+ * Bounded, and the bound is SAID: a patch silently cut at N characters reads
+ * as a patch that ends there, and a reviewer told nothing would judge the
+ * missing half as absent work. The marker names how much was dropped so the
+ * reviewer answers could-not-check for what it cannot see. Null when the diff
+ * fails, for the same reason `committedFilesResult` keeps failure apart.
+ */
+export async function branchPatch(
+  issue: number,
+  maxChars: number,
+): Promise<string | null> {
+  // `--no-ext-diff --no-textconv`: the linked worktrees share the main
+  // `.git/config`, and the bee account can write it. A `diff.external` or a
+  // textconv driver set from a worktree decides what this command PRINTS - so
+  // without these flags the defendant could write the patch its adversary
+  // reads. Measured on a scratch repository laid out like the volume: one
+  // `git config diff.external` run inside `.worktrees/queen-N` replaced the
+  // real patch with the script's text.
+  //
+  // Read with a cap at twice the bound, so an oversized patch is known to be
+  // oversized - and by how much, up to the cap - without ever being held
+  // whole.
+  const out = await run(
+    'git',
+    [
+      'diff',
+      '--no-color',
+      '--no-ext-diff',
+      '--no-textconv',
+      `${baseRef()}...queen-${issue}`,
+    ],
+    workspaceRoot(),
+    60_000,
+    maxChars * 2 + 1,
+  )
+  if (out.code !== 0) return null
+  if (!out.capped && out.out.length <= maxChars) return out.out
+  // Past the cap the exact remainder is unknown, and it is not guessed: the
+  // marker says "at least this many".
+  const dropped = out.out.length - maxChars
+  return `${out.out.slice(0, maxChars)}\n[truncated ${dropped}${out.capped ? '+' : ''} chars]`
+}
+
+/**
+ * How many uncommitted paths the issue's worktree holds, or null when there is
+ * no worktree or git cannot read it.
+ *
+ * An attempt that committed nothing may still have EDITED something - the
+ * measured case is a turn that ran out before `git commit`. The count goes on
+ * the record so an operator can tell "did nothing" from "did not commit", and
+ * nothing is cleaned: a redispatch reuses this worktree (`prepareWorktree`), so
+ * the next bee finds the leftovers where the last one stopped.
+ */
+export async function worktreeDirtCount(issue: number): Promise<number | null> {
+  const path = `${workspaceRoot()}/.worktrees/queen-${issue}`
+  if (!pathExists(path)) return null
+  const dirty = await run('git', ['status', '--porcelain'], path, 60_000)
+  if (dirty.code !== 0) return null
+  return dirty.out.split('\n').filter((l) => l.trim().length > 0).length
 }
 
 /** The same measurement, counted. One rule, asked two ways. */
 export async function committedFileCount(issue: number): Promise<number> {
   return (await committedFiles(issue)).length
 }
+
+/**
+ * The project directory inside the checkout, as a path prefix.
+ *
+ * One reader of `TRIOS_REPO_SUBDIR`, used by the two places that need to know
+ * where the project sits: the working directory a bee is handed, and the
+ * boundary spelling below. Empty string for a repository whose project IS its
+ * root.
+ */
+function repoSubdir(): string {
+  return (process.env.TRIOS_REPO_SUBDIR ?? 'trios').replace(/^\/+|\/+$/g, '')
+}
+
+/** A path with no leading `./` and no trailing slash, for comparison only. */
+function tidyPath(raw: string): string {
+  return raw.replace(/^\.\/+/, '').replace(/\/+$/, '')
+}
+
+/**
+ * Whether one written path lies inside the boundary a dispatch was given.
+ *
+ * BOTH SPELLINGS, for the reason `boundaryStrays` in queen-tick records: git
+ * names a path from the repository root (`trios/docs/x.md`) while an owned
+ * path may be written repository-relative or project-relative (`docs/x.md`).
+ * Each owned path is therefore tried as it stands and again under the project
+ * directory, so either spelling accepts the writes it names.
+ *
+ * THIS IS NOT THE ACCUSER. `queend`'s `boundary` question, asked through
+ * `boundaryStrays`, is still the one rule that decides whether a COMMITTED
+ * path strayed, and that call is untouched. This decides only what the salvage
+ * commit may STAGE, and both ways it can disagree with the accuser are
+ * harmless and visible: narrower, and a file stays uncommitted in the worktree
+ * the next attempt reuses; wider, and the committed path is reported as a
+ * stray by the review exactly as it would be had the bee committed it itself.
+ *
+ * An empty boundary means NOTHING is inside it. A dispatch that declared no
+ * paths did not thereby declare all of them, which is the same reading
+ * `boundaryStrays` and the Swift side already take.
+ */
+export function insideBoundary(
+  written: string,
+  ownedPaths: string[],
+  subdir = repoSubdir(),
+): boolean {
+  const path = tidyPath(written)
+  if (path.length === 0) return false
+  return ownedPaths.some((raw) => {
+    const owned = tidyPath(String(raw ?? ''))
+    if (owned.length === 0) return false
+    const spellings =
+      subdir && owned !== subdir && !owned.startsWith(`${subdir}/`)
+        ? [owned, `${subdir}/${owned}`]
+        : [owned]
+    return spellings.some(
+      (candidate) => path === candidate || path.startsWith(`${candidate}/`),
+    )
+  })
+}
+
+/**
+ * One uncommitted entry as `git status --porcelain -z` reports it.
+ *
+ * `-z` rather than the line format on purpose: without it git QUOTES a path
+ * that carries a space or a non-ASCII byte, and a quoted name handed back to
+ * `git add` names a file that does not exist. The NUL form is the only one
+ * that round-trips.
+ *
+ * A rename carries two paths - the new one and, in the next record, the one it
+ * came from - and they travel together here, because committing half of a
+ * rename is not salvaging work, it is inventing a deletion.
+ */
+export interface DirtEntry {
+  /** Every path this entry touches; all of them are in or all of them are out. */
+  paths: string[]
+  /** The two status columns, as git printed them for this entry. */
+  status: string
+}
+
+/**
+ * Parse the NUL-separated porcelain into entries.
+ *
+ * Anything that does not parse is returned as a one-path entry holding the raw
+ * record, which cannot match a boundary and is therefore left alone. An
+ * unreadable line must not become a committed file.
+ */
+export function parsePorcelainZ(out: string): DirtEntry[] {
+  const records = out.split('\0').filter((r) => r.length > 0)
+  const entries: DirtEntry[] = []
+  for (let i = 0; i < records.length; i++) {
+    const record = records[i]
+    // `XY <path>` - except that `run` TRIMS what it returns, so the FIRST
+    // record of a worktree whose first change is unstaged arrives as
+    // `M file` rather than ` M file`. Measured: a modified tracked file was
+    // read as the path "M trios/docs/keep.md", matched no boundary, and was
+    // left behind by the salvage that existed to commit it. One or two status
+    // characters, then the separating space, then the name.
+    const split = /^(.{1,2}) (.*)$/s.exec(record)
+    if (!split) {
+      entries.push({ paths: [record], status: '' })
+      continue
+    }
+    const status = split[1]
+    const path = split[2]
+    // A rename or a copy: the ORIGIN is the record that follows. Only the
+    // INDEX side reports one, so its status is never the trimmed single
+    // character above - a record that lost its first column lost a space.
+    if (
+      status.length === 2 &&
+      (status[0] === 'R' || status[0] === 'C') &&
+      i + 1 < records.length
+    ) {
+      entries.push({ paths: [path, records[++i]], status })
+      continue
+    }
+    entries.push({ paths: [path], status })
+  }
+  return entries
+}
+
+/** Why a salvage ran. It is written into the commit, so a reader can tell. */
+export type SalvageReason = 'finished' | 'reaped'
+
+/** What one salvage attempt did, and what it deliberately did not do. */
+export interface SalvageResult {
+  /** Whether THIS call wrote a commit. Twice in a row, the second is false. */
+  committed: boolean
+  /** The paths that went into it. */
+  files: string[]
+  /** The paths left uncommitted in the worktree, boundary strays included. */
+  left: string[]
+  /** The commit it wrote, when it wrote one. */
+  sha: string | null
+  /** Why it did what it did, in one sentence, for the log and the row. */
+  detail: string
+}
+
+/**
+ * At most this many paths in one salvage commit.
+ *
+ * A turn that left hundreds of files uncommitted is not the case this exists
+ * for, and one shell command holding every one of their names is a command
+ * that can exceed the argument limit and fail as something else. Past the cap
+ * the commit takes the first `SALVAGE_MAX_PATHS` in sorted order and the rest
+ * are reported as left, which is the honest half-answer; nothing is destroyed
+ * either way, because the next attempt reuses the worktree.
+ */
+export const SALVAGE_MAX_PATHS = 200
+
+/**
+ * COMMIT WHAT A TURN LEFT UNCOMMITTED.
+ *
+ * THE MEASUREMENT. Of 43 finished dispatches re-reviewed in one window on
+ * 2026-09-17/18, 38 had committed nothing, and the first sweep after that
+ * change released 19 attempts as `empty` in one go. In the same 24 hours 116
+ * dispatches recorded "N uncommitted file(s) left by a previous attempt": the
+ * bee HAD edited files, and the turn ended before `git commit` - killed by a
+ * provider 429, by one of 38 deploy restarts (188 of 541 dispatches never
+ * finished), or by the bee simply stopping. The work sat in
+ * `.worktrees/queen-<issue>`, where `committedFiles` cannot see it, so the
+ * review had nothing to judge, the attempt was released as empty, and the next
+ * attempt started from the same uncommitted pile.
+ *
+ * WHAT THIS IS NOT. It does not make the work correct, and it does not claim
+ * to: the commit says in its own subject that it is salvage, the adversarial
+ * reviewer reads it exactly as it reads any other commit, and `t27c` and the
+ * criteria runner still run against it. A salvaged branch that is wrong is a
+ * branch that gets sent back with a reason - which is the outcome the empty
+ * release could never reach.
+ *
+ * WHAT IT REFUSES. A worktree that is not on this dispatch's own branch (a
+ * detached HEAD included), the root checkout, and every path outside the
+ * boundary the dispatch declared. It never pushes: the container holds no push
+ * credential by design, and this changes nothing about that.
+ */
+export async function salvageWorktree(
+  issue: number,
+  ownedPaths: string[],
+  reason: SalvageReason,
+  conversationId: string | null,
+  deps: {
+    /** The git runner. Injected so a suite can watch the argv it invokes. */
+    git?: typeof run
+    /** Does this path exist? Injected for the same reason `prepareWorktree`'s
+     * measurement is: a test must not depend on the developer's disk. */
+    exists?: (target: string) => boolean
+  } = {},
+): Promise<SalvageResult> {
+  const git = deps.git ?? run
+  const exists = deps.exists ?? pathExists
+  const branch = `queen-${issue}`
+  const root = workspaceRoot()
+  const dir = `${root}/.worktrees/${branch}`
+  const nothing = (detail: string, left: string[] = []): SalvageResult => ({
+    committed: false,
+    files: [],
+    left,
+    sha: null,
+    detail,
+  })
+
+  if (!exists(dir)) return nothing('there is no worktree for this issue')
+
+  // ITS OWN BRANCH, OR NOTHING. `--abbrev-ref HEAD` answers `HEAD` for a
+  // detached checkout and the branch name otherwise, so one comparison covers
+  // both refusals the rules ask for: a worktree with no branch of its own, and
+  // a worktree standing on somebody else's.
+  const head = await git(
+    'git',
+    ['rev-parse', '--abbrev-ref', 'HEAD'],
+    dir,
+    60_000,
+  )
+  if (head.code !== 0) {
+    return nothing(
+      `the worktree's HEAD could not be read: ${head.out.slice(0, 200)}`,
+    )
+  }
+  const standing = head.out.trim()
+  if (standing !== branch) {
+    return nothing(
+      `the worktree stands on ${standing || 'no branch'}, not ${branch}, so nothing was committed`,
+    )
+  }
+  // AND NEVER THE ROOT CHECKOUT, asked of git rather than of the string this
+  // function built: a symlink or a bind mount can make two different paths the
+  // same directory, and the one thing that must never carry a salvage commit
+  // is the tree every worktree is cut from.
+  const top = await git('git', ['rev-parse', '--show-toplevel'], dir, 60_000)
+  if (top.code === 0 && top.out.trim() === root) {
+    return nothing('that worktree IS the root checkout; nothing was committed')
+  }
+
+  // `-uall` so an untracked DIRECTORY is reported as its files: a boundary
+  // decides per path, and `?? newdir/` would make it decide about a name no
+  // boundary mentions.
+  const dirty = await git(
+    'git',
+    ['status', '--porcelain', '-z', '-uall'],
+    dir,
+    60_000,
+  )
+  if (dirty.code !== 0) {
+    return nothing(`git status failed: ${dirty.out.slice(0, 200)}`)
+  }
+  const entries = parsePorcelainZ(dirty.out)
+  if (entries.length === 0) return nothing('the worktree is clean')
+  const choice = chooseSalvagePaths(entries, ownedPaths)
+  if (choice.refusal !== null) {
+    return nothing(choice.refusal, choice.left)
+  }
+  const taking = choice.taking
+  const left = choice.left
+
+  const lock = await lockedIndex(git, exists, dir)
+  if (lock !== null) {
+    return nothing(
+      `the worktree's index is locked by ${lock}: either a bee is committing ` +
+        'right now, or a killed git left the lock behind and a person must ' +
+        'remove it',
+      [...taking, ...left].sort(),
+    )
+  }
+
+  const stage = await stageForSalvage(git, dir, taking)
+  if (stage.staged.length === 0) {
+    return nothing(
+      `git add failed: ${stage.error.slice(0, 200)}`,
+      [...taking, ...left].sort(),
+    )
+  }
+  const staged = stage.staged
+  if (stage.dropped.length > 0) {
+    left.push(...stage.dropped)
+    left.sort()
+  }
+
+  // The identity, only when the tree has none. The entrypoint configures one
+  // on the checkout every worktree shares, and overriding a configured author
+  // would rename work that is not this code's to rename.
+  const configured = await git('git', ['config', 'user.email'], dir, 30_000)
+  const identity =
+    configured.code === 0 && configured.out.trim().length > 0
+      ? []
+      : [
+          '-c',
+          `user.name=${process.env.GIT_AUTHOR_NAME || 'Trinity Bee'}`,
+          '-c',
+          `user.email=${process.env.GIT_AUTHOR_EMAIL || 'bee@trinity.local'}`,
+        ]
+
+  // `--only <paths>`: the commit holds these paths and NOTHING else the index
+  // may already carry. A bee that staged a stray before it stopped would
+  // otherwise have that stray committed by this function, which is the one
+  // thing the boundary rule above exists to prevent. `--no-verify` because a
+  // repository hook is the bee's environment, and salvage must not run
+  // arbitrary hook code to close a turn.
+  const written = await git(
+    'git',
+    [
+      ...identity,
+      '-c',
+      'commit.gpgsign=false',
+      'commit',
+      '--no-verify',
+      '--only',
+      '-m',
+      `salvage(${branch}): commit what the turn left uncommitted`,
+      '-m',
+      salvageBody(issue, reason, conversationId, staged.length, left.length),
+      '--',
+      ...staged,
+    ],
+    dir,
+    120_000,
+  )
+  if (written.code !== 0) {
+    // A race with a bee that committed between the status and here reads as
+    // "nothing to commit", and that is not a failure: there is nothing left to
+    // salvage, which is the state this function wanted anyway.
+    const quiet = /nothing to commit|no changes added/i.test(written.out)
+    return nothing(
+      quiet
+        ? 'nothing was left to commit by the time the commit ran'
+        : `git commit failed: ${written.out.slice(0, 200)}${
+            lock === null ? '' : ` (if it was killed, check ${lock})`
+          }`,
+      [...staged, ...left].sort(),
+    )
+  }
+  const sha = shaFrom(await git('git', ['rev-parse', 'HEAD'], dir, 30_000))
+  return {
+    committed: true,
+    files: staged,
+    left,
+    sha,
+    detail: `committed ${staged.length} path(s) the turn left uncommitted${
+      left.length > 0 ? `, left ${left.length} outside the boundary` : ''
+    }`,
+  }
+}
+
+/**
+ * What a dirty worktree offers the salvage, and what it refuses to offer.
+ *
+ * A CONFLICT IS NOT SALVAGE. An unmerged path holds both sides and, often, the
+ * markers between them; committing that would put a file nobody wrote in front
+ * of a reviewer as the bee's work. git refuses a partial commit during a merge
+ * anyway - this refuses first, and says why in a sentence somebody can act on.
+ *
+ * A RECORD THIS CANNOT READ IS NOT A BOUNDARY MISS. `run` appends the child's
+ * stderr to the same buffer it returns, so one line git writes while it walks
+ * the tree for `-uall` ("warning: could not open directory 'x/': Permission
+ * denied", written with the command still exiting 0) arrives glued to whichever
+ * NUL record it landed beside. That record matches no status shape, matches no
+ * boundary, and its file would be reported as a stray and left where it was -
+ * the salvage silently failing at the one job it exists for, with the log
+ * blaming the boundary. A status output this cannot parse means it does not
+ * know what the worktree holds, which is not a state in which to choose what
+ * to commit.
+ *
+ * AND THE CAP COUNTS ENTRIES, NOT PATHS. Slicing a flattened, sorted path list
+ * can cut between a rename's two names - they sort wherever their directories
+ * put them - and half a rename is the invented deletion `parsePorcelainZ` keeps
+ * its pairs together to prevent: `commit --only <new>` leaves HEAD carrying
+ * both copies, and `<old>` alone aborts the add with a pathspec that matches
+ * nothing. So entries are taken whole, and the first one that would cross the
+ * cap stops the taking.
+ */
+export function chooseSalvagePaths(
+  entries: DirtEntry[],
+  ownedPaths: string[],
+): { refusal: string | null; taking: string[]; left: string[] } {
+  const all = () => entries.flatMap((e) => e.paths).sort()
+  const unmerged = entries.filter(
+    (e) => e.status.includes('U') || e.status === 'AA' || e.status === 'DD',
+  )
+  if (unmerged.length > 0) {
+    return {
+      refusal: `the worktree holds ${unmerged.length} unmerged path(s); a conflict is not salvage`,
+      taking: [],
+      left: all(),
+    }
+  }
+  const unreadable = entries.filter((e) => e.status === '')
+  if (unreadable.length > 0) {
+    return {
+      refusal:
+        `git status returned ${unreadable.length} record(s) this cannot parse, ` +
+        'so what the worktree holds is not known; nothing was committed',
+      taking: [],
+      left: all(),
+    }
+  }
+
+  const insideGroups: string[][] = []
+  const left: string[] = []
+  for (const entry of entries) {
+    if (entry.paths.every((p) => insideBoundary(p, ownedPaths)))
+      insideGroups.push([...entry.paths])
+    else left.push(...entry.paths)
+  }
+  insideGroups.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+  left.sort()
+  if (insideGroups.length === 0) {
+    return {
+      refusal:
+        ownedPaths.length === 0
+          ? `${left.length} uncommitted path(s) and no declared boundary to commit them under`
+          : `all ${left.length} uncommitted path(s) fall outside the boundary`,
+      taking: [],
+      left,
+    }
+  }
+
+  const taking: string[] = []
+  const capped: string[] = []
+  for (const group of insideGroups) {
+    if (capped.length > 0 || taking.length + group.length > SALVAGE_MAX_PATHS)
+      capped.push(...group)
+    else taking.push(...group)
+  }
+  taking.sort()
+  if (capped.length > 0) {
+    left.push(...capped)
+    left.sort()
+  }
+  return { refusal: null, taking, left }
+}
+
+/**
+ * The worktree's `index.lock`, when one is there, or null.
+ *
+ * A LOCK IS A HAND ON THE INDEX, and git takes it with no wait and no retry.
+ * Two readings, both fatal to the salvage's purpose: a bee still inside its own
+ * `git commit` loses that commit when the salvage wins the race - the work this
+ * exists to save, destroyed by the saving - and a lock left behind by a SIGKILL
+ * (`run` kills the process GROUP on timeout, and SIGKILL runs no cleanup)
+ * wedges every index write in the tree until a person removes the file. Neither
+ * is a state to commit in, and the path is returned so the refusal can NAME it,
+ * because nothing else in this repository ever will.
+ */
+async function lockedIndex(
+  git: typeof run,
+  exists: (target: string) => boolean,
+  dir: string,
+): Promise<string | null> {
+  const gitDir = await git(
+    'git',
+    ['rev-parse', '--absolute-git-dir'],
+    dir,
+    30_000,
+  )
+  if (gitDir.code !== 0 || gitDir.out.trim().length === 0) return null
+  const lock = `${gitDir.out.trim()}/index.lock`
+  return exists(lock) ? lock : null
+}
+
+/**
+ * Stage the paths the salvage decided to commit, tolerating the ones it
+ * cannot.
+ *
+ * ONE MISSING PATH COSTS ONE PATH. `git add -A -- a b c` aborts the WHOLE
+ * command when a single untracked pathspec matches nothing, and the `git
+ * status` that produced the list and this add are two separate processes
+ * (`su bee -c` apart in production) - so a scratch file the bee's own teardown
+ * removed in between threw away every good file beside it and released the
+ * attempt as `empty`, which is the exact outcome the salvage exists to end.
+ *
+ * AND THE INDEX DECIDES, NOT THE EXIT CODES. A path that is ALREADY staged -
+ * the old half of a `git mv` the bee ran before it stopped - cannot be added
+ * again, because it is in neither the worktree nor the index and the pathspec
+ * matches nothing; and yet it MUST travel into the commit pathspec, or
+ * `commit --only` writes the rename's new file while HEAD keeps the old one.
+ * So the fallback adds one path at a time, ignores the codes, and then asks
+ * `diff --cached` which of them the index actually carries. `--no-renames`,
+ * because the two halves are the two paths this code reasons about; and `diff`
+ * does not require a pathspec to match, so a path that really is gone simply
+ * does not come back.
+ */
+async function stageForSalvage(
+  git: typeof run,
+  dir: string,
+  taking: string[],
+): Promise<{ staged: string[]; dropped: string[]; error: string }> {
+  const added = await git('git', ['add', '-A', '--', ...taking], dir, 120_000)
+  if (added.code === 0) return { staged: taking, dropped: [], error: '' }
+  for (const one of taking) {
+    await git('git', ['add', '-A', '--', one], dir, 30_000)
+  }
+  const inIndex = await git(
+    'git',
+    ['diff', '--cached', '--name-only', '-z', '--no-renames', '--', ...taking],
+    dir,
+    60_000,
+  )
+  const names = new Set(
+    inIndex.code === 0
+      ? inIndex.out.split('\0').filter((n) => n.length > 0)
+      : [],
+  )
+  return {
+    staged: taking.filter((p) => names.has(p)),
+    dropped: taking.filter((p) => !names.has(p)),
+    error: added.out,
+  }
+}
+
+/** The commit body, which says what the commit is and what it is not. */
+function salvageBody(
+  issue: number,
+  reason: SalvageReason,
+  conversationId: string | null,
+  committed: number,
+  left: number,
+): string {
+  return [
+    'The turn ended with these files edited and never committed. Uncommitted',
+    'work is invisible to the review - it reads the branch - so the attempt',
+    'would have been released as empty and the next bee would have started',
+    'beside this work rather than from it.',
+    '',
+    "This commit is not a claim that the work is correct. It is the bee's",
+    'work, committed on its behalf, and it is judged exactly like any other:',
+    'the adversarial reviewer reads it, the compiler runs on it, and the',
+    "issue's own criteria are measured against it.",
+    '',
+    `Issue: #${issue}`,
+    `Turn: ${conversationId ?? 'unknown'}`,
+    `Ending: ${reason === 'reaped' ? 'reaped (the turn was never closed by its own stream)' : 'finished (the turn closed)'}`,
+    `Committed: ${committed} path(s)`,
+    `Left uncommitted: ${left} path(s) outside the declared boundary`,
+  ].join('\n')
+}
+
+/**
+ * Salvage one dispatch's worktree and write down what happened.
+ *
+ * The boundary comes from the ROW, not from the caller: the row is what the
+ * bee was actually dispatched with, and a boundary re-derived from the issue
+ * as it stands now would commit under a contract this turn was never given.
+ *
+ * Every failure here is swallowed and logged. Salvage is a repair that runs on
+ * the way out of a turn, and a repair that can prevent an ending would be a
+ * worse defect than the one it fixes: a dispatch that cannot close holds its
+ * boundary against every overlapping issue until the stall reaper finds it.
+ */
+export async function salvageDispatch(
+  pool: Pool,
+  issue: number,
+  reason: SalvageReason,
+  deps: {
+    salvage?: typeof salvageWorktree
+    exists?: (target: string) => boolean
+    /**
+     * The turn this salvage belongs to. The row must still carry it, or there
+     * is nothing here to salvage FOR this turn and the function does nothing.
+     *
+     * WHY IT IS NOT OPTIONAL IN SPIRIT. `queen_dispatch` holds one row per
+     * ISSUE and a redispatch overwrites it, worktree included: attempt A
+     * stalls, the reaper releases the issue, attempt B is dispatched into the
+     * same `.worktrees/queen-<issue>`, and THEN A's stream ends and closes.
+     * `finishDispatch` already takes a conversation for exactly this reason
+     * ("routine rather than exotic", in its own words). Without the same guard
+     * here, A's late close commits B's half-written files as finished work,
+     * takes the index lock out from under a bee that is running, and stamps
+     * the salvage columns on B's live row.
+     */
+    conversationId?: string | null
+    /** Refuse a row that already finished. The close path passes true: a turn
+     * that is closing has not been ended by anybody else yet. The reapers pass
+     * nothing, because a reaped row is one they are about to end themselves. */
+    requireOpen?: boolean
+  } = {},
+): Promise<SalvageResult> {
+  const salvage = deps.salvage ?? salvageWorktree
+  const exists = deps.exists ?? pathExists
+  const quiet = (detail: string): SalvageResult => ({
+    committed: false,
+    files: [],
+    left: [],
+    sha: null,
+    detail,
+  })
+  // THE CHEAP QUESTION FIRST, and it is not only a speed argument: every
+  // deployment without a worktree for this issue - a local server, a suite
+  // driving `closeDispatch` against a fake pool - must reach the ending
+  // through exactly the statements it always did.
+  if (!exists(`${workspaceRoot()}/.worktrees/queen-${issue}`)) {
+    return quiet('there is no worktree for this issue')
+  }
+  try {
+    const row = await pool.query(
+      `SELECT owned_paths, conversation_id FROM queen_dispatch
+        WHERE issue = $1
+          AND ($2::text IS NULL OR conversation_id::text = $2::text)
+          AND ($3::boolean = false OR finished_at IS NULL)`,
+      [issue, deps.conversationId ?? null, deps.requireOpen === true],
+    )
+    const record = row.rows?.[0] as
+      | { owned_paths?: unknown; conversation_id?: unknown }
+      | undefined
+    // NO ROW IS AN ANSWER, not a missing boundary. The row moved on - another
+    // attempt owns this issue and this worktree now - so this turn has nothing
+    // left to salvage, and committing under a boundary it was never given
+    // would be worse than committing nothing.
+    if (!record) {
+      return quiet(
+        'the dispatch row no longer belongs to this turn, so nothing was ' +
+          'salvaged for it',
+      )
+    }
+    const ownedPaths = Array.isArray(record?.owned_paths)
+      ? (record.owned_paths as unknown[]).map((p) => String(p))
+      : []
+    const conversationId =
+      record?.conversation_id == null ? null : String(record.conversation_id)
+    const result = await salvage(issue, ownedPaths, reason, conversationId, {
+      exists: deps.exists,
+    })
+    if (result.committed) {
+      logger.info('Queen salvaged the work a turn left uncommitted', {
+        issue,
+        reason,
+        conversationId,
+        sha: result.sha,
+        committed: result.files.length,
+        files: result.files.slice(0, 20),
+        left: result.left.length,
+        leftPaths: result.left.slice(0, 20),
+      })
+      // THE ROW SAYS IT, or the review cannot. A branch that carries a commit
+      // nobody wrote by hand reads as ordinary work, and a reviewer told that
+      // the container committed it can say so instead of guessing.
+      await pool
+        .query(
+          // Guarded by the conversation the boundary was read under: between
+          // the SELECT above and here a redispatch can have replaced the row,
+          // and salvage columns stamped on somebody else's attempt are the
+          // provenance lie this feature exists to prevent.
+          `UPDATE queen_dispatch
+              SET salvaged_at = now(), salvaged_sha = $2,
+                  salvaged_files = $3::jsonb, salvage_left = $4::jsonb
+            WHERE issue = $1
+              AND ($5::text IS NULL OR conversation_id::text = $5::text)`,
+          [
+            issue,
+            result.sha,
+            JSON.stringify(result.files),
+            JSON.stringify(result.left),
+            conversationId,
+          ],
+        )
+        .catch((error) => {
+          logger.warn('Queen could not record a salvage on the dispatch row', {
+            issue,
+            error: error instanceof Error ? error.message : String(error),
+          })
+        })
+    } else if (result.left.length > 0) {
+      // Nothing committed and something left is the stray case, and a stray is
+      // a finding: it is said out loud rather than silently dropped.
+      logger.warn('Queen left uncommitted work where the turn left it', {
+        issue,
+        reason,
+        detail: result.detail,
+        left: result.left.length,
+        leftPaths: result.left.slice(0, 20),
+      })
+    }
+    return result
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error)
+    logger.warn('Queen could not salvage a turn', {
+      issue,
+      reason,
+      error: detail,
+    })
+    return quiet(`salvage failed: ${detail}`)
+  }
+}
+
+/**
+ * The issues whose bee is streaming IN THIS PROCESS right now.
+ *
+ * WHY IT HAS TO EXIST. `reapStalledDispatches` matches on
+ * `dispatched_at < now() - 120 minutes`, and that predicate does not mean the
+ * bee is dead - it means nobody has written an ending yet. Nothing caps a turn
+ * by wall clock: the agent stops on a step count, `startTurn` carries no abort
+ * signal, and the server sets `idleTimeout: 0`. So a turn that legitimately
+ * runs past two hours is still editing `.worktrees/queen-<issue>` when the
+ * sweep reaches it, in the SAME process that dispatched it - and the salvage
+ * would then run `git add`/`git commit` under a bee's hands: half-written
+ * files committed as finished work, or the bee's own commit killed by a lock
+ * it did not take. The brief's one explicit rule is "never fight a bee that is
+ * still running", and the database cannot answer that question - only this
+ * process knows which bees are its own.
+ *
+ * Keyed by issue and holding the conversation, so a late close from a previous
+ * attempt cannot clear the entry belonging to the attempt that replaced it.
+ */
+const beesRunningHere = new Map<number, string>()
+
+/** This process has started a turn on this issue and not yet closed it. */
+export function markBeeRunningHere(
+  issue: number,
+  conversationId: string,
+): void {
+  beesRunningHere.set(issue, conversationId)
+}
+
+/** That turn is over. Only the turn that set the entry may clear it. */
+export function clearBeeRunningHere(
+  issue: number,
+  conversationId: string,
+): void {
+  if (beesRunningHere.get(issue) === conversationId)
+    beesRunningHere.delete(issue)
+}
+
+/** Whether a bee this process started is still streaming on this issue. */
+export function beeIsRunningHere(issue: number): boolean {
+  return beesRunningHere.has(issue)
+}
+
+/**
+ * Run a best-effort repair under a deadline, and never wait longer than that.
+ *
+ * The salvage is seven git commands whose timeouts sum to about eight minutes,
+ * and every caller of it is on a path that must not be held: `closeDispatch`
+ * holds the lane, the row's boundary and its provider key open until
+ * `finished_at` is written, and the reapers run inside the single round gate.
+ * A repair that can delay an ending is worth less than the ending, so the
+ * deadline resolves to the caller's fallback and the git that is still running
+ * finishes, or is killed by its own timeout, unwatched.
+ */
+async function underDeadline<T>(
+  work: Promise<T>,
+  ms: number,
+  fallback: T,
+  onLate: () => void,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const late = new Promise<T>((resolve) => {
+    timer = setTimeout(() => {
+      onLate()
+      resolve(fallback)
+    }, ms)
+  })
+  try {
+    return await Promise.race([work, late])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
+/** How long a closing turn may wait for its own salvage before it ends. */
+export const SALVAGE_CLOSE_DEADLINE_MS = 60_000
+
+/** How long one reaper sweep may spend salvaging before it releases the rows. */
+export const SALVAGE_SWEEP_BUDGET_MS = 120_000
 
 /**
  * What `t27c` says about ONE `.t27` file a bee committed.
@@ -1701,7 +2770,10 @@ export async function reapWorktrees(
   after: number | null
   removed: string[]
   keptDirty: string[]
+  /** Trees kept because a bee is running in them. */
   keptRunning: string[]
+  /** Trees kept because their branch holds commits only this volume has. */
+  keptUnpushed: string[]
   refused: string[]
 }> {
   const high = opts.high ?? Number(process.env.QUEEN_VOLUME_HIGH ?? 80)
@@ -1717,6 +2789,7 @@ export async function reapWorktrees(
     removed: [] as string[],
     keptDirty: [] as string[],
     keptRunning: [] as string[],
+    keptUnpushed: [] as string[],
     refused: [] as string[],
   }
   // Unknown is not room. Below the mark is not an emergency.
@@ -1755,6 +2828,29 @@ export async function reapWorktrees(
     // only copy of a turn's work.
     if (dirty.code !== 0 || dirty.out.trim().length > 0) {
       result.keptDirty.push(c.path)
+      continue
+    }
+    // NOR A TREE WHOSE BRANCH CARRIES COMMITS NOBODY ELSE HAS.
+    //
+    // The container holds no push credential by design, so a commit on a bee
+    // branch lives in exactly one place: this volume. Until the salvage, "the
+    // only copy" and "uncommitted" were the same set and the dirt check above
+    // covered both. The salvage breaks that: it COMMITS the work and leaves
+    // the tree clean, which made the tree eligible for removal here - and the
+    // next `prepareWorktree` re-cuts with `worktree add -B queen-<issue>
+    // <base>`, which RESETS the branch to base and takes the salvage with it.
+    // The work this exists to preserve would be destroyed by the preserving,
+    // and the row would still advertise a salvaged_sha no ref reaches.
+    //
+    // Unreadable is not merged, for the same reason unreadable is not clean.
+    const ahead = await run(
+      'git',
+      ['rev-list', '--count', `${baseRef()}..HEAD`],
+      c.path,
+      60_000,
+    )
+    if (ahead.code !== 0 || Number(ahead.out.trim() || '1') > 0) {
+      result.keptUnpushed.push(c.path)
       continue
     }
     // No `--force`, here or anywhere else in this project. A tree that refuses
@@ -2026,6 +3122,7 @@ export async function prepareWorktree(
         removed: gc.removed.length,
         keptDirty: gc.keptDirty.length,
         keptRunning: gc.keptRunning.length,
+        keptUnpushed: gc.keptUnpushed.length,
         refused: gc.refused.length,
       })
     }
@@ -2668,13 +3765,60 @@ export async function closeDispatch(
   conversationId: string,
   outcome: string,
   tokens?: TokenUsage,
+  deps: { salvage?: typeof salvageDispatch; salvageDeadlineMs?: number } = {},
 ): Promise<void> {
   // The stream is over, so what the container guard reserved for this bee while
   // it was young is over too - whatever the database does below.
   noteBeeEnded(conversationId)
   // ...and so is the agent that ran it. Released BEFORE the refill signal at
   // the end, so the memory is back before the next bee is started against it.
+  //
+  // FIRST, and not after the salvage below, because the two are independent:
+  // `releaseSession` is an HTTP delete against the session store and touches
+  // neither the worktree nor git, while the salvage can wait out its whole
+  // deadline. Holding a gigabyte of message history for the length of a wedged
+  // git is the exact baseline growth this release exists to end.
   await releaseSession(conversationId)
+  // SALVAGE BEFORE THE ENDING IS WRITTEN, not after.
+  //
+  // `finished_at` is what makes a row reviewable, and the review reads the
+  // BRANCH: a row closed while the turn's edits are still uncommitted can be
+  // picked up by the very next sweep and released as `empty`, which is the
+  // measured loop this exists to end. Committing first means the review's
+  // first look already sees the work.
+  //
+  // It cannot fail the ending. `salvageDispatch` swallows and logs everything;
+  // this `catch` is the second belt, because a dispatch that cannot close
+  // holds its boundary against every overlapping issue.
+  //
+  // AND IT CANNOT DELAY THE ENDING FOR LONG EITHER. Until the deadline below,
+  // a slow or wedged git could hold `finished_at` NULL for the sum of every
+  // per-command timeout - which is the phantom-running state this function's
+  // own doc exists to prevent: the board reads `running`, the boundary blocks
+  // every overlapping issue, and the durable-close refill that frees the key
+  // does not fire.
+  //
+  // THE CONVERSATION IS THE OTHER HALF. A stream from a previous attempt can
+  // finish after the reaper released the issue and a new bee took the same
+  // worktree; `finishDispatch` takes a conversation for precisely that case,
+  // and so does this, or a late close commits the CURRENT bee's half-written
+  // files as its finished work.
+  await underDeadline(
+    (deps.salvage ?? salvageDispatch)(pool, issue, 'finished', {
+      conversationId,
+      requireOpen: true,
+    }).catch(() => undefined),
+    deps.salvageDeadlineMs ?? SALVAGE_CLOSE_DEADLINE_MS,
+    undefined,
+    () =>
+      logger.warn('Queen ended a turn without waiting for its salvage', {
+        issue,
+        conversationId,
+        waitedMs: deps.salvageDeadlineMs ?? SALVAGE_CLOSE_DEADLINE_MS,
+      }),
+  )
+  // This turn is over: the stall sweep may salvage its worktree from here on.
+  clearBeeRunningHere(issue, conversationId)
   // Whether the row reads finished on the database when this returns. That is
   // the ONLY condition under which the slot may be announced as free: a signal
   // about a row that still says `running` wakes a round that sees the bee as
@@ -2807,17 +3951,105 @@ export async function finishDispatch(
  * redeploys and the board had no way to know. A supervisor whose board says
  * "busy" about work that no longer exists will refuse real work on its behalf.
  */
+/**
+ * Salvage every dispatch a reaper is about to release, BEFORE it releases it.
+ *
+ * A reap releases the issue for retry, and the retry reuses the worktree
+ * (`prepareWorktree`). Until this, the next bee opened a tree holding its
+ * predecessor's edits as dirt - "N uncommitted file(s) left by a previous
+ * attempt", 116 times in 24 hours - and started BESIDE that work instead of
+ * FROM it, because nothing on the branch said it existed. Committing here
+ * makes the killed turn's work the next attempt's starting point.
+ *
+ * The rows are read with the reaper's own predicate and salvaged one at a
+ * time; the UPDATE that follows keeps that predicate, so a row that finished
+ * normally in between is released by neither and salvaged harmlessly by this -
+ * the salvage of a tree with nothing to commit writes nothing.
+ *
+ * Never fatal. A reaper that cannot reap is a board full of phantoms, which is
+ * a worse failure than work left in a worktree for one more attempt.
+ */
+async function salvageBeforeRelease(
+  pool: Pool,
+  sql: string,
+  params: unknown[],
+  deps: { salvage?: typeof salvageDispatch; budgetMs?: number } = {},
+): Promise<number[]> {
+  const salvage = deps.salvage ?? salvageDispatch
+  const budgetMs = deps.budgetMs ?? SALVAGE_SWEEP_BUDGET_MS
+  const due: number[] = []
+  try {
+    const rows = await pool.query(sql, params)
+    for (const row of rows.rows ?? []) {
+      const issue = Number((row as { issue?: unknown }).issue)
+      if (Number.isFinite(issue)) due.push(issue)
+    }
+  } catch (error) {
+    logger.warn('Queen could not read the rows a reaper is about to release', {
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return []
+  }
+  const deadline = Date.now() + budgetMs
+  for (const issue of due) {
+    // NEVER A BEE OF OUR OWN. The stall predicate says "nobody has written an
+    // ending", not "the bee is dead", and a turn of this process's own can
+    // outlive two hours with no wall-clock cap anywhere. Its worktree is the
+    // one place a salvage must not put a hand.
+    if (beeIsRunningHere(issue)) {
+      logger.info('Queen left a stalled bee that is still running here alone', {
+        issue,
+      })
+      continue
+    }
+    // AND NEVER FOR LONGER THAN THE BUDGET. The release is what the reaper is
+    // for; the repair is what it would like to do on the way. A sweep inside
+    // the round gate that spends unbounded git time is a swarm that dispatches
+    // nothing while its lease still looks healthy - the reason the measurement
+    // sweep twenty lines from here already carries a budget of its own.
+    if (Date.now() >= deadline) {
+      logger.warn('Queen ran out of salvage budget before reaping', {
+        remaining: due.length - due.indexOf(issue),
+      })
+      break
+    }
+    await salvage(pool, issue, 'reaped').catch(() => undefined)
+  }
+  return due
+}
+
 export async function reapDispatchesFromPreviousBoot(
   pool: Pool,
+  deps: { salvage?: typeof salvageDispatch; budgetMs?: number } = {},
 ): Promise<number[]> {
+  const due = await salvageBeforeRelease(
+    pool,
+    `SELECT issue FROM queen_dispatch
+      WHERE started = true AND finished_at IS NULL`,
+    [],
+    deps,
+  )
+  if (due.length === 0) return []
   const reaped = await pool.query(
     // The label base is enumerated with every other outcome (#1360); the
     // explanation is appended and the whole value stays under the cap.
+    //
+    // BOUND TO THE ROWS THE SALVAGE SAW, and that bound is the whole point.
+    // This function is fired WITHOUT being awaited and the first round starts
+    // milliseconds later, so between the SELECT above and this statement the
+    // round can dispatch a brand-new bee - `started = true, finished_at NULL`,
+    // the unbounded predicate's exact shape. It used to be microseconds; with
+    // a salvage in front of it it is however long git takes on the volume the
+    // restart left behind. Reaping a bee that is streaming right now frees its
+    // key and its boundary, re-dispatches the issue into the same worktree,
+    // and hands the reviewer a branch whose turn has not finished.
     `UPDATE queen_dispatch
         SET finished_at = now(),
             outcome = '${DISPATCH_OUTCOME_LABELS.reapedAtBoot}: the container running this turn was replaced'
       WHERE started = true AND finished_at IS NULL
+        AND issue = ANY($1::int[])
       RETURNING issue`,
+    [due],
   )
   return reaped.rows.map((r) => r.issue as number)
 }
@@ -2825,19 +4057,36 @@ export async function reapDispatchesFromPreviousBoot(
 export async function reapStalledDispatches(
   pool: Pool,
   stallMinutes = 120,
+  deps: { salvage?: typeof salvageDispatch; budgetMs?: number } = {},
 ): Promise<number[]> {
+  const due = await salvageBeforeRelease(
+    pool,
+    `SELECT issue FROM queen_dispatch
+      WHERE started = true
+        AND finished_at IS NULL
+        AND dispatched_at < now() - make_interval(mins => $1)`,
+    [stallMinutes],
+    deps,
+  )
+  if (due.length === 0) return []
   const reaped = await pool.query(
     // The label base is enumerated with every other outcome (#1360); the
     // minute count is the one closed parameter it carries, and the whole
     // value stays under the cap for any sane bound.
+    //
+    // Bound to the rows the salvage saw, for the reason the boot reaper's
+    // statement gives. The interval keeps this one self-limiting on its own,
+    // but two reapers that disagree about which rows they release is a second
+    // statement of one rule.
     `UPDATE queen_dispatch
         SET finished_at = now(),
             outcome = '${DISPATCH_OUTCOME_LABELS.reapedStalled}: no completion within ' || $1 || ' minutes'
       WHERE started = true
         AND finished_at IS NULL
         AND dispatched_at < now() - make_interval(mins => $1)
+        AND issue = ANY($2::int[])
       RETURNING issue`,
-    [stallMinutes],
+    [stallMinutes, due],
   )
   return reaped.rows.map((r) => r.issue as number)
 }
@@ -2978,10 +4227,10 @@ export async function dispatchBee(
   // bee would be handed a path that does not exist. TRIOS_REPO_SUBDIR names it,
   // and defaults to `trios` so the existing deployment behaves exactly as
   // before; set it empty for a repo whose project IS its root.
-  const subdir = (process.env.TRIOS_REPO_SUBDIR ?? 'trios').replace(
-    /^\/+|\/+$/g,
-    '',
-  )
+  // One reader of the setting, shared with the salvage boundary above: the two
+  // must agree about where the project sits or a boundary spelled
+  // project-relative would be committed under a prefix the bee never wrote in.
+  const subdir = repoSubdir()
   const workingDirectory = subdir ? `${worktree.path}/${subdir}` : worktree.path
 
   const conversationId = randomUUID()
@@ -3025,6 +4274,11 @@ export async function dispatchBee(
   // A bee that just started has not allocated what it will hold. The next
   // dispatch of this round must not read the container as empty because of it.
   if (turn.ok) noteBeeStarted(conversationId, (deps.now ?? Date.now)())
+  // THIS PROCESS NOW KNOWS THIS BEE IS ALIVE, which is a question the database
+  // cannot answer: a row that has not been closed for two hours is a row, not
+  // a corpse. The stall sweep reads this before it salvages, so a long turn's
+  // worktree is never committed from under it. `closeDispatch` clears it.
+  if (turn.ok) markBeeRunningHere(issue, conversationId)
   // ONLY NOW may the stream be read. Everything that reads the bee's output
   // eventually writes to the row above, and a writer that can outrun the row's
   // creation is a writer that silently updates nothing.
@@ -3349,8 +4603,42 @@ export async function recordDispatch(
            -- whose review_state IS NULL.
            review_state = CASE WHEN EXCLUDED.started THEN NULL
                                ELSE queen_dispatch.review_state END,
+           -- free_attempts survives a redispatch on purpose: it counts
+           -- consecutive attempts that produced nothing judgeable. The one
+           -- exception is an issue a PERSON (or the round's 7-day window) put
+           -- back after it escalated or was released as failed: without the
+           -- reset the dead-letter count of 3 carried over, and the first
+           -- silent attempt of the person's retry escalated again at once.
+           -- Read before review_state is cleared, because the SET list sees
+           -- the old row.
+           free_attempts = CASE
+             WHEN EXCLUDED.started
+                  AND queen_dispatch.review_state IN ('escalate', 'failed')
+             THEN 0 ELSE queen_dispatch.free_attempts END,
+           -- Undelivered reviews are about ONE attempt's commit; a new
+           -- attempt starts the count again.
+           reviewer_misses = CASE WHEN EXCLUDED.started THEN 0
+                                  ELSE queen_dispatch.reviewer_misses END,
            review_note = CASE WHEN EXCLUDED.started THEN NULL
-                              ELSE queen_dispatch.review_note END`,
+                              ELSE queen_dispatch.review_note END,
+           -- WHO WROTE THIS ATTEMPT'S CODE IS A FACT ABOUT THIS ATTEMPT.
+           -- Left in place, one salvage marked the issue as salvaged for ever:
+           -- attempt 2's bee commits its own ten files, salvage writes nothing
+           -- (it only writes when it commits), and the verdict, the stored
+           -- note, the next bee's brief and the salvaged metric all still
+           -- report attempt 1's count and attempt 1's sha - a sha that a worktree
+           -- re-cut (worktree add -B) may have left unreachable.
+           -- Exactly the class the input_tokens reset above records: a price,
+           -- and an authorship, belong to the turn that incurred them. The
+           -- history archive keeps the previous attempt's values.
+           salvaged_at = CASE WHEN EXCLUDED.started THEN NULL
+                              ELSE queen_dispatch.salvaged_at END,
+           salvaged_sha = CASE WHEN EXCLUDED.started THEN NULL
+                               ELSE queen_dispatch.salvaged_sha END,
+           salvaged_files = CASE WHEN EXCLUDED.started THEN '[]'::jsonb
+                                 ELSE queen_dispatch.salvaged_files END,
+           salvage_left = CASE WHEN EXCLUDED.started THEN '[]'::jsonb
+                               ELSE queen_dispatch.salvage_left END`,
     [
       issue,
       branch,

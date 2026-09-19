@@ -348,7 +348,9 @@ describe('the review, without a compiler', () => {
     ])
     process.env.T27C_BIN = join(tmpdir(), 'no-such-t27c-anywhere')
     const { pool, queries } = reviewPool([finishedRow(block(true))])
-    const out = await reviewFinishedDispatches(pool)
+    const out = await reviewFinishedDispatches(pool, {
+      laneCandidates: () => [],
+    })
     expect(out.acted).toEqual([`#${ISSUE}:escalate`])
     const update = reviewUpdate(queries)
     expect(update?.params[1]).toBe('escalate')
@@ -417,7 +419,11 @@ describe('the review, with the compiler', () => {
       process.env.T27C_BIN = T27C
       process.env.TRIOS_QUEEND_PATH = QUEEND
       const { pool, queries } = reviewPool([finishedRow(block(true))])
-      const out = await reviewFinishedDispatches(pool)
+      // No reviewer lane: the compiler's refusal needs no adversary, and a
+      // suite must never reach a paid model through a key in the environment.
+      const out = await reviewFinishedDispatches(pool, {
+        laneCandidates: () => [],
+      })
       expect(out.acted).toEqual([`#${ISSUE}:sendBack`])
       const update = reviewUpdate(queries)
       const note = String(update?.params[2])
@@ -436,8 +442,38 @@ describe('the review, with the compiler', () => {
       ])
       process.env.T27C_BIN = T27C
       process.env.TRIOS_QUEEND_PATH = QUEEND
+      // The compiler's yes is not an accept on its own (#1127): with no
+      // reviewer lane the commit waits for one, never passing on the bee's
+      // word...
+      const held = reviewPool([finishedRow(block(true))])
+      const waited = await reviewFinishedDispatches(held.pool, {
+        laneCandidates: () => [],
+      })
+      expect(waited.acted).toEqual([`#${ISSUE}:wait`])
+      // ...and an adversary that could not refute it, citing the committed
+      // spec, accepts it - over the real git, t27c and queend.
       const { pool, queries } = reviewPool([finishedRow(block(true))])
-      const out = await reviewFinishedDispatches(pool)
+      const out = await reviewFinishedDispatches(pool, {
+        laneCandidates: () => [
+          {
+            provider: 'openai-compatible',
+            model: 'reviewer-model',
+            baseUrl: 'https://reviewer.example.invalid',
+            apiKey: 'not-a-real-key',
+            poolNumber: 2,
+            laneIndex: 0,
+          },
+        ],
+        llm: async () => ({
+          ok: true,
+          text: [
+            '## VERDICT',
+            ...CRITERIA.map(
+              (_, i) => `- ${i + 1}. specs/x.t27:2 returns 1 as asked: met`,
+            ),
+          ].join('\n'),
+        }),
+      })
       expect(out.acted).toEqual([`#${ISSUE}:accept`])
       expect(reviewUpdate(queries)?.params[1]).toBe('accept')
     },

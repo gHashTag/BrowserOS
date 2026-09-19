@@ -59,6 +59,18 @@ else
   echo "[entrypoint] no unprivileged account configured; git runs as the current user"
 fi
 
+# An agent that commits needs an author. Without one git refuses the commit
+# with a message about --global config, which reads as a broken tool rather
+# than a missing setting.
+#
+# BEFORE the fetch, not after: `git stash` writes a commit too, so with the
+# identity still unset it printed "Aborting" and left the tree dirty, which is
+# how eleven paths survived a stash that had just said it saved them.
+if [ -d "$REPO_DIR/.git" ]; then
+  $AS_USER "git -C '$REPO_DIR' config user.name '${GIT_AUTHOR_NAME:-Trinity Bee}' \
+    && git -C '$REPO_DIR' config user.email '${GIT_AUTHOR_EMAIL:-bee@trinity.local}'"
+fi
+
 if [ -d "$REPO_DIR/.git" ]; then
   echo "[entrypoint] checkout present at $REPO_DIR; fetching $TRIOS_REPO_REF"
   # A failed fetch is not a reason to refuse to serve. The checkout on disk is
@@ -71,9 +83,41 @@ if [ -d "$REPO_DIR/.git" ]; then
   # detached head, which refuses every acceptance, and `merge-base` needs
   # history that a depth of one does not have. The clone below is blobless
   # rather than shallow for the same reason - agents need `log` and `blame`.
-  $AS_USER "git -C '$REPO_DIR' fetch origin '$TRIOS_REPO_REF' \
-    && git -C '$REPO_DIR' checkout -B '$TRIOS_REPO_REF' FETCH_HEAD" \
-    || echo "[entrypoint] fetch failed; continuing on the existing checkout"
+  # TWO STEPS, NOT ONE `&&`. Joined, the failure of either printed "fetch
+  # failed", and for three days it was the OTHER one: the fetch succeeded, the
+  # checkout refused with "Your local changes to the following files would be
+  # overwritten", and the tree sat on 0ad96968 while origin/master moved 366
+  # commits ahead. A message that names the wrong half of a command sends every
+  # reader to the wrong place.
+  if $AS_USER "git -C '$REPO_DIR' fetch origin '$TRIOS_REPO_REF'"; then
+    if ! $AS_USER "git -C '$REPO_DIR' checkout -B '$TRIOS_REPO_REF' FETCH_HEAD"; then
+      # Uncommitted files an earlier turn left in the ROOT checkout (bees work
+      # in worktrees; this tree is only ever read). They are set aside, never
+      # discarded: `git stash` keeps them recoverable, `reset --hard` would not,
+      # and nothing here is allowed to destroy work it did not write.
+      dirty=$($AS_USER "git -C '$REPO_DIR' status --porcelain --untracked-files=no" | wc -l | tr -d ' ')
+      echo "[entrypoint] checkout blocked by $dirty uncommitted path(s); stashing them"
+      # The exit code of the stash is not the question - the first run of this
+      # said "stash failed" under a "Saved working directory" line. What matters
+      # is whether the tree came out CLEAN, so that is what is read, and when it
+      # did not, the paths still in the way are printed instead of guessed at.
+      # TRACKED FILES ONLY. `--include-untracked` made git try to stash
+      # `.worktrees/`, the directory every bee's worktree lives in, and it
+      # answered "Aborting" - so the stash saved nothing and the retry refused
+      # with the same paths. Untracked files never block `checkout -B` anyway.
+      $AS_USER "git -C '$REPO_DIR' stash push \
+        --message 'entrypoint stashed a dirty root checkout'" >/dev/null 2>&1 || true
+      left=$($AS_USER "git -C '$REPO_DIR' status --porcelain --untracked-files=no" | wc -l | tr -d ' ')
+      if [ "$left" != "0" ]; then
+        echo "[entrypoint] $left tracked path(s) still dirty after the stash:"
+        $AS_USER "git -C '$REPO_DIR' status --porcelain --untracked-files=no" | head -10
+      fi
+      $AS_USER "git -C '$REPO_DIR' checkout -B '$TRIOS_REPO_REF' FETCH_HEAD" \
+        || echo "[entrypoint] checkout still failed; continuing on the existing tree"
+    fi
+  else
+    echo "[entrypoint] fetch FAILED; continuing on the existing checkout"
+  fi
 else
   echo "[entrypoint] cloning $TRIOS_REPO_URL@$TRIOS_REPO_REF into $REPO_DIR"
   # Blobless rather than shallow: agents need real history for `git log` and
@@ -86,9 +130,6 @@ else
     || { echo "[entrypoint] clone FAILED; starting without a checkout"; exec "$@"; }
 fi
 
-# An agent that commits needs an author. Without one git refuses the commit
-# with a message about --global config, which reads as a broken tool rather
-# than a missing setting.
 $AS_USER "git -C '$REPO_DIR' config user.name '${GIT_AUTHOR_NAME:-Trinity Bee}' \
   && git -C '$REPO_DIR' config user.email '${GIT_AUTHOR_EMAIL:-bee@trinity.local}'"
 

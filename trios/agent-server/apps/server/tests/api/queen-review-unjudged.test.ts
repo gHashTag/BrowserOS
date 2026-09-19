@@ -65,7 +65,10 @@ const FIVE = [
 
 /** A verdict block answering the first N criteria, met or unmet as given. */
 const block = (answers: Array<{ of: string; met: boolean }>): string =>
-  ['## VERDICT', ...answers.map((a) => `- ${a.of}: ${a.met ? 'met' : 'unmet'}`)].join('\n')
+  [
+    '## VERDICT',
+    ...answers.map((a) => `- ${a.of}: ${a.met ? 'met' : 'unmet'}`),
+  ].join('\n')
 
 describe('unjudgedCriteria, the difference itself', () => {
   /**
@@ -87,7 +90,10 @@ describe('unjudgedCriteria, the difference itself', () => {
 
   it('returns nothing when the block answered every criterion', () => {
     expect(
-      unjudgedCriteria(FIVE, FIVE.map((c) => ({ criterion: c, met: true }))),
+      unjudgedCriteria(
+        FIVE,
+        FIVE.map((c) => ({ criterion: c, met: true })),
+      ),
     ).toEqual([])
   })
 
@@ -130,9 +136,10 @@ describe('unjudgedCriteria, the difference itself', () => {
    */
   it('does not let a short line judge everything that mentions it', () => {
     expect(
-      unjudgedCriteria(['The warm-up waits for the gate'], [
-        { criterion: 'warm-up', met: true },
-      ]),
+      unjudgedCriteria(
+        ['The warm-up waits for the gate'],
+        [{ criterion: 'warm-up', met: true }],
+      ),
     ).toEqual(['The warm-up waits for the gate'])
   })
 
@@ -186,6 +193,12 @@ function reviewPool(finished: FinishedRow[]) {
   return { pool, queries }
 }
 
+/** A branch whose diff read fine and holds no commit. */
+const EMPTY_BRANCH = {
+  committedFilesResult: async () => ({ ok: true as const, files: [] }),
+  laneCandidates: () => [],
+}
+
 /** The UPDATE that records a verdict, as opposed to the reaper's. */
 const reviewUpdate = (queries: Array<{ sql: string; params: unknown[] }>) =>
   queries.find(
@@ -203,9 +216,10 @@ describe('the review, against the real policy', () => {
       delete process.env[key]
     }
     if (BIN) process.env.TRIOS_QUEEND_PATH = BIN
-    // A workspace that is not there: `committedFiles` runs git in it, fails,
-    // and returns nothing - which is what this suite wants to be true every
-    // time, on every machine.
+    // A workspace that is not there, so nothing here can reach a real git.
+    // The empty commit set this suite wants is injected (`EMPTY_BRANCH`): a
+    // diff that FAILS is no longer read as an empty branch - it decides
+    // nothing - so the failing workspace alone would make every case a wait.
     process.env.WORKSPACE_DIR = join(tmpdir(), 'queen-review-unjudged-no-such')
   })
 
@@ -242,13 +256,11 @@ describe('the review, against the real policy', () => {
         }),
       ])
 
-      const reviewed = await reviewFinishedDispatches(pool)
+      const reviewed = await reviewFinishedDispatches(pool, EMPTY_BRANCH)
 
       expect(reviewed.acted).toEqual([`#${ISSUE}:sendBack`])
       // FR-001: judged and unjudged recorded as separate numbers.
-      expect(reviewed.tally).toEqual([
-        { issue: ISSUE, judged: 2, unjudged: 3 },
-      ])
+      expect(reviewed.tally).toEqual([{ issue: ISSUE, judged: 2, unjudged: 3 }])
 
       const update = reviewUpdate(queries)
       expect(update?.params[1]).toBe('sendBack')
@@ -281,11 +293,9 @@ describe('the review, against the real policy', () => {
         }),
       ])
 
-      const reviewed = await reviewFinishedDispatches(pool)
+      const reviewed = await reviewFinishedDispatches(pool, EMPTY_BRANCH)
 
-      expect(reviewed.tally).toEqual([
-        { issue: ISSUE, judged: 5, unjudged: 0 },
-      ])
+      expect(reviewed.tally).toEqual([{ issue: ISSUE, judged: 5, unjudged: 0 }])
 
       const update = reviewUpdate(queries)
       expect(update?.params[1]).toBe('sendBack')
@@ -316,11 +326,9 @@ describe('the review, against the real policy', () => {
         }),
       ])
 
-      const reviewed = await reviewFinishedDispatches(pool)
+      const reviewed = await reviewFinishedDispatches(pool, EMPTY_BRANCH)
 
-      expect(reviewed.tally).toEqual([
-        { issue: ISSUE, judged: 2, unjudged: 3 },
-      ])
+      expect(reviewed.tally).toEqual([{ issue: ISSUE, judged: 2, unjudged: 3 }])
 
       const update = reviewUpdate(queries)
       expect(update?.params[1]).toBe('sendBack')
@@ -356,22 +364,26 @@ describe('the review, against the real policy', () => {
    * the policy is asked about zero verdicts and answers wait, and nothing is
    * spent. Told apart, too: judged 0 is a different fact from judged 2.
    */
-  it.if(present)(
-    'still reads a wholly absent block as a wait',
-    async () => {
-      const { pool, queries } = reviewPool([
-        finishedRow({ said: 'I finished. It all looks fine to me.' }),
-      ])
+  it.if(present)('still reads a wholly absent block as a wait', async () => {
+    const { pool, queries } = reviewPool([
+      finishedRow({ said: 'I finished. It all looks fine to me.' }),
+    ])
 
-      const reviewed = await reviewFinishedDispatches(pool)
+    const reviewed = await reviewFinishedDispatches(pool, {
+      // A commit exists: with none, a silent bee is an EMPTY attempt, which
+      // is released rather than waited on. No lane, so nothing is reviewed.
+      committedFilesResult: async () => ({
+        ok: true as const,
+        files: ['src/x.ts'],
+      }),
+      branchHeadSha: async () => null,
+      laneCandidates: () => [],
+    })
 
-      expect(reviewed.tally).toEqual([
-        { issue: ISSUE, judged: 0, unjudged: 5 },
-      ])
+    expect(reviewed.tally).toEqual([{ issue: ISSUE, judged: 0, unjudged: 5 }])
 
-      const update = reviewUpdate(queries)
-      expect(update?.params[1]).toBe('wait')
-      expect(update?.params[4]).toBe(false)
-    },
-  )
+    const update = reviewUpdate(queries)
+    expect(update?.params[1]).toBe('wait')
+    expect(update?.params[4]).toBe(false)
+  })
 })

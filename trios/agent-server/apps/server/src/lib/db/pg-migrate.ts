@@ -240,6 +240,24 @@ ALTER TABLE queen_issues
 -- escalation reaches one. Without this the hold that stopped the six-times
 -- loop would have become a different starvation - every issue she finished
 -- locked out of the pool for ever.
+-- The salvage commit, when a turn left its work uncommitted.
+--
+-- Measured 2026-09-17/18: of 43 finished dispatches re-reviewed in one window
+-- 38 had committed nothing, while 116 dispatches in 24h recorded uncommitted
+-- files left by a previous attempt. The bee had edited; the turn ended before
+-- git commit. The container now commits that work on the way out, and these
+-- columns are how the review can say the work was salvaged rather than
+-- written. Added here rather than in the round's own column repair because the
+-- boot reaper salvages before the first round runs.
+ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS salvaged_at timestamptz;
+ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS salvaged_sha text;
+ALTER TABLE queen_dispatch
+  ADD COLUMN IF NOT EXISTS salvaged_files jsonb NOT NULL DEFAULT '[]'::jsonb;
+-- What the salvage deliberately did NOT commit: paths outside the boundary the
+-- dispatch declared. A stray is a finding, not a deliverable.
+ALTER TABLE queen_dispatch
+  ADD COLUMN IF NOT EXISTS salvage_left jsonb NOT NULL DEFAULT '[]'::jsonb;
+
 ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS review_state text;
 ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS review_note text;
 ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS reviewed_at timestamptz;
