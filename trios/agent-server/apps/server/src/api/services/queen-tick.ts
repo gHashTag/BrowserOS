@@ -462,7 +462,17 @@ async function ensureQueenColumns(pool: Pool): Promise<void> {
       -- worktree and up to 20 commands; an unchanged head is the same
       -- measurement, so it is read from here instead of run again.
       ADD COLUMN IF NOT EXISTS criteria_fingerprint text,
-      ADD COLUMN IF NOT EXISTS criteria_runs jsonb;
+      ADD COLUMN IF NOT EXISTS criteria_runs jsonb,
+      -- The salvage commit: what the container committed on the bee's behalf
+      -- when the turn ended with its work uncommitted, and what it left
+      -- outside the boundary. The boot migration adds these too, because the
+      -- boot reaper salvages before the first round runs - they are repeated
+      -- here because the review's own SELECT names them, and a column the
+      -- sweep names and the database lacks stops every review rather than one.
+      ADD COLUMN IF NOT EXISTS salvaged_at timestamptz,
+      ADD COLUMN IF NOT EXISTS salvaged_sha text,
+      ADD COLUMN IF NOT EXISTS salvaged_files jsonb NOT NULL DEFAULT '[]'::jsonb,
+      ADD COLUMN IF NOT EXISTS salvage_left jsonb NOT NULL DEFAULT '[]'::jsonb;
   `)
 }
 
@@ -2153,6 +2163,42 @@ async function boundaryStrays(
 }
 
 /**
+ * What the verdict says when the container committed for the bee.
+ *
+ * A SALVAGED COMMIT IS JUDGED LIKE ANY OTHER. The reviewer reads the same
+ * patch, the compiler runs on the same files, and the criteria are measured on
+ * the same head - this sentence adds a FACT to the note and takes no decision:
+ * whoever reads the verdict, worker or person, should know that the work
+ * reached the branch because the turn ended without committing it, not because
+ * the bee said it was done.
+ *
+ * Empty when nothing was salvaged, so a note that says nothing about salvage
+ * is a note about a bee that committed its own work.
+ */
+export function salvageSentence(row: {
+  salvaged_at?: unknown
+  salvaged_sha?: unknown
+  salvaged_files?: unknown
+  salvage_left?: unknown
+}): string {
+  if (row.salvaged_at == null) return ''
+  const files = Array.isArray(row.salvaged_files) ? row.salvaged_files : []
+  if (files.length === 0) return ''
+  const left = Array.isArray(row.salvage_left) ? row.salvage_left : []
+  const sha = row.salvaged_sha == null ? '' : String(row.salvaged_sha)
+  return (
+    `\n\n${files.length} file(s) on this branch were committed by the container ` +
+    `as salvage${sha ? ` (${sha.slice(0, 12)})` : ''}, not by the bee: the turn ` +
+    'ended with them edited and never committed, so there would otherwise have ' +
+    'been nothing to judge. They are judged exactly like any other commit.' +
+    (left.length > 0
+      ? ` ${left.length} path(s) were left uncommitted because they fall ` +
+        'outside the boundary this dispatch was given.'
+      : '')
+  )
+}
+
+/**
  * The criteria a bee never wrote a verdict line for.
  *
  * SILENCE IS NOT FAILURE. The review marks a criterion unmet when the VERDICT
@@ -2426,6 +2472,11 @@ export async function reviewFinishedDispatches(
             d.reviewer_provider, d.reviewer_misses, d.outcome,
             d.judged_head, d.judged_conversation, d.judged_note,
             d.criteria_fingerprint, d.criteria_runs,
+            -- What the container committed on the bee's behalf when the turn
+            -- ended with its work uncommitted. Read so the verdict can say the
+            -- work was salvaged rather than written; it changes NOTHING about
+            -- how the work is judged.
+            d.salvaged_at, d.salvaged_sha, d.salvaged_files, d.salvage_left,
             (SELECT string_agg(t.text, '' ORDER BY t.seq)
                FROM queen_transcript t
               WHERE t.conversation_id = d.conversation_id AND t.kind = 'say')
@@ -2542,6 +2593,11 @@ export async function reviewFinishedDispatches(
       continue
     }
     const files = diff.files
+    // The fact, not a decision: whether these files reached the branch because
+    // the bee committed them or because the container salvaged a turn that
+    // ended without committing. It is appended to whatever verdict the policy
+    // reaches, below and in the empty path.
+    const salvaged = salvageSentence(row)
     const strays = await boundaryStrays(files, row.owned_paths ?? [])
     if (strays.length > 0) {
       strayed.push({ issue, paths: strays })
@@ -2607,12 +2663,13 @@ export async function reviewFinishedDispatches(
         (files.length > 0 && priorFinding
           ? `\n\nThe last review's findings still stand:\n${priorFinding}`
           : '')
-      const note = deadLetter
-        ? `${freeAttempts} consecutive attempts produced nothing judgeable ` +
-          '(no commit, or no criterion anyone could establish), so this is ' +
-          'handed to a person instead of being retried again. Last attempt: ' +
-          emptyNote
-        : emptyNote
+      const note =
+        (deadLetter
+          ? `${freeAttempts} consecutive attempts produced nothing judgeable ` +
+            '(no commit, or no criterion anyone could establish), so this is ' +
+            'handed to a person instead of being retried again. Last attempt: ' +
+            emptyNote
+          : emptyNote) + salvaged
       logger.info('Queen reviewed her own work', {
         issue,
         verdict: state,
@@ -2633,6 +2690,10 @@ export async function reviewFinishedDispatches(
         reviewerCached: false,
         files: files.length,
         diffOk: true,
+        // How many of those files the container committed for the bee.
+        salvaged: Array.isArray(row.salvaged_files)
+          ? row.salvaged_files.length
+          : 0,
         dirty,
         freeAttempts,
         providerEnded,
@@ -3331,6 +3392,10 @@ export async function reviewFinishedDispatches(
       reviewerMisses,
       files: files.length,
       diffOk: true,
+      // How many of those files the container committed for the bee.
+      salvaged: Array.isArray(row.salvaged_files)
+        ? row.salvaged_files.length
+        : 0,
       dirty: null,
       freeAttempts,
       providerEnded,
@@ -3407,12 +3472,13 @@ export async function reviewFinishedDispatches(
               : heldForReviewer
                 ? `Waiting for the adversarial reviewer before judging a commit on the worker's word (${reviewerSkipped || 'no reviewer verdict yet'}).`
                 : policyNote
-    const note = deadLetter
-      ? `${freeAttempts} consecutive attempts produced nothing judgeable ` +
-        '(no commit, or no criterion anyone could establish), so this is ' +
-        'handed to a person instead of being retried again. Last review: ' +
-        judgedNote
-      : judgedNote
+    const note =
+      (deadLetter
+        ? `${freeAttempts} consecutive attempts produced nothing judgeable ` +
+          '(no commit, or no criterion anyone could establish), so this is ' +
+          'handed to a person instead of being retried again. Last review: ' +
+          judgedNote
+        : judgedNote) + salvaged
     await recordVerdict(pool, issue, {
       state,
       note,

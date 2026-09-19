@@ -1320,6 +1320,494 @@ export async function committedFileCount(issue: number): Promise<number> {
 }
 
 /**
+ * The project directory inside the checkout, as a path prefix.
+ *
+ * One reader of `TRIOS_REPO_SUBDIR`, used by the two places that need to know
+ * where the project sits: the working directory a bee is handed, and the
+ * boundary spelling below. Empty string for a repository whose project IS its
+ * root.
+ */
+function repoSubdir(): string {
+  return (process.env.TRIOS_REPO_SUBDIR ?? 'trios').replace(/^\/+|\/+$/g, '')
+}
+
+/** A path with no leading `./` and no trailing slash, for comparison only. */
+function tidyPath(raw: string): string {
+  return raw.replace(/^\.\/+/, '').replace(/\/+$/, '')
+}
+
+/**
+ * Whether one written path lies inside the boundary a dispatch was given.
+ *
+ * BOTH SPELLINGS, for the reason `boundaryStrays` in queen-tick records: git
+ * names a path from the repository root (`trios/docs/x.md`) while an owned
+ * path may be written repository-relative or project-relative (`docs/x.md`).
+ * Each owned path is therefore tried as it stands and again under the project
+ * directory, so either spelling accepts the writes it names.
+ *
+ * THIS IS NOT THE ACCUSER. `queend`'s `boundary` question, asked through
+ * `boundaryStrays`, is still the one rule that decides whether a COMMITTED
+ * path strayed, and that call is untouched. This decides only what the salvage
+ * commit may STAGE, and both ways it can disagree with the accuser are
+ * harmless and visible: narrower, and a file stays uncommitted in the worktree
+ * the next attempt reuses; wider, and the committed path is reported as a
+ * stray by the review exactly as it would be had the bee committed it itself.
+ *
+ * An empty boundary means NOTHING is inside it. A dispatch that declared no
+ * paths did not thereby declare all of them, which is the same reading
+ * `boundaryStrays` and the Swift side already take.
+ */
+export function insideBoundary(
+  written: string,
+  ownedPaths: string[],
+  subdir = repoSubdir(),
+): boolean {
+  const path = tidyPath(written)
+  if (path.length === 0) return false
+  return ownedPaths.some((raw) => {
+    const owned = tidyPath(String(raw ?? ''))
+    if (owned.length === 0) return false
+    const spellings =
+      subdir && owned !== subdir && !owned.startsWith(`${subdir}/`)
+        ? [owned, `${subdir}/${owned}`]
+        : [owned]
+    return spellings.some(
+      (candidate) => path === candidate || path.startsWith(`${candidate}/`),
+    )
+  })
+}
+
+/**
+ * One uncommitted entry as `git status --porcelain -z` reports it.
+ *
+ * `-z` rather than the line format on purpose: without it git QUOTES a path
+ * that carries a space or a non-ASCII byte, and a quoted name handed back to
+ * `git add` names a file that does not exist. The NUL form is the only one
+ * that round-trips.
+ *
+ * A rename carries two paths - the new one and, in the next record, the one it
+ * came from - and they travel together here, because committing half of a
+ * rename is not salvaging work, it is inventing a deletion.
+ */
+interface DirtEntry {
+  /** Every path this entry touches; all of them are in or all of them are out. */
+  paths: string[]
+  /** The two status columns, as git printed them for this entry. */
+  status: string
+}
+
+/**
+ * Parse the NUL-separated porcelain into entries.
+ *
+ * Anything that does not parse is returned as a one-path entry holding the raw
+ * record, which cannot match a boundary and is therefore left alone. An
+ * unreadable line must not become a committed file.
+ */
+export function parsePorcelainZ(out: string): DirtEntry[] {
+  const records = out.split('\0').filter((r) => r.length > 0)
+  const entries: DirtEntry[] = []
+  for (let i = 0; i < records.length; i++) {
+    const record = records[i]
+    // `XY <path>` - except that `run` TRIMS what it returns, so the FIRST
+    // record of a worktree whose first change is unstaged arrives as
+    // `M file` rather than ` M file`. Measured: a modified tracked file was
+    // read as the path "M trios/docs/keep.md", matched no boundary, and was
+    // left behind by the salvage that existed to commit it. One or two status
+    // characters, then the separating space, then the name.
+    const split = /^(.{1,2}) (.*)$/s.exec(record)
+    if (!split) {
+      entries.push({ paths: [record], status: '' })
+      continue
+    }
+    const status = split[1]
+    const path = split[2]
+    // A rename or a copy: the ORIGIN is the record that follows. Only the
+    // INDEX side reports one, so its status is never the trimmed single
+    // character above - a record that lost its first column lost a space.
+    if (
+      status.length === 2 &&
+      (status[0] === 'R' || status[0] === 'C') &&
+      i + 1 < records.length
+    ) {
+      entries.push({ paths: [path, records[++i]], status })
+      continue
+    }
+    entries.push({ paths: [path], status })
+  }
+  return entries
+}
+
+/** Why a salvage ran. It is written into the commit, so a reader can tell. */
+export type SalvageReason = 'finished' | 'reaped'
+
+/** What one salvage attempt did, and what it deliberately did not do. */
+export interface SalvageResult {
+  /** Whether THIS call wrote a commit. Twice in a row, the second is false. */
+  committed: boolean
+  /** The paths that went into it. */
+  files: string[]
+  /** The paths left uncommitted in the worktree, boundary strays included. */
+  left: string[]
+  /** The commit it wrote, when it wrote one. */
+  sha: string | null
+  /** Why it did what it did, in one sentence, for the log and the row. */
+  detail: string
+}
+
+/**
+ * At most this many paths in one salvage commit.
+ *
+ * A turn that left hundreds of files uncommitted is not the case this exists
+ * for, and one shell command holding every one of their names is a command
+ * that can exceed the argument limit and fail as something else. Past the cap
+ * the commit takes the first `SALVAGE_MAX_PATHS` in sorted order and the rest
+ * are reported as left, which is the honest half-answer; nothing is destroyed
+ * either way, because the next attempt reuses the worktree.
+ */
+export const SALVAGE_MAX_PATHS = 200
+
+/**
+ * COMMIT WHAT A TURN LEFT UNCOMMITTED.
+ *
+ * THE MEASUREMENT. Of 43 finished dispatches re-reviewed in one window on
+ * 2026-09-17/18, 38 had committed nothing, and the first sweep after that
+ * change released 19 attempts as `empty` in one go. In the same 24 hours 116
+ * dispatches recorded "N uncommitted file(s) left by a previous attempt": the
+ * bee HAD edited files, and the turn ended before `git commit` - killed by a
+ * provider 429, by one of 38 deploy restarts (188 of 541 dispatches never
+ * finished), or by the bee simply stopping. The work sat in
+ * `.worktrees/queen-<issue>`, where `committedFiles` cannot see it, so the
+ * review had nothing to judge, the attempt was released as empty, and the next
+ * attempt started from the same uncommitted pile.
+ *
+ * WHAT THIS IS NOT. It does not make the work correct, and it does not claim
+ * to: the commit says in its own subject that it is salvage, the adversarial
+ * reviewer reads it exactly as it reads any other commit, and `t27c` and the
+ * criteria runner still run against it. A salvaged branch that is wrong is a
+ * branch that gets sent back with a reason - which is the outcome the empty
+ * release could never reach.
+ *
+ * WHAT IT REFUSES. A worktree that is not on this dispatch's own branch (a
+ * detached HEAD included), the root checkout, and every path outside the
+ * boundary the dispatch declared. It never pushes: the container holds no push
+ * credential by design, and this changes nothing about that.
+ */
+export async function salvageWorktree(
+  issue: number,
+  ownedPaths: string[],
+  reason: SalvageReason,
+  conversationId: string | null,
+  deps: {
+    /** The git runner. Injected so a suite can watch the argv it invokes. */
+    git?: typeof run
+    /** Does this path exist? Injected for the same reason `prepareWorktree`'s
+     * measurement is: a test must not depend on the developer's disk. */
+    exists?: (target: string) => boolean
+  } = {},
+): Promise<SalvageResult> {
+  const git = deps.git ?? run
+  const exists = deps.exists ?? pathExists
+  const branch = `queen-${issue}`
+  const root = workspaceRoot()
+  const dir = `${root}/.worktrees/${branch}`
+  const nothing = (detail: string, left: string[] = []): SalvageResult => ({
+    committed: false,
+    files: [],
+    left,
+    sha: null,
+    detail,
+  })
+
+  if (!exists(dir)) return nothing('there is no worktree for this issue')
+
+  // ITS OWN BRANCH, OR NOTHING. `--abbrev-ref HEAD` answers `HEAD` for a
+  // detached checkout and the branch name otherwise, so one comparison covers
+  // both refusals the rules ask for: a worktree with no branch of its own, and
+  // a worktree standing on somebody else's.
+  const head = await git(
+    'git',
+    ['rev-parse', '--abbrev-ref', 'HEAD'],
+    dir,
+    60_000,
+  )
+  if (head.code !== 0) {
+    return nothing(
+      `the worktree's HEAD could not be read: ${head.out.slice(0, 200)}`,
+    )
+  }
+  const standing = head.out.trim()
+  if (standing !== branch) {
+    return nothing(
+      `the worktree stands on ${standing || 'no branch'}, not ${branch}, so nothing was committed`,
+    )
+  }
+  // AND NEVER THE ROOT CHECKOUT, asked of git rather than of the string this
+  // function built: a symlink or a bind mount can make two different paths the
+  // same directory, and the one thing that must never carry a salvage commit
+  // is the tree every worktree is cut from.
+  const top = await git('git', ['rev-parse', '--show-toplevel'], dir, 60_000)
+  if (top.code === 0 && top.out.trim() === root) {
+    return nothing('that worktree IS the root checkout; nothing was committed')
+  }
+
+  // `-uall` so an untracked DIRECTORY is reported as its files: a boundary
+  // decides per path, and `?? newdir/` would make it decide about a name no
+  // boundary mentions.
+  const dirty = await git(
+    'git',
+    ['status', '--porcelain', '-z', '-uall'],
+    dir,
+    60_000,
+  )
+  if (dirty.code !== 0) {
+    return nothing(`git status failed: ${dirty.out.slice(0, 200)}`)
+  }
+  const entries = parsePorcelainZ(dirty.out)
+  if (entries.length === 0) return nothing('the worktree is clean')
+  // A CONFLICT IS NOT SALVAGE. An unmerged path holds both sides and, often,
+  // the markers between them; committing that would put a file nobody wrote in
+  // front of a reviewer as the bee's work. git refuses a partial commit during
+  // a merge anyway - this refuses first, and says why in a sentence somebody
+  // can act on.
+  const unmerged = entries.filter(
+    (e) => e.status.includes('U') || e.status === 'AA' || e.status === 'DD',
+  )
+  if (unmerged.length > 0) {
+    return nothing(
+      `the worktree holds ${unmerged.length} unmerged path(s); a conflict is not salvage`,
+      entries.flatMap((e) => e.paths).sort(),
+    )
+  }
+
+  const inside: string[] = []
+  const left: string[] = []
+  for (const entry of entries) {
+    if (entry.paths.every((p) => insideBoundary(p, ownedPaths)))
+      inside.push(...entry.paths)
+    else left.push(...entry.paths)
+  }
+  inside.sort()
+  left.sort()
+  if (inside.length === 0) {
+    return nothing(
+      ownedPaths.length === 0
+        ? `${left.length} uncommitted path(s) and no declared boundary to commit them under`
+        : `all ${left.length} uncommitted path(s) fall outside the boundary`,
+      left,
+    )
+  }
+  const taking = inside.slice(0, SALVAGE_MAX_PATHS)
+  const capped = inside.slice(SALVAGE_MAX_PATHS)
+  if (capped.length > 0) left.push(...capped)
+
+  const added = await git('git', ['add', '-A', '--', ...taking], dir, 120_000)
+  if (added.code !== 0) {
+    return nothing(
+      `git add failed: ${added.out.slice(0, 200)}`,
+      [...taking, ...left].sort(),
+    )
+  }
+
+  // The identity, only when the tree has none. The entrypoint configures one
+  // on the checkout every worktree shares, and overriding a configured author
+  // would rename work that is not this code's to rename.
+  const configured = await git('git', ['config', 'user.email'], dir, 30_000)
+  const identity =
+    configured.code === 0 && configured.out.trim().length > 0
+      ? []
+      : [
+          '-c',
+          `user.name=${process.env.GIT_AUTHOR_NAME || 'Trinity Bee'}`,
+          '-c',
+          `user.email=${process.env.GIT_AUTHOR_EMAIL || 'bee@trinity.local'}`,
+        ]
+
+  // `--only <paths>`: the commit holds these paths and NOTHING else the index
+  // may already carry. A bee that staged a stray before it stopped would
+  // otherwise have that stray committed by this function, which is the one
+  // thing the boundary rule above exists to prevent. `--no-verify` because a
+  // repository hook is the bee's environment, and salvage must not run
+  // arbitrary hook code to close a turn.
+  const written = await git(
+    'git',
+    [
+      ...identity,
+      '-c',
+      'commit.gpgsign=false',
+      'commit',
+      '--no-verify',
+      '--only',
+      '-m',
+      `salvage(${branch}): commit what the turn left uncommitted`,
+      '-m',
+      salvageBody(issue, reason, conversationId, taking.length, left.length),
+      '--',
+      ...taking,
+    ],
+    dir,
+    120_000,
+  )
+  if (written.code !== 0) {
+    // A race with a bee that committed between the status and here reads as
+    // "nothing to commit", and that is not a failure: there is nothing left to
+    // salvage, which is the state this function wanted anyway.
+    const quiet = /nothing to commit|no changes added/i.test(written.out)
+    return nothing(
+      quiet
+        ? 'nothing was left to commit by the time the commit ran'
+        : `git commit failed: ${written.out.slice(0, 200)}`,
+      [...taking, ...left].sort(),
+    )
+  }
+  const sha = shaFrom(await git('git', ['rev-parse', 'HEAD'], dir, 30_000))
+  return {
+    committed: true,
+    files: taking,
+    left,
+    sha,
+    detail: `committed ${taking.length} path(s) the turn left uncommitted${
+      left.length > 0 ? `, left ${left.length} outside the boundary` : ''
+    }`,
+  }
+}
+
+/** The commit body, which says what the commit is and what it is not. */
+function salvageBody(
+  issue: number,
+  reason: SalvageReason,
+  conversationId: string | null,
+  committed: number,
+  left: number,
+): string {
+  return [
+    'The turn ended with these files edited and never committed. Uncommitted',
+    'work is invisible to the review - it reads the branch - so the attempt',
+    'would have been released as empty and the next bee would have started',
+    'beside this work rather than from it.',
+    '',
+    "This commit is not a claim that the work is correct. It is the bee's",
+    'work, committed on its behalf, and it is judged exactly like any other:',
+    'the adversarial reviewer reads it, the compiler runs on it, and the',
+    "issue's own criteria are measured against it.",
+    '',
+    `Issue: #${issue}`,
+    `Turn: ${conversationId ?? 'unknown'}`,
+    `Ending: ${reason === 'reaped' ? 'reaped (the turn was never closed by its own stream)' : 'finished (the turn closed)'}`,
+    `Committed: ${committed} path(s)`,
+    `Left uncommitted: ${left} path(s) outside the declared boundary`,
+  ].join('\n')
+}
+
+/**
+ * Salvage one dispatch's worktree and write down what happened.
+ *
+ * The boundary comes from the ROW, not from the caller: the row is what the
+ * bee was actually dispatched with, and a boundary re-derived from the issue
+ * as it stands now would commit under a contract this turn was never given.
+ *
+ * Every failure here is swallowed and logged. Salvage is a repair that runs on
+ * the way out of a turn, and a repair that can prevent an ending would be a
+ * worse defect than the one it fixes: a dispatch that cannot close holds its
+ * boundary against every overlapping issue until the stall reaper finds it.
+ */
+export async function salvageDispatch(
+  pool: Pool,
+  issue: number,
+  reason: SalvageReason,
+  deps: {
+    salvage?: typeof salvageWorktree
+    exists?: (target: string) => boolean
+  } = {},
+): Promise<SalvageResult> {
+  const salvage = deps.salvage ?? salvageWorktree
+  const exists = deps.exists ?? pathExists
+  const quiet = (detail: string): SalvageResult => ({
+    committed: false,
+    files: [],
+    left: [],
+    sha: null,
+    detail,
+  })
+  // THE CHEAP QUESTION FIRST, and it is not only a speed argument: every
+  // deployment without a worktree for this issue - a local server, a suite
+  // driving `closeDispatch` against a fake pool - must reach the ending
+  // through exactly the statements it always did.
+  if (!exists(`${workspaceRoot()}/.worktrees/queen-${issue}`)) {
+    return quiet('there is no worktree for this issue')
+  }
+  try {
+    const row = await pool.query(
+      'SELECT owned_paths, conversation_id FROM queen_dispatch WHERE issue = $1',
+      [issue],
+    )
+    const record = row.rows?.[0] as
+      | { owned_paths?: unknown; conversation_id?: unknown }
+      | undefined
+    const ownedPaths = Array.isArray(record?.owned_paths)
+      ? (record.owned_paths as unknown[]).map((p) => String(p))
+      : []
+    const conversationId =
+      record?.conversation_id == null ? null : String(record.conversation_id)
+    const result = await salvage(issue, ownedPaths, reason, conversationId, {
+      exists: deps.exists,
+    })
+    if (result.committed) {
+      logger.info('Queen salvaged the work a turn left uncommitted', {
+        issue,
+        reason,
+        conversationId,
+        sha: result.sha,
+        committed: result.files.length,
+        files: result.files.slice(0, 20),
+        left: result.left.length,
+        leftPaths: result.left.slice(0, 20),
+      })
+      // THE ROW SAYS IT, or the review cannot. A branch that carries a commit
+      // nobody wrote by hand reads as ordinary work, and a reviewer told that
+      // the container committed it can say so instead of guessing.
+      await pool
+        .query(
+          `UPDATE queen_dispatch
+              SET salvaged_at = now(), salvaged_sha = $2,
+                  salvaged_files = $3::jsonb, salvage_left = $4::jsonb
+            WHERE issue = $1`,
+          [
+            issue,
+            result.sha,
+            JSON.stringify(result.files),
+            JSON.stringify(result.left),
+          ],
+        )
+        .catch((error) => {
+          logger.warn('Queen could not record a salvage on the dispatch row', {
+            issue,
+            error: error instanceof Error ? error.message : String(error),
+          })
+        })
+    } else if (result.left.length > 0) {
+      // Nothing committed and something left is the stray case, and a stray is
+      // a finding: it is said out loud rather than silently dropped.
+      logger.warn('Queen left uncommitted work where the turn left it', {
+        issue,
+        reason,
+        detail: result.detail,
+        left: result.left.length,
+        leftPaths: result.left.slice(0, 20),
+      })
+    }
+    return result
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error)
+    logger.warn('Queen could not salvage a turn', {
+      issue,
+      reason,
+      error: detail,
+    })
+    return quiet(`salvage failed: ${detail}`)
+  }
+}
+
+/**
  * What `t27c` says about ONE `.t27` file a bee committed.
  *
  * `present` is false for a file the branch deleted - there is no spec to read.
@@ -2873,7 +3361,22 @@ export async function closeDispatch(
   conversationId: string,
   outcome: string,
   tokens?: TokenUsage,
+  deps: { salvage?: typeof salvageDispatch } = {},
 ): Promise<void> {
+  // SALVAGE BEFORE THE ENDING IS WRITTEN, not after.
+  //
+  // `finished_at` is what makes a row reviewable, and the review reads the
+  // BRANCH: a row closed while the turn's edits are still uncommitted can be
+  // picked up by the very next sweep and released as `empty`, which is the
+  // measured loop this exists to end. Committing first means the review's
+  // first look already sees the work.
+  //
+  // It cannot fail the ending. `salvageDispatch` swallows and logs everything;
+  // this `catch` is the second belt, because a dispatch that cannot close
+  // holds its boundary against every overlapping issue.
+  await (deps.salvage ?? salvageDispatch)(pool, issue, 'finished').catch(
+    () => undefined,
+  )
   // Whether the row reads finished on the database when this returns. That is
   // the ONLY condition under which the slot may be announced as free: a signal
   // about a row that still says `running` wakes a round that sees the bee as
@@ -3006,9 +3509,56 @@ export async function finishDispatch(
  * redeploys and the board had no way to know. A supervisor whose board says
  * "busy" about work that no longer exists will refuse real work on its behalf.
  */
+/**
+ * Salvage every dispatch a reaper is about to release, BEFORE it releases it.
+ *
+ * A reap releases the issue for retry, and the retry reuses the worktree
+ * (`prepareWorktree`). Until this, the next bee opened a tree holding its
+ * predecessor's edits as dirt - "N uncommitted file(s) left by a previous
+ * attempt", 116 times in 24 hours - and started BESIDE that work instead of
+ * FROM it, because nothing on the branch said it existed. Committing here
+ * makes the killed turn's work the next attempt's starting point.
+ *
+ * The rows are read with the reaper's own predicate and salvaged one at a
+ * time; the UPDATE that follows keeps that predicate, so a row that finished
+ * normally in between is released by neither and salvaged harmlessly by this -
+ * the salvage of a tree with nothing to commit writes nothing.
+ *
+ * Never fatal. A reaper that cannot reap is a board full of phantoms, which is
+ * a worse failure than work left in a worktree for one more attempt.
+ */
+async function salvageBeforeRelease(
+  pool: Pool,
+  sql: string,
+  params: unknown[],
+  deps: { salvage?: typeof salvageDispatch } = {},
+): Promise<void> {
+  const salvage = deps.salvage ?? salvageDispatch
+  try {
+    const due = await pool.query(sql, params)
+    for (const row of due.rows ?? []) {
+      const issue = Number((row as { issue?: unknown }).issue)
+      if (!Number.isFinite(issue)) continue
+      await salvage(pool, issue, 'reaped').catch(() => undefined)
+    }
+  } catch (error) {
+    logger.warn('Queen could not salvage before reaping', {
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+}
+
 export async function reapDispatchesFromPreviousBoot(
   pool: Pool,
+  deps: { salvage?: typeof salvageDispatch } = {},
 ): Promise<number[]> {
+  await salvageBeforeRelease(
+    pool,
+    `SELECT issue FROM queen_dispatch
+      WHERE started = true AND finished_at IS NULL`,
+    [],
+    deps,
+  )
   const reaped = await pool.query(
     // The label base is enumerated with every other outcome (#1360); the
     // explanation is appended and the whole value stays under the cap.
@@ -3024,7 +3574,17 @@ export async function reapDispatchesFromPreviousBoot(
 export async function reapStalledDispatches(
   pool: Pool,
   stallMinutes = 120,
+  deps: { salvage?: typeof salvageDispatch } = {},
 ): Promise<number[]> {
+  await salvageBeforeRelease(
+    pool,
+    `SELECT issue FROM queen_dispatch
+      WHERE started = true
+        AND finished_at IS NULL
+        AND dispatched_at < now() - make_interval(mins => $1)`,
+    [stallMinutes],
+    deps,
+  )
   const reaped = await pool.query(
     // The label base is enumerated with every other outcome (#1360); the
     // minute count is the one closed parameter it carries, and the whole
@@ -3138,10 +3698,10 @@ export async function dispatchBee(
   // bee would be handed a path that does not exist. TRIOS_REPO_SUBDIR names it,
   // and defaults to `trios` so the existing deployment behaves exactly as
   // before; set it empty for a repo whose project IS its root.
-  const subdir = (process.env.TRIOS_REPO_SUBDIR ?? 'trios').replace(
-    /^\/+|\/+$/g,
-    '',
-  )
+  // One reader of the setting, shared with the salvage boundary above: the two
+  // must agree about where the project sits or a boundary spelled
+  // project-relative would be committed under a prefix the bee never wrote in.
+  const subdir = repoSubdir()
   const workingDirectory = subdir ? `${worktree.path}/${subdir}` : worktree.path
 
   const conversationId = randomUUID()
