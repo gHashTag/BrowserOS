@@ -15,9 +15,11 @@ import {
   endpointPoolProblems,
   finishDispatch,
   MAX_KEYS_PER_POOL,
+  MAX_POOL_NUMBER,
   missingProviderRefusal,
   POOL_KEY_STRIDE,
   prepareWorktree,
+  queenWorkerLimit,
   recordDispatch,
   resolveWorkerProvider,
   setDurableCloseListener,
@@ -70,7 +72,18 @@ const KEYS = [
   // The far end of the key list (MAX_KEYS_PER_POOL) and the first name past it.
   'TRIOS_QUEEN_WORKER_API_KEY_17',
   'TRIOS_QUEEN_WORKER_API_KEY_1024',
-  'TRIOS_QUEEN_WORKER_API_KEY_1025',
+  'TRIOS_QUEEN_WORKER_API_KEY_4096',
+  // Names that look like key variables and are not: see the suffix rule.
+  'TRIOS_QUEEN_WORKER_API_KEY_02',
+  'TRIOS_QUEEN_WORKER_API_KEY_1',
+  'TRIOS_QUEEN_WORKER_API_KEY_x',
+  // A ninth pool, and one whose number no durable index can address.
+  'TRIOS_QUEEN_WORKER_POOL_9_BASE_URL',
+  'TRIOS_QUEEN_WORKER_POOL_9_MODEL',
+  'TRIOS_QUEEN_WORKER_POOL_9_API_KEY',
+  'TRIOS_QUEEN_WORKER_POOL_300000_BASE_URL',
+  'TRIOS_QUEEN_WORKER_POOL_300000_MODEL',
+  'TRIOS_QUEEN_WORKER_POOL_300000_API_KEY',
   'TRIOS_ZAI_CONCURRENCY_PER_KEY',
   ...POOL_VARIABLES,
 ]
@@ -486,24 +499,86 @@ describe('queen dispatch precheck', () => {
       })
     })
 
-    it('reads a key past the sixteenth, up to the bound and not beyond it', () => {
+    it('reads every suffixed key that exists, in numeric order', () => {
       firstPool('z1')
-      // 16 was where the loop ended, not a measurement: a seventeenth variable
-      // was read by nothing and reported by nothing.
+      // The loop used to end at 16, then at 1024. Both were bounds that said
+      // nothing when they bound: the next variable was read by nothing. The
+      // names are now read from the environment, so there is no next variable.
+      process.env.TRIOS_QUEEN_WORKER_API_KEY_4096 = 'z4096'
       process.env.TRIOS_QUEEN_WORKER_API_KEY_17 = 'z17'
       process.env.TRIOS_QUEEN_WORKER_API_KEY_1024 = 'z1024'
-      process.env.TRIOS_QUEEN_WORKER_API_KEY_1025 = 'past-the-bound'
       process.env.TRIOS_QUEEN_MAX_WORKERS = '16'
 
-      expect(MAX_KEYS_PER_POOL).toBe(1024)
       expect(workerCapacityBreakdown()).toEqual({
-        connectedCredentials: 3,
+        connectedCredentials: 4,
         lanesPerCredential: 1,
-        effectiveCapacity: 3,
+        effectiveCapacity: 4,
       })
+      // Numeric, not lexical: 17 before 1024 before 4096.
       expect(resolveWorkerProvider([0])?.apiKey).toBe('z17')
       expect(resolveWorkerProvider([0, 1])?.apiKey).toBe('z1024')
-      expect(resolveWorkerProvider([0, 1, 2])?.exhausted).toBe(3)
+      expect(resolveWorkerProvider([0, 1, 2])?.apiKey).toBe('z4096')
+      expect(resolveWorkerProvider([0, 1, 2, 3])?.exhausted).toBe(4)
+    })
+
+    it('ignores names that only look like key variables', () => {
+      firstPool('z1')
+      // `_1` would be a second name for the unsuffixed key, `_02` a second name
+      // for `_2`, `_x` no number at all. Guessing at any of them is how one
+      // secret becomes two slots.
+      process.env.TRIOS_QUEEN_WORKER_API_KEY_1 = 'not-a-slot'
+      process.env.TRIOS_QUEEN_WORKER_API_KEY_02 = 'not-a-slot-either'
+      process.env.TRIOS_QUEEN_WORKER_API_KEY_x = 'nor-this'
+
+      expect(workerCapacityBreakdown().connectedCredentials).toBe(1)
+    })
+
+    it("cuts a pool where the next pool's durable index begins", () => {
+      firstPool('z1')
+      const extra = Array.from(
+        { length: MAX_KEYS_PER_POOL + 5 },
+        (_, index) => `TRIOS_QUEEN_WORKER_API_KEY_${index + 2}`,
+      )
+      for (const [index, name] of extra.entries()) {
+        process.env[name] = `z${index + 2}`
+      }
+      try {
+        // Not a policy: key_index of pool 2 starts at POOL_KEY_STRIDE, and that
+        // stride is already written in production rows.
+        expect(workerCapacityBreakdown().connectedCredentials).toBe(
+          MAX_KEYS_PER_POOL,
+        )
+        expect(MAX_KEYS_PER_POOL).toBe(POOL_KEY_STRIDE - 1)
+      } finally {
+        for (const name of extra) delete process.env[name]
+      }
+    })
+
+    it('reads a ninth pool, because pools are discovered and not counted to eight', () => {
+      firstPool('z1')
+      process.env.TRIOS_QUEEN_WORKER_POOL_9_BASE_URL = NVIDIA_URL
+      process.env.TRIOS_QUEEN_WORKER_POOL_9_MODEL = NVIDIA_MODEL
+      process.env.TRIOS_QUEEN_WORKER_POOL_9_API_KEY = 'n9'
+
+      const choice = resolveWorkerProvider([0])
+      expect(choice?.apiKey).toBe('n9')
+      expect(choice?.poolNumber).toBe(9)
+      expect(choice?.keyIndex).toBe(8 * POOL_KEY_STRIDE)
+      expect(endpointPoolProblems()).toEqual([])
+    })
+
+    it('says so when a pool number cannot be named by a durable index', () => {
+      firstPool('z1')
+      process.env.TRIOS_QUEEN_WORKER_POOL_300000_BASE_URL = NVIDIA_URL
+      process.env.TRIOS_QUEEN_WORKER_POOL_300000_MODEL = NVIDIA_MODEL
+      process.env.TRIOS_QUEEN_WORKER_POOL_300000_API_KEY = 'far'
+
+      expect(MAX_POOL_NUMBER).toBeLessThan(300000)
+      expect(workerCapacityBreakdown().connectedCredentials).toBe(1)
+      expect(endpointPoolProblems().join(' ')).toContain(
+        'TRIOS_QUEEN_WORKER_POOL_300000_BASE_URL',
+      )
+      expect(endpointPoolProblems().join(' ')).not.toContain('far')
     })
 
     it('lets the credentials bind rather than a number nobody chose', () => {
@@ -523,11 +598,11 @@ describe('queen dispatch precheck', () => {
       })
     })
 
-    it('still clamps a value that can only be a typo', () => {
-      // The clamp is not gone, it moved to where it can only catch a mistake:
-      // an operator who meant 50 and typed 5000 gets MAX_KEYS_PER_POOL bees,
-      // not fifty times the swarm. Enough credentials are connected that the
-      // ceiling, not the key list, is what answers.
+    it("lets the operator's number answer when the credentials are there to carry it", () => {
+      // This used to clamp at 1024. As a typo guard that protected little: an
+      // operator who meant 50 and typed 5000 over thousands of connected lanes
+      // got 1024 bees instead, and either number ends a container sized for
+      // fifty. What bounds a mistyped value is the credential list.
       firstPool('z1')
       const extra = Array.from(
         { length: MAX_KEYS_PER_POOL - 1 },
@@ -541,11 +616,22 @@ describe('queen dispatch precheck', () => {
         expect(workerCapacityBreakdown()).toEqual({
           connectedCredentials: MAX_KEYS_PER_POOL,
           lanesPerCredential: 1,
-          effectiveCapacity: 1024,
+          effectiveCapacity: 5000,
         })
       } finally {
         for (const name of extra) delete process.env[name]
       }
+    })
+
+    it('still refuses a value that is not a number of bees at all', () => {
+      process.env.TRIOS_QUEEN_MAX_WORKERS = '99999999999'
+      expect(queenWorkerLimit()).toBe(1_000_000)
+      process.env.TRIOS_QUEEN_MAX_WORKERS = 'many'
+      expect(queenWorkerLimit()).toBe(4)
+      process.env.TRIOS_QUEEN_MAX_WORKERS = '0'
+      expect(queenWorkerLimit()).toBe(4)
+      delete process.env.TRIOS_QUEEN_MAX_WORKERS
+      expect(queenWorkerLimit()).toBe(4)
     })
 
     it('keeps a whole pool below the stride that separates pools', () => {

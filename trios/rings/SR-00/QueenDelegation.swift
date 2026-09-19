@@ -482,9 +482,14 @@ public enum QueenDelegationPolicy {
     /// Both sides now read one variable with one default and one ceiling, so
     /// the only way to raise the swarm is to raise it for both at once.
     ///
-    /// The ceiling here is 1024, and it is a guard against a typo rather than
-    /// a working value. It was 16, and 16 was the wrong KIND of number to
-    /// write into the policy: what a deployment can actually run is decided by
+    /// The ceiling here is 1_000_000, and it bounds no real deployment: it only
+    /// stops a value that is not a number of bees at all. It was 16 and then
+    /// 1024, and both were the wrong KIND of number to write into the policy.
+    /// As a typo guard 1024 protected little - an operator who meant 50 and
+    /// typed 5000 over two thousand connected lanes got 1024 bees instead of
+    /// 2000, and either ends a container sized for fifty. A mistyped value is
+    /// bounded by the credential list, because dispatch refuses when every
+    /// lane is taken. What a deployment can actually run is decided by
     /// how many credentials are connected times how many lanes each carries,
     /// and by the number the operator puts in TRIOS_QUEEN_MAX_WORKERS. Once a
     /// deployment could connect a second provider's endpoint and keys, a hard
@@ -507,7 +512,7 @@ public enum QueenDelegationPolicy {
     public static var maximumConcurrentWorkers: Int {
         let raw = ProcessInfo.processInfo.environment["TRIOS_QUEEN_MAX_WORKERS"]
         guard let raw, let parsed = Int(raw), parsed >= 1 else { return 4 }
-        return min(parsed, 1024)
+        return min(parsed, 1_000_000)
     }
 
     public static func canStartAnother(running: Int) -> Bool {

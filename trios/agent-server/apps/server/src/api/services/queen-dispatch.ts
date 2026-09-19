@@ -232,23 +232,26 @@ export interface WorkerProvider {
  * its padding, and handing the trimmed form out keeps the count and the
  * selection - which both read this list - from ever disagreeing.
  *
- * The suffix runs to MAX_KEYS_PER_POOL. It used to stop at 16, and 16 was never
- * a measurement: it was where the loop happened to end, equal by coincidence to
- * the policy ceiling on bees. They are different quantities. The ceiling bounds
- * how many bees RUN; this bounds how many credentials the rotation may SPREAD
- * them over, and a free key refuses its third concurrent request in under half
- * a second (`1302`), so a swarm at the ceiling wants more keys than bees, not
- * the same number. A seventeenth variable used to be read by nothing and
- * reported by nothing, which is the zero-length-key trap again: it looks
- * configured and supplies nothing. Widening the list does not widen the swarm -
- * `queenWorkerLimit` still decides that.
+ * The suffixes are READ FROM THE ENVIRONMENT, not counted up to a number. The
+ * loop used to stop at 16 and then at 1024, and both were the same kind of
+ * mistake: a bound that says nothing when it binds. `_17` was read by nothing
+ * while the loop ended at 16, and `_1025` would have been read by nothing
+ * after it. Asking the environment which suffixed names exist has no such
+ * edge - every variable an operator can see in the editor is a variable this
+ * function reads - and it costs the size of the environment rather than the
+ * size of a range.
  *
- * 1024 rather than a round thousand so that this bound can never sit BELOW a
- * worker ceiling expressed as a power of two: with one lane per credential a
- * swarm of N bees needs N keys, and a key bound under the worker bound would be
- * a second, hidden ceiling that reports nothing when it is hit.
+ * Order is the numeric suffix, the unsuffixed name first, so every index a
+ * deployment has already written still names the same key. A suffix must be a
+ * plain integer of two or more (`_2`, `_17`, `_4096`): `_02`, `_1` and `_x`
+ * are not key names and are ignored rather than guessed at.
+ *
+ * What remains is a consequence, not a policy: a pool is cut at
+ * MAX_KEYS_PER_POOL because the durable index of the next pool starts at
+ * POOL_KEY_STRIDE, and that stride is already written in production rows.
+ * Widening the list does not widen the swarm - `queenWorkerLimit` decides that.
  */
-export const MAX_KEYS_PER_POOL = 1024
+export const MAX_KEYS_PER_POOL = 9_999
 
 function keysFor(envVar: string): string[] {
   const keys: string[] = []
@@ -260,8 +263,16 @@ function keysFor(envVar: string): string[] {
     keys.push(trimmed)
   }
   admit(process.env[envVar])
-  for (let i = 2; i <= MAX_KEYS_PER_POOL; i++) {
-    admit(process.env[`${envVar}_${i}`])
+  const prefix = `${envVar}_`
+  const suffixes = Object.keys(process.env)
+    .filter((name) => name.startsWith(prefix))
+    .map((name) => name.slice(prefix.length))
+    .filter((suffix) => /^[1-9]\d*$/.test(suffix) && Number(suffix) >= 2)
+    .map(Number)
+    .sort((a, b) => a - b)
+  for (const suffix of suffixes) {
+    if (keys.length >= MAX_KEYS_PER_POOL) break
+    admit(process.env[`${envVar}_${suffix}`])
   }
   return keys
 }
@@ -298,18 +309,25 @@ function workerLanesFor(provider: string): number {
  * dispatch, and promising less hides capacity that was paid for.
  *
  * So both sides now read the SAME environment variable, with the same default
- * and the same ceiling. That ceiling is 1024 and it is a guard against a typo,
- * not a working value: capacity is decided by connected credentials times
- * lanes and by the number the operator sets. It used to be 16, which sat below
- * the credentials a deployment could connect once endpoint pools existed, and
- * said nothing when it bound. Review cost is still linear in running workers -
- * that is why the operator picks the VALUE by measurement. The Swift side
- * records the full reasoning.
+ * and the same ceiling. That ceiling is WORKER_SANITY_BOUND and it no longer
+ * bounds a real deployment: capacity is decided by connected credentials times
+ * lanes and by the number the operator sets. It was 16, then 1024, and both
+ * times it ended up sitting below credentials a deployment could connect and
+ * saying nothing when it bound. As a guard against a typo 1024 protected
+ * little: an operator who meant 50 and typed 5000 over two thousand connected
+ * lanes got 1024 bees instead of 2000, and either number ends a container
+ * sized for fifty. What actually bounds a mistyped value is the credential
+ * list - dispatch refuses when every lane is taken - so the constant only has
+ * to stop a value that is not a number of bees at all. Review cost is still
+ * linear in running workers, which is why the operator picks the VALUE by
+ * measurement. The Swift side records the full reasoning.
  */
-function queenWorkerLimit(): number {
+export const WORKER_SANITY_BOUND = 1_000_000
+
+export function queenWorkerLimit(): number {
   const parsed = Number(process.env.TRIOS_QUEEN_MAX_WORKERS)
   if (!Number.isInteger(parsed) || parsed < 1) return 4
-  return Math.min(parsed, 1024)
+  return Math.min(parsed, WORKER_SANITY_BOUND)
 }
 
 /**
@@ -502,13 +520,13 @@ function availableKeyIndex(
  * sixteen bees while three working NVIDIA keys sat unused next to them.
  *
  * So the FIRST pool is exactly the variables that already exist, unchanged in
- * name and meaning, and further pools are numbered from 2:
+ * name and meaning, and further pools are numbered from 2, as many as exist:
  *
  *   TRIOS_QUEEN_WORKER_POOL_<n>_BASE_URL   the endpoint (required)
  *   TRIOS_QUEEN_WORKER_POOL_<n>_MODEL      the model THAT endpoint serves (required)
  *   TRIOS_QUEEN_WORKER_POOL_<n>_PROVIDER   openai-compatible (default) or zai
  *   TRIOS_QUEEN_WORKER_POOL_<n>_CONTEXT    that model's context window
- *   TRIOS_QUEEN_WORKER_POOL_<n>_API_KEY, _API_KEY_2 ... (MAX_KEYS_PER_POOL)
+ *   TRIOS_QUEEN_WORKER_POOL_<n>_API_KEY, _API_KEY_2, _API_KEY_3 ... (any number of them)
  *
  * A pool is REMOTE credentials by definition. A local Ollama stays what it was
  * measured to be - one inference slot - and does not join a credential pool,
@@ -521,7 +539,6 @@ function availableKeyIndex(
  * breakdown (#1308) an exact statement: credentials x lanes, bounded by the
  * policy ceiling.
  */
-const MAX_ENDPOINT_POOLS = 8
 const REMOTE_ENDPOINT_PROVIDERS = new Set(['openai-compatible', 'zai'])
 
 /**
@@ -538,6 +555,35 @@ const REMOTE_ENDPOINT_PROVIDERS = new Set(['openai-compatible', 'zai'])
  * one - a test holds the two constants to that.
  */
 export const POOL_KEY_STRIDE = 10_000
+
+/**
+ * The numbers of the pools someone has started to configure, ascending.
+ *
+ * Discovered from the environment for the same reason the key suffixes are:
+ * "up to eight" was a bound nobody chose, and a ninth pool would have been
+ * configured in the editor and read by nothing. The only ceiling left is
+ * arithmetic - `key_index` is a 32-bit column and pool n starts at
+ * (n - 1) * POOL_KEY_STRIDE - so a pool number past MAX_POOL_NUMBER cannot be
+ * named durably and is reported by `endpointPoolProblems` instead of being
+ * silently dropped.
+ */
+export const MAX_POOL_NUMBER = Math.floor(2_147_483_647 / POOL_KEY_STRIDE) - 1
+
+function configuredPoolNumbers(): { usable: number[]; tooLarge: number[] } {
+  const numbers = new Set<number>()
+  for (const name of Object.keys(process.env)) {
+    const match =
+      /^TRIOS_QUEEN_WORKER_POOL_([1-9]\d*)_(BASE_URL|API_KEY(_[1-9]\d*)?)$/.exec(
+        name,
+      )
+    if (match && process.env[name]?.trim()) numbers.add(Number(match[1]))
+  }
+  const sorted = [...numbers].filter((n) => n >= 2).sort((a, b) => a - b)
+  return {
+    usable: sorted.filter((n) => n <= MAX_POOL_NUMBER),
+    tooLarge: sorted.filter((n) => n > MAX_POOL_NUMBER),
+  }
+}
 
 interface EndpointPool {
   /** 1-based; 1 is the pool made of the unnumbered variables. */
@@ -575,7 +621,13 @@ function contextWindowFrom(raw: string | undefined): number {
  */
 export function endpointPoolProblems(): string[] {
   const problems: string[] = []
-  for (let n = 2; n <= MAX_ENDPOINT_POOLS; n++) {
+  const discovered = configuredPoolNumbers()
+  for (const n of discovered.tooLarge) {
+    problems.push(
+      `${poolVariable(n, 'BASE_URL')} names pool ${n}, above the ${MAX_POOL_NUMBER} a durable key index can address`,
+    )
+  }
+  for (const n of discovered.usable) {
     const baseUrl = cleanBaseUrl(process.env[poolVariable(n, 'BASE_URL')])
     const keys = keysFor(poolVariable(n, 'API_KEY'))
     if (!baseUrl && keys.length === 0) continue
@@ -632,7 +684,7 @@ function configuredEndpointPools(): EndpointPool[] {
     },
   ]
   if (provider === 'ollama') return pools
-  for (let n = 2; n <= MAX_ENDPOINT_POOLS; n++) {
+  for (const n of configuredPoolNumbers().usable) {
     const poolUrl = cleanBaseUrl(process.env[poolVariable(n, 'BASE_URL')])
     const poolProvider =
       process.env[poolVariable(n, 'PROVIDER')]?.trim() || 'openai-compatible'
