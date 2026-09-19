@@ -2187,7 +2187,7 @@ export function salvageSentence(row: {
   const left = Array.isArray(row.salvage_left) ? row.salvage_left : []
   const sha = row.salvaged_sha == null ? '' : String(row.salvaged_sha)
   return (
-    `\n\n${files.length} file(s) on this branch were committed by the container ` +
+    `${files.length} file(s) on this branch were committed by the container ` +
     `as salvage${sha ? ` (${sha.slice(0, 12)})` : ''}, not by the bee: the turn ` +
     'ended with them edited and never committed, so there would otherwise have ' +
     'been nothing to judge. They are judged exactly like any other commit.' +
@@ -2196,6 +2196,30 @@ export function salvageSentence(row: {
         'outside the boundary this dispatch was given.'
       : '')
   )
+}
+
+/**
+ * Put the salvage sentence IN FRONT of the verdict note, not after it.
+ *
+ * `recordVerdict` stores `note.slice(0, PREVIOUS_REVIEW_MAX_CHARS)`, and that
+ * bound's own comment says why it was raised to 1500: "a reviewer's reasons
+ * with citations do not fit the 900 a bare list of criteria used to". A
+ * send-back note carrying four headed lists of `criterion - reason` routinely
+ * lands at the cap - measured here, a six-criterion send-back with cited
+ * reasons stored exactly 1500 characters, ending mid-word, with the appended
+ * salvage sentence gone entirely. And review_note is the note a person reads on the
+ * board AND the only channel that reaches the next bee's brief
+ * (`previousReviewSection` reads the same bounded column), so the one thing
+ * this feature had to say - that the container committed this branch, not the
+ * bee - was silently lost on exactly the send-backs where the next attempt
+ * builds on the salvaged commit.
+ *
+ * Provenance is not a trailing remark. It goes first, where the cap cannot
+ * reach it, and the reviewer's reasons take the truncation instead.
+ */
+export function noteWithSalvage(salvaged: string, body: string): string {
+  const fact = salvaged.trim()
+  return fact.length === 0 ? body : `${fact}\n\n${body}`
 }
 
 /**
@@ -2663,13 +2687,15 @@ export async function reviewFinishedDispatches(
         (files.length > 0 && priorFinding
           ? `\n\nThe last review's findings still stand:\n${priorFinding}`
           : '')
-      const note =
-        (deadLetter
+      const note = noteWithSalvage(
+        salvaged,
+        deadLetter
           ? `${freeAttempts} consecutive attempts produced nothing judgeable ` +
-            '(no commit, or no criterion anyone could establish), so this is ' +
-            'handed to a person instead of being retried again. Last attempt: ' +
-            emptyNote
-          : emptyNote) + salvaged
+              '(no commit, or no criterion anyone could establish), so this is ' +
+              'handed to a person instead of being retried again. Last attempt: ' +
+              emptyNote
+          : emptyNote,
+      )
       logger.info('Queen reviewed her own work', {
         issue,
         verdict: state,
@@ -3299,8 +3325,32 @@ export async function reviewFinishedDispatches(
     //
     // And a finding is charged ONCE per commit: at a head another attempt was
     // already judged at, the same finding is not new, whoever repeats it.
+    //
+    // AND A TURN THE BEE NEVER SPOKE FOR SPENDS NOTHING, wherever it lands.
+    //
+    // `providerEnded` used to be consulted in exactly one place - the empty
+    // path - because a turn killed by a quota window or a broken stream
+    // committed nothing and therefore always WENT down the empty path, where
+    // FREE_ATTEMPT_CEILING's own comment records why it must not be counted:
+    // "a quota window ends every turn at once and three of them are minutes,
+    // not evidence about the issue". The salvage removed that coincidence. The
+    // container now commits the killed turn's edits, `files.length > 0`, and
+    // the attempt arrives HERE instead - where a half-written file fails the
+    // compiler, `machineFailed` is non-empty, the state stays `sendBack` and
+    // `send_backs` climbs. Two deploy restarts (38 of them in one measured
+    // day) would exhaust the issue's send-backs and retire it over work the
+    // bee never claimed to have finished; a could-not-check reviewer would
+    // escalate it through `beyondThePatch` on the very first one.
+    //
+    // So the exemption follows the attempt rather than the path: the bee wrote
+    // no verdict and the ending came from the provider or the transport, so
+    // the container spoke for it. The work is still judged and still reported
+    // - the note and the send-back stand - it simply does not spend the
+    // issue's budget, exactly as it did not before the salvage existed.
+    const containerSpokeForTheBee = providerEnded && verdicts.length === 0
     const countsAgainstTheIssue =
       !unchangedSinceJudged &&
+      !containerSpokeForTheBee &&
       (machineFailed.length > 0 || admitted.length > 0 || refuted.length > 0)
 
     // BEYOND WHAT A PATCH SHOWS. The reviewer read the commit, refuted
@@ -3311,10 +3361,17 @@ export async function reviewFinishedDispatches(
     // went sendBack, sendBack, escalate - three bee turns and two hour-long
     // floors to reach the person it was always going to reach. So it goes to
     // the person now, and the note names what could not be seen.
+    //
+    // Never for a turn the container spoke for: `countsAgainstTheIssue` is
+    // false there by exemption rather than by judgement, and escalating on it
+    // would hand a person an issue whose only evidence is a quota window -
+    // sooner even than the counters could, because this fires on the FIRST
+    // such turn.
     const beyondThePatch =
       reviewer !== null &&
       state === 'sendBack' &&
       !countsAgainstTheIssue &&
+      !containerSpokeForTheBee &&
       !unchangedSinceJudged &&
       unestablished.length > 0
     if (beyondThePatch) state = 'escalate'
@@ -3341,7 +3398,10 @@ export async function reviewFinishedDispatches(
       )
     if (acceptedOnBaseTruthAlone) state = 'escalate'
 
-    const freeAttempt = state === 'sendBack' && !countsAgainstTheIssue
+    // A free attempt is still an attempt the ISSUE spends; a turn the provider
+    // ended is not the issue's at all, so it moves neither counter.
+    const freeAttempt =
+      state === 'sendBack' && !countsAgainstTheIssue && !containerSpokeForTheBee
     const freeAttempts = freeAttempt
       ? priorFreeAttempts + 1
       : (state === 'sendBack' && countsAgainstTheIssue) || state === 'accept'
@@ -3399,6 +3459,9 @@ export async function reviewFinishedDispatches(
       dirty: null,
       freeAttempts,
       providerEnded,
+      // The ending came from the provider and the bee wrote no verdict, so
+      // this attempt spends neither counter however it was judged.
+      containerSpokeForTheBee,
       unchangedSinceJudged,
       // The criteria the Queen ran herself: checks that ran (passed plus
       // failed), and whether this round ran them or read the cache.
@@ -3472,13 +3535,15 @@ export async function reviewFinishedDispatches(
               : heldForReviewer
                 ? `Waiting for the adversarial reviewer before judging a commit on the worker's word (${reviewerSkipped || 'no reviewer verdict yet'}).`
                 : policyNote
-    const note =
-      (deadLetter
+    const note = noteWithSalvage(
+      salvaged,
+      deadLetter
         ? `${freeAttempts} consecutive attempts produced nothing judgeable ` +
-          '(no commit, or no criterion anyone could establish), so this is ' +
-          'handed to a person instead of being retried again. Last review: ' +
-          judgedNote
-        : judgedNote) + salvaged
+            '(no commit, or no criterion anyone could establish), so this is ' +
+            'handed to a person instead of being retried again. Last review: ' +
+            judgedNote
+        : judgedNote,
+    )
     await recordVerdict(pool, issue, {
       state,
       note,
