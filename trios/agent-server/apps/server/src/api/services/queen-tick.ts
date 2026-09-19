@@ -706,6 +706,16 @@ export function stateOfDispatch(
     return idleMs >= EMPTY_ATTEMPT_FLOOR_MS ? 'failed' : 'rejected'
   }
 
+  // THE CONTRACT IT WAS JUDGED AGAINST IS GONE. An issue's criteria are frozen
+  // onto the dispatch row so a bee is judged by what it was told, and that is
+  // right - but when the ISSUE's criteria are rewritten, the verdict on the old
+  // row answers a question nobody is asking any more. Measured 2026-09-19: 126
+  // open issues quoted a compiler a bee does not have and criteria the container
+  // could never satisfy; after they were rewritten, 72 of the 86 rows still
+  // holding their issues had been judged against the old text. Released at
+  // once, with no floor: there is nothing to wait for.
+  if (verdict === 'stale-contract') return 'failed'
+
   if (verdict === 'sendBack') {
     if (idleMs >= SEND_BACK_IDLE_FLOOR_MS && sendBacks < ceiling)
       return 'failed'
@@ -1476,6 +1486,14 @@ export async function runRound(
   // own policy, and only an ESCALATION reaches a person. Without this the hold
   // added to stop the six-times loop would have become a different starvation:
   // every issue she finished would be locked out of the pool for ever.
+  // Before judging anything: a row whose contract was rewritten is judged
+  // against text nobody is asking about, and holds its issue while it waits.
+  await releaseStaleContracts(pool).catch((error) => {
+    logger.warn('Queen could not release stale contracts', {
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return []
+  })
   const reviewed = await reviewFinishedDispatches(pool, deps.review)
   if (reviewed.acted.length > 0) {
     logger.info('Queen reviewed her own work', { verdicts: reviewed.acted })
@@ -2445,6 +2463,66 @@ const withoutSlot = (criterion: string): string =>
  * real one - so a suite can drive the adversarial review with a fake model and
  * a fake branch and still get the real policy's answer.
  */
+/**
+ * Release the rows whose contract has been rewritten under them.
+ *
+ * A dispatch freezes the issue's criteria so a bee is judged by what it was
+ * told. When the ISSUE is edited, the frozen text and the live text disagree,
+ * and the verdict on that row answers a question nobody is asking any more -
+ * while the row goes on holding its issue and its files.
+ *
+ * Measured 2026-09-19: 126 open issues quoted a compiler the container does not
+ * have and, in 119 of them, a parse-metrics criterion that prints nothing there,
+ * so nothing a bee did could satisfy it. After the rewrite, 72 of the 86 rows
+ * still holding an issue had been judged against the old text, and the swarm
+ * sat at "nothing to choose" with 84 issues claimed.
+ *
+ * `accept` is never touched - the work landed, whatever the text says now - and
+ * neither is a row whose issue is not in the open set, because a comparison
+ * against a missing row is not a disagreement. `send_backs` and `free_attempts`
+ * go back to zero: they count attempts judged against a contract that no longer
+ * exists.
+ */
+export async function releaseStaleContracts(pool: Pool): Promise<number[]> {
+  const board = await pool.query<{ n: string }>(
+    'SELECT count(*)::text AS n FROM queen_issues',
+  )
+  // An empty board means the sync has not run in this process; every row would
+  // look stale and the whole swarm would be released at once.
+  if (Number(board.rows[0]?.n ?? 0) === 0) return []
+  const stale = await pool.query<{ issue: number }>(
+    `UPDATE queen_dispatch d
+        SET review_state = 'stale-contract',
+            review_note = 'The criteria this attempt was judged against have '
+              || 'been rewritten on the issue, so the verdict answers a '
+              || 'question that is no longer being asked. Released for a fresh '
+              || 'attempt against the criteria as they stand.',
+            reviewed_at = now(),
+            send_backs = 0,
+            free_attempts = 0
+       FROM queen_issues i
+      WHERE i.number = d.issue
+        AND d.started = true
+        AND d.finished_at IS NOT NULL
+        AND coalesce(d.review_state, '') NOT IN ('accept', 'stale-contract')
+        AND d.outcome NOT LIKE 'reaped%'
+        AND jsonb_array_length(i.criteria) > 0
+        AND i.criteria IS DISTINCT FROM d.criteria
+      RETURNING d.issue`,
+  )
+  const issues = stale.rows.map((r) => Number(r.issue))
+  if (issues.length > 0) {
+    logger.info(
+      'Queen released work judged against criteria that have changed',
+      {
+        count: issues.length,
+        issues: issues.slice(0, 25),
+      },
+    )
+  }
+  return issues
+}
+
 export async function reviewFinishedDispatches(
   pool: Pool,
   overrides: Partial<ReviewDeps> = {},
