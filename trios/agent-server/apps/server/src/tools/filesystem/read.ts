@@ -53,6 +53,9 @@ function getSelectedLines(
   return remaining
 }
 
+/** Room kept for the continuation note, so the answer can always carry one. */
+const CONTINUATION_NOTE_BUDGET = 160
+
 function formatReadResult(args: {
   selected: string[]
   startIdx: number
@@ -76,10 +79,50 @@ function formatReadResult(args: {
     text += `\n\n(Showing lines ${startLineNum}-${endLineNum} of ${args.totalLines})`
   }
 
+  // A REFUSAL COSTS A PROVIDER CALL, AND THE PROVIDER IS THE CEILING.
+  //
+  // This used to throw, and the agent's only recovery was to ask again with a
+  // smaller range. Measured on the running deployment 2026-09-20: 18 of 19
+  // filesystem tool failures in one window were this refusal, on files of 159
+  // and 500 lines - ordinary specs. Each one spent a round trip on the same
+  // endpoint that was answering `Service temporarily overloaded` 76 times in
+  // the same window, and returned no content at all.
+  //
+  // So it returns what FITS, and says exactly where to continue. The caller
+  // gets content on the first call and a correct `offset` for the rest, which
+  // is what it would have asked for on the second.
   if (text.length > MAX_READ_CHARS) {
-    throw new Error(
-      `Requested lines ${startLineNum}-${endLineNum} produce ${text.length} characters in the response, above the ${MAX_READ_CHARS}-character limit for filesystem_read. Retry with a smaller limit or a later offset.`,
-    )
+    const kept: string[] = []
+    let used = 0
+    for (let i = 0; i < args.selected.length; i++) {
+      const rendered = `${String(args.startIdx + i + 1).padStart(width)} | ${args.selected[i]}\n`
+      // Leave room for the continuation note, which is what makes the answer
+      // usable rather than merely shorter.
+      if (used + rendered.length > MAX_READ_CHARS - CONTINUATION_NOTE_BUDGET)
+        break
+      used += rendered.length
+      kept.push(args.selected[i])
+    }
+    if (kept.length === 0) {
+      // One line longer than the whole budget. Nothing to hand back, and the
+      // caller needs to hear why rather than get an empty answer.
+      throw new Error(
+        `Line ${startLineNum} alone is ${args.selected[0]?.length ?? 0} characters, above the ${MAX_READ_CHARS}-character limit for filesystem_read. Use filesystem_grep to find what you need in it.`,
+      )
+    }
+    const cutAt = args.startIdx + kept.length
+    const shortened = kept
+      .map(
+        (line, i) =>
+          `${String(args.startIdx + i + 1).padStart(width)} | ${line}`,
+      )
+      .join('\n')
+    return {
+      text:
+        shortened +
+        `\n\n(${args.totalLines - cutAt} more lines in file; this answer was ` +
+        `cut at the ${MAX_READ_CHARS}-character limit. Use offset=${cutAt + 1} to continue reading.)`,
+    }
   }
 
   return { text }
