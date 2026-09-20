@@ -109,7 +109,7 @@ derive_worker_cap() {
   # derived 1 here would be a swarm of one built out of an empty measurement.
   if [ "$credentials" -lt 1 ]; then
     echo "[entrypoint] no worker credential is set, so the lane count cannot be derived" >&2
-    echo "${TRIOS_QUEEN_MAX_WORKERS:-4}"
+    echo "${TRIOS_QUEEN_MAX_WORKERS_CEILING:-4}"
     return
   fi
   lanes=${TRIOS_QUEEN_WORKER_LANES_PER_KEY:-1}
@@ -148,7 +148,17 @@ derive_worker_cap() {
     echo "[entrypoint] memory: no container limit readable, so it does not bind" >&2
   fi
 
-  ceiling=${TRIOS_QUEEN_MAX_WORKERS_CEILING:-${TRIOS_QUEEN_MAX_WORKERS:-}}
+  # ONLY the explicitly named ceiling caps the derivation. A bare
+  # TRIOS_QUEEN_MAX_WORKERS is the old static number and is IGNORED, loudly:
+  # measured 2026-09-20, something outside both repositories rewrote it to 9
+  # twice within ten minutes of it being set to 20, and a derived cap that
+  # honours whatever is in that variable inherits the same problem it was
+  # written to end. An operator who wants a lower ceiling names it as one.
+  legacy=${TRIOS_QUEEN_MAX_WORKERS:-}
+  if [ -n "$legacy" ] && [ "$legacy" != "$derived" ]; then
+    echo "[entrypoint] TRIOS_QUEEN_MAX_WORKERS=$legacy is ignored; the lane count is derived. Use TRIOS_QUEEN_MAX_WORKERS_CEILING to cap it." >&2
+  fi
+  ceiling=${TRIOS_QUEEN_MAX_WORKERS_CEILING:-}
   case "$ceiling" in
     ''|*[!0-9]*) ceiling="" ;;
   esac
