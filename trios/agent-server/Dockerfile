@@ -192,9 +192,25 @@ WORKDIR /app
 #
 # tini as PID 1 reaps orphans and forwards signals. It is what `docker run
 # --init` installs, and it is the standard answer to exactly this.
+#
+# python3 is here for the same reason perl-base is: declared, not assumed.
+# Every gate that decides whether a bee's pull request lands is a Python
+# script -- tools/dupe_scan.py is the Duplicate Body Ratchet,
+# tools/check_assertionless_spec_tests.py is the corpus ratchet,
+# tools/ci/check_specs_still_parse.py is the required Spec Parse Ratchet, and
+# the twenty-one reporting helpers under scripts/tri_loop/ are Python too. A
+# bee that cannot run the gate that will fail it is a bee guessing, and the
+# brief has been telling it to run `python3 tools/dupe_scan.py --name <fn>`
+# since 2026-09-20.
+#
+# `python3`, not `python3-minimal`: those scripts import json, hashlib,
+# difflib and subprocess, and Debian's minimal package carries a subset of the
+# standard library chosen for dpkg's maintainer scripts. Nothing here needs a
+# module from outside the standard library, so there is no pip and no venv.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends git ca-certificates openssh-client tini perl-base \
- && rm -rf /var/lib/apt/lists/*
+ && apt-get install -y --no-install-recommends git ca-certificates openssh-client tini perl-base python3 \
+ && rm -rf /var/lib/apt/lists/* \
+ && python3 --version
 
 # An unprivileged account for the agents' shell commands.
 #

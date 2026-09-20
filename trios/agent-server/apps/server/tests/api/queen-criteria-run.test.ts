@@ -260,7 +260,7 @@ describe('criteria become checks', () => {
 })
 
 describe('t27c is allowed only where it reads', () => {
-  // `t27c --help` lists 180 subcommands and they are not all readers: `battery`
+  // `t27c --help` lists 155 subcommands and they are not all readers: `battery`
   // and `gates` run every `check_*.py` in the tree, and the tree is the bee's
   // own commit. A program allowlist alone would let a criterion run a script
   // the bee wrote in the same attempt.
@@ -275,6 +275,13 @@ describe('t27c is allowed only where it reads', () => {
     ['t27c fpga-flash'],
     ['t27c'],
     ['grep -c x specs/a.t27 && t27c battery'],
+    // Readers, and still refused: both walk the whole corpus. Measured
+    // 2026-09-20 on master, `dupes` takes ~50 s and `check-calls` ~140 s
+    // against a 60 s per-command timeout, and a criterion that times out is
+    // inconclusive - it spends a review and establishes nothing. The bee's own
+    // shell has no allowlist and can run either.
+    ['t27c dupes --name magadd'],
+    ['t27c check-calls --specs-dir specs'],
   ])('refuses %s', (cmd) => {
     expect(isSafeCommand(cmd)).toBe(false)
   })
@@ -285,6 +292,18 @@ describe('t27c is allowed only where it reads', () => {
     ['t27c parse specs/a.t27 2>&1 | grep -c x'],
     ['t27c typecheck specs/a.t27'],
     ['t27c impl-status'],
+    // The compile question, which no grep can ask: `test-report` generates the
+    // reviewed spec and has Zig build and run that spec's own tests. Admitted
+    // deliberately - see the comment on CRITERION_T27C_SUBCOMMANDS.
+    ['t27c test-report specs/a.t27 2>&1 | grep -c BLOCKED'],
+    // The readers a criterion could not name until now.
+    ['t27c coverage specs/a.t27'],
+    ['t27c lint specs/a.t27 | grep -c WARN'],
+    ['t27c symbols specs/a.t27 | wc -l'],
+    ['t27c outline specs/a.t27'],
+    ['t27c validate-vacuity --specs-dir specs'],
+    ['t27c api-diff specs/a.t27 specs/b.t27'],
+    ['t27c eval 1 + 2'],
   ])('allows %s', (cmd) => {
     expect(isSafeCommand(cmd)).toBe(true)
   })
