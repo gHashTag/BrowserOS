@@ -21,6 +21,149 @@
 
 set -e
 
+# ---------------------------------------------------------------------------
+# HOW MANY BEES: derived from what is connected, not typed by hand.
+#
+# TRIOS_QUEEN_MAX_WORKERS was a number somebody set. It read 8 on 2026-09-20
+# while ten credentials were connected at two lanes each - twenty lanes paid
+# for and twelve of them unusable - and nothing anywhere said so, because a
+# constant cannot notice that the thing it stands for has changed. The same
+# variable had been 4, then 16, then 8 again, with no commit in either
+# repository to show for any of it.
+#
+# So it is computed here, once, before either reader is started, and both the
+# TypeScript that reports capacity and the Swift policy that enforces it then
+# read the same number out of the same environment. That is the drift this
+# repository has already paid for twice: capacity 12 reported while every tick
+# refused with "4 workers already running (limit 4)".
+#
+#   lanes = distinct worker credentials x TRIOS_QUEEN_WORKER_LANES_PER_KEY
+#   bees  = min(lanes, container memory / TRIOS_QUEEN_BEE_MEMORY_MB)
+#
+# The memory term is not decoration. The dispatch resource guard already
+# refuses to start a bee when memory is short, so a lane count above what the
+# container can hold is telemetry promising what the guard will refuse - which
+# sends an operator hunting a bug in dispatch. Both terms are printed.
+#
+# Adding a credential now raises the swarm by itself. Nothing has to be edited.
+#
+# TRIOS_QUEEN_MAX_WORKERS, if it is still set, is honoured as a CEILING and
+# said so out loud: an operator who deliberately set a small number keeps it,
+# and an operator who set a large one does not get a swarm the credentials
+# cannot feed. Unset it to let the derivation govern.
+
+# Distinct, non-empty worker credentials, counted WITHOUT any value reaching a
+# log, a file or an argument list: each is hashed and only the digest is
+# compared. Two variables holding the same key are one credential.
+worker_credentials() {
+  if [ "${TRIOS_QUEEN_WORKER_PROVIDER:-}" = "ollama" ]; then
+    # One measured inference server, however many names its token has.
+    echo 1
+    return
+  fi
+  seen=""
+  count=0
+  for suffix in "" 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 \
+                21 22 23 24 25 26 27 28 29 30 31 32; do
+    if [ -z "$suffix" ]; then
+      value=$(printenv TRIOS_QUEEN_WORKER_API_KEY 2>/dev/null || echo "")
+    else
+      value=$(printenv "TRIOS_QUEEN_WORKER_API_KEY_$suffix" 2>/dev/null || echo "")
+    fi
+    [ -n "$value" ] || continue
+    # A missing hasher must NOT read as a missing credential: the failure mode
+    # of "skip what I cannot hash" is a swarm of one, which is worse than
+    # counting a duplicated key twice.
+    digest=$(printf '%s' "$value" | sha256sum 2>/dev/null | cut -c1-16)
+    if [ -z "$digest" ]; then
+      count=$((count + 1))
+      continue
+    fi
+    case " $seen " in
+      *" $digest "*) continue ;;
+    esac
+    seen="$seen $digest"
+    count=$((count + 1))
+  done
+  echo "$count"
+}
+
+# The container's own memory limit, or empty when it has none to read. cgroup
+# v1 writes "no limit" as a number near 2^63, and v2 writes the word max.
+container_memory_bytes() {
+  for file in /sys/fs/cgroup/memory.max /sys/fs/cgroup/memory/memory.limit_in_bytes; do
+    [ -r "$file" ] || continue
+    value=$(cat "$file" 2>/dev/null || echo "")
+    case "$value" in
+      ''|max|922337203685477*|-1) continue ;;
+    esac
+    echo "$value"
+    return
+  done
+  echo ""
+}
+
+derive_worker_cap() {
+  credentials=$(worker_credentials)
+  # Nothing to derive from. Say so and leave whatever was set alone, because a
+  # derived 1 here would be a swarm of one built out of an empty measurement.
+  if [ "$credentials" -lt 1 ]; then
+    echo "[entrypoint] no worker credential is set, so the lane count cannot be derived" >&2
+    echo "${TRIOS_QUEEN_MAX_WORKERS:-4}"
+    return
+  fi
+  lanes=${TRIOS_QUEEN_WORKER_LANES_PER_KEY:-1}
+  case "$lanes" in
+    ''|*[!0-9]*) lanes=1 ;;
+  esac
+  [ "$lanes" -ge 1 ] || lanes=1
+  # The same bound the TypeScript applies, for the same reason: one typo must
+  # not turn a credential pool into a request fan-out.
+  [ "$lanes" -le 4 ] || lanes=4
+
+  from_keys=$((credentials * lanes))
+  bee_mb=${TRIOS_QUEEN_BEE_MEMORY_MB:-1024}
+  case "$bee_mb" in
+    ''|*[!0-9]*) bee_mb=1024 ;;
+  esac
+  [ "$bee_mb" -ge 128 ] || bee_mb=1024
+
+  memory_bytes=$(container_memory_bytes)
+  if [ -n "$memory_bytes" ] && [ "$bee_mb" -gt 0 ]; then
+    from_memory=$((memory_bytes / 1048576 / bee_mb))
+  else
+    from_memory=0
+  fi
+
+  derived=$from_keys
+  if [ "$from_memory" -gt 0 ] && [ "$from_memory" -lt "$derived" ]; then
+    derived=$from_memory
+  fi
+  [ "$derived" -ge 1 ] || derived=1
+
+  echo "[entrypoint] lanes: $credentials credential(s) x $lanes = $from_keys" >&2
+  if [ "$from_memory" -gt 0 ]; then
+    echo "[entrypoint] memory: $((memory_bytes / 1048576)) MiB / $bee_mb MiB per bee = $from_memory" >&2
+  else
+    echo "[entrypoint] memory: no container limit readable, so it does not bind" >&2
+  fi
+
+  ceiling=${TRIOS_QUEEN_MAX_WORKERS_CEILING:-${TRIOS_QUEEN_MAX_WORKERS:-}}
+  case "$ceiling" in
+    ''|*[!0-9]*) ceiling="" ;;
+  esac
+  if [ -n "$ceiling" ] && [ "$ceiling" -ge 1 ] && [ "$ceiling" -lt "$derived" ]; then
+    echo "[entrypoint] an operator ceiling of $ceiling is lower than the derived $derived; using $ceiling" >&2
+    derived=$ceiling
+  fi
+
+  echo "$derived"
+}
+
+TRIOS_QUEEN_MAX_WORKERS=$(derive_worker_cap)
+export TRIOS_QUEEN_MAX_WORKERS
+echo "[entrypoint] TRIOS_QUEEN_MAX_WORKERS=$TRIOS_QUEEN_MAX_WORKERS (derived)"
+
 if [ -z "$TRIOS_REPO_URL" ]; then
   echo "[entrypoint] TRIOS_REPO_URL unset; starting without a checkout"
   exec "$@"
