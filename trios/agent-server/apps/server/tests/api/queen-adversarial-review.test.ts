@@ -1464,7 +1464,16 @@ describe('a redispatch after a person released an escalation', () => {
     expect(upsert?.sql).toMatch(
       /reviewer_misses = CASE WHEN EXCLUDED\.started THEN 0/,
     )
-    // send_backs is still not named: it accumulates across attempts.
-    expect(upsert?.sql).not.toContain('send_backs')
+    // send_backs accumulates across attempts, with ONE exception added on
+    // 2026-09-20: the hand-back of a spent ceiling. Without the reset the new
+    // attempt starts already at the ceiling and its first verdict parks the
+    // issue again, which makes the hand-back meaningless; `ceiling_releases`
+    // is what stops that becoming a cycle. Anywhere else, the count stands.
+    expect(upsert?.sql).toMatch(
+      /send_backs = CASE\s+WHEN EXCLUDED\.started AND queen_dispatch\.send_backs >= 2\s+THEN 0 ELSE queen_dispatch\.send_backs END/,
+    )
+    expect(upsert?.sql).toMatch(
+      /ceiling_releases = CASE\s+WHEN EXCLUDED\.started AND queen_dispatch\.send_backs >= 2\s+THEN queen_dispatch\.ceiling_releases \+ 1/,
+    )
   })
 })
