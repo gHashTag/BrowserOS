@@ -1,0 +1,226 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>TRIOS — loop status</title>
+<style>
+  :root {
+    --bg: #1f1e1d; --panel: #262624; --line: #3a3937;
+    --ink: #f0eee6; --dim: #8f8b83; --faint: #6b6761;
+    --accent: #d97757; --good: #7fb069; --warn: #d9a441; --bad: #d16d63;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--mono);
+         font-size: 13px; line-height: 1.55; padding: 28px 24px 48px; }
+  .wrap { max-width: 1040px; margin: 0 auto; }
+  h1 { font-size: 15px; font-weight: 600; margin: 0 0 2px; letter-spacing: .02em; }
+  h1 .dot { color: var(--accent); }
+  .sub { color: var(--dim); font-size: 12px; margin-bottom: 4px; }
+  .banner { margin: 14px 0 22px; padding: 9px 13px; border-radius: 6px;
+            border: 1px solid var(--line); background: var(--panel); color: var(--dim); font-size: 12px; }
+  .banner.stale { border-color: #6d4a3f; background: #2e2320; color: #e7b9a6; }
+  .banner b { color: var(--ink); font-weight: 600; }
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 14px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 13px 15px 15px; }
+  .card.full { grid-column: 1 / -1; }
+  .card h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .09em;
+             color: var(--faint); margin: 0 0 10px; font-weight: 600; }
+  .row { display: grid; grid-template-columns: 1fr auto; grid-template-areas: "k v" "src src";
+         gap: 0 10px; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,.03); }
+  .row:last-child { border-bottom: 0; }
+  .k { grid-area: k; color: var(--dim); }
+  .v { grid-area: v; color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .v.good { color: var(--good); } .v.warn { color: var(--warn); } .v.bad { color: var(--bad); }
+  .src { grid-area: src; color: var(--faint); font-size: 10.5px; margin-top: -2px; }
+  .row.unmeasured .v { color: var(--faint); font-weight: 400; }
+  .bar-row { display: grid; grid-template-columns: 190px 1fr 120px; gap: 10px; align-items: center; padding: 3px 0; }
+  .bk { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar { background: #141312; border-radius: 3px; height: 9px; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--accent); }
+  .bv { text-align: right; font-variant-numeric: tabular-nums; }
+  .bv em { color: var(--faint); font-style: normal; }
+  .chip { display: inline-flex; gap: 7px; align-items: baseline; padding: 4px 9px; margin: 0 6px 6px 0;
+          border: 1px solid var(--line); border-radius: 5px; background: #1c1b1a; }
+  .chip b { font-weight: 600; } .chip span { color: var(--faint); font-size: 11px; }
+  .chip.good b { color: var(--good); } .chip.warn b { color: var(--warn); } .chip.bad b { color: var(--bad); }
+  ul.anom { list-style: none; margin: 0; padding: 0; }
+  ul.anom li { padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,.04); }
+  ul.anom li:last-child { border-bottom: 0; }
+  ul.anom b { font-weight: 600; }
+  .sev { display: inline-block; min-width: 62px; margin-right: 9px; padding: 1px 6px; border-radius: 3px;
+         font-size: 10px; text-transform: uppercase; letter-spacing: .07em; text-align: center;
+         background: #332f2c; color: var(--dim); vertical-align: 1px; }
+  .sev-blocker .sev { background: #4a2b27; color: #e79b8f; }
+  .sev-high .sev { background: #4a3a22; color: #e0bb72; }
+  .truth { color: var(--dim); margin: 3px 0 0 71px; }
+  .repair { color: var(--faint); margin: 3px 0 0 71px; font-size: 11.5px; }
+  .repair code { color: var(--accent); }
+  .empty { color: var(--faint); }
+  .stopped { background: #4a2b27; color: #e79b8f; padding: 1px 6px; border-radius: 3px;
+             font-size: 10px; letter-spacing: .07em; margin-left: 6px; }
+  footer { margin-top: 22px; color: var(--faint); font-size: 11px; line-height: 1.7; }
+  footer code { color: var(--dim); }
+</style>
+<div class="wrap">
+  <h1><span class="dot">◆</span> TRIOS CONTINUOUS LOOP</h1>
+  <div class="sub">the CLI that runs the loop was in no repository, and the box could not say the counter was stuck</div>
+
+  <div class="banner">
+    reading taken <b>2026-09-20T14:00:47.784Z</b>
+    — <b>0m</b> ago
+    
+    <br>every value carries the command that produced it. A dash means nobody measured it — it is never a zero.
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>The swarm</h2>
+      <div class="row">
+        <span class="k">bees running</span>
+        <span class="v bad" title="source: GET /queen/status">0</span>
+        <span class="src">GET /queen/status</span>
+      </div>
+      <div class="row">
+        <span class="k">dispatches finished</span>
+        <span class="v " title="source: GET /queen/status">864</span>
+        <span class="src">GET /queen/status</span>
+      </div>
+      <div class="row unmeasured">
+        <span class="k">candidates refused</span>
+        <span class="v warn" title="source: GET /queen/status">—</span>
+        <span class="src">GET /queen/status</span>
+      </div>
+      <div class="row unmeasured">
+        <span class="k">idle, over the window</span>
+        <span class="v warn" title="source: tri idle
+skipped: needs --deep">—</span>
+        <span class="src">tri idle</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>This checkout</h2>
+      <div class="row">
+        <span class="k">branch</span>
+        <span class="v " title="source: git status --porcelain">feat/queen-supervisor</span>
+        <span class="src">git status --porcelain</span>
+      </div>
+      <div class="row">
+        <span class="k">commits behind its remote</span>
+        <span class="v " title="source: git status --porcelain">23</span>
+        <span class="src">git status --porcelain</span>
+      </div>
+      <div class="row">
+        <span class="k">commits ahead</span>
+        <span class="v " title="source: git status --porcelain">0</span>
+        <span class="src">git status --porcelain</span>
+      </div>
+      <div class="row">
+        <span class="k">volume used</span>
+        <span class="v warn" title="source: df -h">80%</span>
+        <span class="src">df -h</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>The loop itself <span class="stopped">stopped</span></h2>
+      <div class="row">
+        <span class="k">iteration</span>
+        <span class="v bad" title="source: state.json">97 — STOPPED</span>
+        <span class="src">state.json</span>
+      </div>
+      <div class="row">
+        <span class="k">hours since one closed</span>
+        <span class="v bad" title="source: state.json
+hours since the last iteration closed">340.7h</span>
+        <span class="src">state.json</span>
+      </div>
+      <div class="row">
+        <span class="k">lessons recorded</span>
+        <span class="v " title="source: state.json">73</span>
+        <span class="src">state.json</span>
+      </div>
+      <div class="row">
+        <span class="k">lock</span>
+        <span class="v " title="source: loop.lock">cycle (0.1m)</span>
+        <span class="src">loop.lock</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Gates</h2>
+      <div class="row">
+        <span class="k">declared</span>
+        <span class="v " title="source: Makefile check: + .github/workflows">25</span>
+        <span class="src">Makefile check: + .github/workflows</span>
+      </div>
+      <div class="row">
+        <span class="k">wired into a workflow</span>
+        <span class="v warn" title="source: Makefile check: + .github/workflows">8</span>
+        <span class="src">Makefile check: + .github/workflows</span>
+      </div>
+      <div class="row">
+        <span class="k">fires the loop: launchd</span>
+        <span class="v good" title="source: scheduled_tasks.json + crontab + launchctl
+what, if anything, fires the loop">4</span>
+        <span class="src">scheduled_tasks.json + crontab + launchctl</span>
+      </div>
+      <div class="row">
+        <span class="k">fires the loop: crontab</span>
+        <span class="v " title="source: scheduled_tasks.json + crontab + launchctl
+what, if anything, fires the loop">1</span>
+        <span class="src">scheduled_tasks.json + crontab + launchctl</span>
+      </div>
+    </div>
+
+    
+
+    <div class="card full">
+      <h2>Timers — when each last wrote</h2>
+      <div>        <div class="chip good"><b>heal</b><span>6.8m ago</span></div>
+        <div class="chip good"><b>feed</b><span>1.3m ago</span></div></div>
+    </div>
+
+    <div class="card full">
+      <h2>Anomalies — what the loop asserts, against what was measured</h2>
+      <ul class="anom"><li class="sev-blocker">
+          <span class="sev">blocker</span>
+          <b>DASHBOARD.txt header says &quot;cron */15 job 23d6fe89&quot;</b>
+          <div class="truth">.claude/scheduled_tasks.json holds 0 tasks - that job does not exist</div>
+          <div class="repair">repair: <code>Render the driver row from scheduled_tasks.json at draw time instead of writing the job id into the template, and show NO DRIVER when the list is empty.</code></div>
+        </li><li class="sev-blocker">
+          <span class="sev">blocker</span>
+          <b>state.json presents iteration 97 as the current one</b>
+          <div class="truth">it closed 340.7 hours ago (14.2 days) and no iteration has opened since</div>
+          <div class="repair">repair: <code>Either start an iteration or make the dashboard say STOPPED. A loop that stops is fine; a loop that stops while reporting as running is not.</code></div>
+        </li><li class="sev-high">
+          <span class="sev">high</span>
+          <b>the heal and feed timers are firing, which reads as &quot;the loop is running&quot;</b>
+          <div class="truth">they last wrote 6.8 min ago and are doing no-op work (author filed 0, land 0, close-done nothing) while the iteration counter has not moved in 340.7h</div>
+          <div class="repair">repair: <code>Separate the two liveness signals on the dashboard: TIMERS (launchd) and DRIVER (iterations). They fail independently and today they disagree.</code></div>
+        </li><li class="sev-high">
+          <span class="sev">high</span>
+          <b>DASHBOARD.txt shows &quot;bees running 4&quot;</b>
+          <div class="truth">the Queen's board says running 0 right now; the dashboard file is 74.6h old</div>
+          <div class="repair">repair: <code>Stamp every rendered dashboard with the age of its newest measurement and refuse to draw a swarm row older than one hour.</code></div>
+        </li><li class="sev-medium">
+          <span class="sev">medium</span>
+          <b>make check declares 25 gates, which reads as 25 gates guarding the branch</b>
+          <div class="truth">8 of them appear in a workflow CI will load; 17 run only on a developer's Mac</div>
+          <div class="repair">repair: <code>For each unwired gate, either wire it or write the reason next to it. A gate that skips silently when its input is absent must NOT be wired - it manufactures green.</code></div>
+        </li><li class="sev-medium">
+          <span class="sev">medium</span>
+          <b>the working tree is the record of what this project has done</b>
+          <div class="truth">4 untracked source file(s) and 0 modified one(s) exist only on this disk</div>
+          <div class="repair">repair: <code>Classify each: output (ignore it) or work (commit it). A worktree reaper removing a tree takes uncommitted work with it.</code></div>
+        </li></ul>
+    </div>
+  </div>
+
+  <footer>
+    Rendered by <code>tri dash-cc</code> from the newest line of
+    <code>state/cycle-readings.jsonl</code>. Nothing on this page is measured here and
+    nothing is derived from anything else on it, except the refusal shares, which come
+    from two numbers in the same reading.<br>
+    A dash is not a zero. A stale page says so at the top, before any number.
+  </footer>
+</div>

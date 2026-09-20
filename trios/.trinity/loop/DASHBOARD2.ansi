@@ -1,0 +1,31 @@
+[38;5;240m╭─[0m [38;5;173mTRIOS[0m [1mCONTINUOUS LOOP[0m  [38;5;167m● STOPPED[0m [38;5;240m───────────────────────────────────────────╮[0m
+[38;5;240m│[0m [38;5;245mdrawn from a reading      [0m[38;5;245mjust now    [0m[38;5;245m2026-09-20 14:00:47Z[0m                   [38;5;240m│[0m
+[38;5;240m├──────────────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245miteration                 [0m[1m97[0m          [38;5;245mthe CLI that runs the loop was in no…[0m  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlast advanced             [0m[38;5;167m14.2d ago[0m   [38;5;245mno driver; last iteration 14.2d ago[0m    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdriver (iterations)       [0m[38;5;167mNONE[0m        [38;5;245mnothing schedules an iteration[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtimers (housekeeping)     [0m[38;5;71m4 launchd[0m   [38;5;245mheal wrote 7m ago[0m                      [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlock                      [0m[1mcycle 0.1m[0m                                         [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mSWARM   measured just now[0m [38;5;240m──────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbees running              [0m[38;5;167m0[0m           [38;5;245mnothing is being worked on[0m             [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdispatches finished       [0m[1m864[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtick refusal              [0m[1mDISPATCHED[0m                                         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mcandidates skipped        [0m[1m678[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  missing boundary        [0m[38;5;167m554[0m         [38;5;245m82% of all skips[0m                       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  claimed by a fence      [0m[1m19[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  done but still open     [0m[1m26[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mavailable to a bee        [0m[38;5;245m-[0m           [38;5;245mneeds a deep cycle[0m                     [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mTREE[0m [38;5;240m───────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbranch                    [0m[1mfeat/queen-supervisor[0m  [38;5;245mahead 0  behind 23[0m          [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245muncommitted source        [0m[38;5;179m0 mod / 4 new[0m  [38;5;245mgenerated files excluded[0m            [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mworktrees                 [0m[1m21[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mvolume used               [0m[38;5;71m80%[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mgates declared / wired    [0m[38;5;179m25 / 8[0m      [38;5;245m17 run only on a Mac[0m                   [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mANOMALIES   2 blocker  2 high  2 medium[0m [38;5;240m────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;167m![0m .claude/scheduled_tasks.json holds 0 tasks - that job does not exist       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;167m![0m it closed 340.7 hours ago (14.2 days) and no iteration has opened since    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m they last wrote 6.8 min ago and are doing no-op work (author filed 0, l…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the Queen's board says running 0 right now; the dashboard file is 74.6h…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m●[0m 8 of them appear in a workflow CI will load; 17 run only on a developer…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m●[0m 4 untracked source file(s) and 0 modified one(s) exist only on this disk   [38;5;240m│[0m
+[38;5;240m╰──────────────────────────────────────────────────────────────────────────────╯[0m

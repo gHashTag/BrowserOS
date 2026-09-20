@@ -1,0 +1,790 @@
+[38;5;240m╭─[0m [38;5;173mTRIOS[0m [1mCONTINUOUS LOOP[0m  [38;5;167m● STOPPED[0m [38;5;240m───────────────────────────────────────────╮[0m
+[38;5;240m│[0m [38;5;245mdrawn from a reading      [0m[38;5;245mjust now    [0m[38;5;245m2026-09-17 12:04:38Z[0m                   [38;5;240m│[0m
+[38;5;240m├──────────────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245miteration                 [0m[1m97[0m          [38;5;245mthe CLI that runs the loop was in no…[0m  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlast advanced             [0m[38;5;167m11.1d ago[0m   [38;5;245mno driver; last iteration 11.1d ago[0m    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdriver (iterations)       [0m[38;5;167mNONE[0m        [38;5;245mnothing schedules an iteration[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtimers (housekeeping)     [0m[38;5;71m4 launchd[0m   [38;5;245mheal wrote 10m ago[0m                     [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlock                      [0m[1mcycle 0.1m[0m                                         [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mSWARM   measured just now[0m [38;5;240m──────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbees running              [0m[38;5;71m6[0m                                                  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdispatches finished       [0m[1m774[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtick refusal              [0m[1mnothing to choose[0m                                  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mcandidates skipped        [0m[1m742[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  missing boundary        [0m[38;5;167m553[0m         [38;5;245m75% of all skips[0m                       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  claimed by a fence      [0m[1m106[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  done but still open     [0m[1m61[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mavailable to a bee        [0m[38;5;245m-[0m           [38;5;245mneeds a deep cycle[0m                     [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mTREE[0m [38;5;240m───────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbranch                    [0m[1mfeat/queen-supervisor[0m  [38;5;245mahead 0  behind 0[0m           [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245muncommitted source        [0m[38;5;179m0 mod / 4 new[0m  [38;5;245mgenerated files excluded[0m            [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mworktrees                 [0m[1m21[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mvolume used               [0m[38;5;167m97%[0m         [38;5;245mbees die at 0s when this fills[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mgates declared / wired    [0m[38;5;179m25 / 8[0m      [38;5;245m17 run only on a Mac[0m                   [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mANOMALIES   3 blocker  3 high  2 medium[0m [38;5;240m────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;167m![0m .claude/scheduled_tasks.json holds 0 tasks - that job does not exist       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;167m![0m it closed 266.8 hours ago (11.1 days) and no iteration has opened since    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;167m![0m 553 of 742 skipped candidates (75%) were refused for missingBoundary - …   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m they last wrote 9.8 min ago and are doing no-op work (author filed 0, l…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the Queen's board says running 6 right now; the dashboard file is 0.6h …   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the volume is 97% used; how much of it the loop owns was not measured t…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m●[0m 8 of them appear in a workflow CI will load; 17 run only on a developer…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  +1 more - tri cycle-anomalies[0m                                              [38;5;240m│[0m
+[38;5;240m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+repaired: reap-local removed 1 of 1 merged and clean worktree(s)
+cycle 2: 8 anomalies in 8.6s
+cycle: skipped - lock feed.mjs is running (the lock is not proof on its own)
+cycle: skipped - lock feed.mjs is running (the lock is not proof on its own)
+cycle: skipped - lock feed.mjs is running (the lock is not proof on its own)
+cycle: skipped - lock feed.mjs is running (the lock is not proof on its own)
+[38;5;240m╭─[0m [38;5;173mTRIOS[0m [1mCONTINUOUS LOOP[0m  [38;5;167m● STOPPED[0m [38;5;240m───────────────────────────────────────────╮[0m
+[38;5;240m│[0m [38;5;245mdrawn from a reading      [0m[38;5;245mjust now    [0m[38;5;245m2026-09-17 17:04:41Z[0m                   [38;5;240m│[0m
+[38;5;240m├──────────────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245miteration                 [0m[1m97[0m          [38;5;245mthe CLI that runs the loop was in no…[0m  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlast advanced             [0m[38;5;167m11.3d ago[0m   [38;5;245mno driver; last iteration 11.3d ago[0m    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdriver (iterations)       [0m[38;5;167mNONE[0m        [38;5;245mnothing schedules an iteration[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtimers (housekeeping)     [0m[38;5;71m4 launchd[0m   [38;5;245mheal wrote 8m ago[0m                      [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlock                      [0m[1mcycle 0m[0m                                           [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mSWARM   measured just now[0m [38;5;240m──────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbees running              [0m[38;5;167m0[0m           [38;5;245mnothing is being worked on[0m             [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdispatches finished       [0m[1m785[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtick refusal              [0m[1mnothing to choose[0m                                  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mcandidates skipped        [0m[1m711[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  missing boundary        [0m[38;5;167m553[0m         [38;5;245m78% of all skips[0m                       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  claimed by a fence      [0m[1m99[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  done but still open     [0m[1m45[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mavailable to a bee        [0m[38;5;245m-[0m           [38;5;245mneeds a deep cycle[0m                     [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mTREE[0m [38;5;240m───────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbranch                    [0m[1mfeat/queen-supervisor[0m  [38;5;245mahead 0  behind 0[0m           [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245muncommitted source        [0m[38;5;179m0 mod / 4 new[0m  [38;5;245mgenerated files excluded[0m            [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mworktrees                 [0m[1m21[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mvolume used               [0m[38;5;167m97%[0m         [38;5;245mbees die at 0s when this fills[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mgates declared / wired    [0m[38;5;179m25 / 8[0m      [38;5;245m17 run only on a Mac[0m                   [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mANOMALIES   3 blocker  3 high  2 medium[0m [38;5;240m────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;167m![0m .claude/scheduled_tasks.json holds 0 tasks - that job does not exist       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;167m![0m it closed 271.8 hours ago (11.3 days) and no iteration has opened since    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;167m![0m 553 of 711 skipped candidates (78%) were refused for missingBoundary - …   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m they last wrote 7.6 min ago and are doing no-op work (author filed 0, l…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the Queen's board says running 0 right now; the dashboard file is 5.6h …   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the volume is 97% used; how much of it the loop owns was not measured t…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m●[0m 8 of them appear in a workflow CI will load; 17 run only on a developer…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  +1 more - tri cycle-anomalies[0m                                              [38;5;240m│[0m
+[38;5;240m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+cycle 9: 8 anomalies in 5.4s
+[38;5;240m╭─[0m [38;5;173mTRIOS[0m [1mCONTINUOUS LOOP[0m  [38;5;167m● STOPPED[0m [38;5;240m───────────────────────────────────────────╮[0m
+[38;5;240m│[0m [38;5;245mdrawn from a reading      [0m[38;5;245mjust now    [0m[38;5;245m2026-09-17 18:04:47Z[0m                   [38;5;240m│[0m
+[38;5;240m├──────────────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245miteration                 [0m[1m97[0m          [38;5;245mthe CLI that runs the loop was in no…[0m  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlast advanced             [0m[38;5;167m11.4d ago[0m   [38;5;245mno driver; last iteration 11.4d ago[0m    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdriver (iterations)       [0m[38;5;167mNONE[0m        [38;5;245mnothing schedules an iteration[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtimers (housekeeping)     [0m[38;5;71m4 launchd[0m   [38;5;245mheal wrote 8m ago[0m                      [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlock                      [0m[1mcycle 0m[0m                                           [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mSWARM   measured just now[0m [38;5;240m──────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbees running              [0m[38;5;167m0[0m           [38;5;245mnothing is being worked on[0m             [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdispatches finished       [0m[1m785[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtick refusal              [0m[1mnothing to choose[0m                                  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mcandidates skipped        [0m[1m712[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  missing boundary        [0m[38;5;167m553[0m         [38;5;245m78% of all skips[0m                       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  claimed by a fence      [0m[1m98[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  done but still open     [0m[1m45[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mavailable to a bee        [0m[38;5;245m-[0m           [38;5;245mneeds a deep cycle[0m                     [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mwindow with no bee        [0m[38;5;71m15%[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mrounds failed             [0m[38;5;245m-[0m                                                  [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mTREE[0m [38;5;240m───────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbranch                    [0m[1mfeat/queen-supervisor[0m  [38;5;245mahead 0  behind 0[0m           [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245muncommitted source        [0m[38;5;179m0 mod / 4 new[0m  [38;5;245mgenerated files excluded[0m            [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mworktrees                 [0m[1m21[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mvolume used               [0m[38;5;167m96%[0m         [38;5;245mbees die at 0s when this fills[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mgates declared / wired    [0m[38;5;179m25 / 8[0m      [38;5;245m17 run only on a Mac[0m                   [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mANOMALIES   3 blocker  3 high  2 medium[0m [38;5;240m────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;167m![0m .claude/scheduled_tasks.json holds 0 tasks - that job does not exist       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;167m![0m it closed 272.8 hours ago (11.4 days) and no iteration has opened since    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;167m![0m 553 of 712 skipped candidates (78%) were refused for missingBoundary - …   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m they last wrote 7.6 min ago and are doing no-op work (author filed 0, l…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the Queen's board says running 0 right now; the dashboard file is 6.6h …   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the volume is 96% used; the loop's own worktrees are 2.5G of that, 0.6%…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m●[0m 8 of them appear in a workflow CI will load; 17 run only on a developer…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  +1 more - tri cycle-anomalies[0m                                              [38;5;240m│[0m
+[38;5;240m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+cycle 12: 8 anomalies in 18.8s
+[38;5;240m╭─[0m [38;5;173mTRIOS[0m [1mCONTINUOUS LOOP[0m  [38;5;167m● STOPPED[0m [38;5;240m───────────────────────────────────────────╮[0m
+[38;5;240m│[0m [38;5;245mdrawn from a reading      [0m[38;5;245mjust now    [0m[38;5;245m2026-09-17 19:05:25Z[0m                   [38;5;240m│[0m
+[38;5;240m├──────────────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245miteration                 [0m[1m97[0m          [38;5;245mthe CLI that runs the loop was in no…[0m  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlast advanced             [0m[38;5;167m11.4d ago[0m   [38;5;245mno driver; last iteration 11.4d ago[0m    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdriver (iterations)       [0m[38;5;167mNONE[0m        [38;5;245mnothing schedules an iteration[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtimers (housekeeping)     [0m[38;5;71m4 launchd[0m   [38;5;245mheal wrote 8m ago[0m                      [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlock                      [0m[1mcycle 0m[0m                                           [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mSWARM   measured just now[0m [38;5;240m──────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbees running              [0m[38;5;71m1[0m                                                  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdispatches finished       [0m[1m784[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtick refusal              [0m[1mnothing to choose[0m                                  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mcandidates skipped        [0m[1m713[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  missing boundary        [0m[38;5;167m553[0m         [38;5;245m78% of all skips[0m                       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  claimed by a fence      [0m[1m96[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  done but still open     [0m[1m46[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mavailable to a bee        [0m[38;5;245m-[0m           [38;5;245mneeds a deep cycle[0m                     [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mTREE[0m [38;5;240m───────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbranch                    [0m[1mfeat/queen-supervisor[0m  [38;5;245mahead 0  behind 0[0m           [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245muncommitted source        [0m[38;5;179m0 mod / 4 new[0m  [38;5;245mgenerated files excluded[0m            [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mworktrees                 [0m[1m21[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mvolume used               [0m[38;5;167m96%[0m         [38;5;245mbees die at 0s when this fills[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mgates declared / wired    [0m[38;5;179m25 / 8[0m      [38;5;245m17 run only on a Mac[0m                   [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mANOMALIES   3 blocker  3 high  2 medium[0m [38;5;240m────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;167m![0m .claude/scheduled_tasks.json holds 0 tasks - that job does not exist       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;167m![0m it closed 273.8 hours ago (11.4 days) and no iteration has opened since    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;167m![0m 553 of 713 skipped candidates (78%) were refused for missingBoundary - …   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m they last wrote 7.6 min ago and are doing no-op work (author filed 0, l…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the Queen's board says running 1 right now; the dashboard file is 7.6h …   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the volume is 96% used; how much of it the loop owns was not measured t…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m●[0m 8 of them appear in a workflow CI will load; 17 run only on a developer…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  +1 more - tri cycle-anomalies[0m                                              [38;5;240m│[0m
+[38;5;240m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+cycle 15: 8 anomalies in 5.8s
+[38;5;240m╭─[0m [38;5;173mTRIOS[0m [1mCONTINUOUS LOOP[0m  [38;5;167m● STOPPED[0m [38;5;240m───────────────────────────────────────────╮[0m
+[38;5;240m│[0m [38;5;245mdrawn from a reading      [0m[38;5;245mjust now    [0m[38;5;245m2026-09-17 20:05:31Z[0m                   [38;5;240m│[0m
+[38;5;240m├──────────────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245miteration                 [0m[1m97[0m          [38;5;245mthe CLI that runs the loop was in no…[0m  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlast advanced             [0m[38;5;167m11.5d ago[0m   [38;5;245mno driver; last iteration 11.5d ago[0m    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdriver (iterations)       [0m[38;5;167mNONE[0m        [38;5;245mnothing schedules an iteration[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtimers (housekeeping)     [0m[38;5;71m4 launchd[0m   [38;5;245mheal wrote 8m ago[0m                      [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlock                      [0m[1mcycle 0m[0m                                           [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mSWARM   measured just now[0m [38;5;240m──────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbees running              [0m[38;5;167m0[0m           [38;5;245mnothing is being worked on[0m             [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdispatches finished       [0m[1m785[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtick refusal              [0m[1mnothing to choose[0m                                  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mcandidates skipped        [0m[1m714[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  missing boundary        [0m[38;5;167m553[0m         [38;5;245m77% of all skips[0m                       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  claimed by a fence      [0m[1m95[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  done but still open     [0m[1m46[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mavailable to a bee        [0m[38;5;245m-[0m           [38;5;245mneeds a deep cycle[0m                     [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mTREE[0m [38;5;240m───────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbranch                    [0m[1mfeat/queen-supervisor[0m  [38;5;245mahead 0  behind 0[0m           [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245muncommitted source        [0m[38;5;179m0 mod / 4 new[0m  [38;5;245mgenerated files excluded[0m            [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mworktrees                 [0m[1m21[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mvolume used               [0m[38;5;167m96%[0m         [38;5;245mbees die at 0s when this fills[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mgates declared / wired    [0m[38;5;179m25 / 8[0m      [38;5;245m17 run only on a Mac[0m                   [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mANOMALIES   3 blocker  3 high  2 medium[0m [38;5;240m────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;167m![0m .claude/scheduled_tasks.json holds 0 tasks - that job does not exist       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;167m![0m it closed 274.8 hours ago (11.5 days) and no iteration has opened since    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;167m![0m 553 of 714 skipped candidates (77%) were refused for missingBoundary - …   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m they last wrote 7.5 min ago and are doing no-op work (author filed 0, l…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the Queen's board says running 0 right now; the dashboard file is 8.6h …   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the volume is 96% used; how much of it the loop owns was not measured t…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m●[0m 8 of them appear in a workflow CI will load; 17 run only on a developer…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  +1 more - tri cycle-anomalies[0m                                              [38;5;240m│[0m
+[38;5;240m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+cycle 18: 8 anomalies in 6.8s
+cycle: skipped - lock feed.mjs is running (the lock is not proof on its own)
+cycle: skipped - lock feed.mjs is running (the lock is not proof on its own)
+cycle: skipped - lock feed.mjs is running (the lock is not proof on its own)
+cycle: skipped - lock feed.mjs is running (the lock is not proof on its own)
+[38;5;240m╭─[0m [38;5;173mTRIOS[0m [1mCONTINUOUS LOOP[0m  [38;5;167m● STOPPED[0m [38;5;240m───────────────────────────────────────────╮[0m
+[38;5;240m│[0m [38;5;245mdrawn from a reading      [0m[38;5;245mjust now    [0m[38;5;245m2026-09-18 16:01:16Z[0m                   [38;5;240m│[0m
+[38;5;240m├──────────────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245miteration                 [0m[1m97[0m          [38;5;245mthe CLI that runs the loop was in no…[0m  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlast advanced             [0m[38;5;167m12.3d ago[0m   [38;5;245mno driver; last iteration 12.3d ago[0m    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdriver (iterations)       [0m[38;5;167mNONE[0m        [38;5;245mnothing schedules an iteration[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtimers (housekeeping)     [0m[38;5;71m4 launchd[0m   [38;5;245mheal wrote 8m ago[0m                      [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlock                      [0m[1mcycle 0m[0m                                           [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mSWARM   measured just now[0m [38;5;240m──────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbees running              [0m[38;5;71m9[0m                                                  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdispatches finished       [0m[1m785[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtick refusal              [0m[1m9 workers already running (li…[0m                     [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mcandidates skipped        [0m[1m0[0m                                                  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  missing boundary        [0m[38;5;245m-[0m                                                  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  claimed by a fence      [0m[38;5;245m-[0m                                                  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  done but still open     [0m[38;5;245m-[0m                                                  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mavailable to a bee        [0m[38;5;245m-[0m           [38;5;245mneeds a deep cycle[0m                     [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mTREE[0m [38;5;240m───────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbranch                    [0m[1mfeat/queen-supervisor[0m  [38;5;245mahead 0  behind 11[0m          [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245muncommitted source        [0m[38;5;179m0 mod / 4 new[0m  [38;5;245mgenerated files excluded[0m            [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mworktrees                 [0m[1m21[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mvolume used               [0m[38;5;167m96%[0m         [38;5;245mbees die at 0s when this fills[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mgates declared / wired    [0m[38;5;179m25 / 8[0m      [38;5;245m17 run only on a Mac[0m                   [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mANOMALIES   2 blocker  3 high  2 medium[0m [38;5;240m────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;167m![0m .claude/scheduled_tasks.json holds 0 tasks - that job does not exist       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;167m![0m it closed 294.7 hours ago (12.3 days) and no iteration has opened since    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m they last wrote 8.3 min ago and are doing no-op work (author filed 0, l…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the Queen's board says running 9 right now; the dashboard file is 28.6h…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the volume is 96% used; how much of it the loop owns was not measured t…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m●[0m 8 of them appear in a workflow CI will load; 17 run only on a developer…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m●[0m 4 untracked source file(s) and 0 modified one(s) exist only on this disk   [38;5;240m│[0m
+[38;5;240m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+cycle 27: 7 anomalies in 5.3s
+[38;5;240m╭─[0m [38;5;173mTRIOS[0m [1mCONTINUOUS LOOP[0m  [38;5;167m● STOPPED[0m [38;5;240m───────────────────────────────────────────╮[0m
+[38;5;240m│[0m [38;5;245mdrawn from a reading      [0m[38;5;245mjust now    [0m[38;5;245m2026-09-18 17:01:22Z[0m                   [38;5;240m│[0m
+[38;5;240m├──────────────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245miteration                 [0m[1m97[0m          [38;5;245mthe CLI that runs the loop was in no…[0m  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlast advanced             [0m[38;5;167m12.3d ago[0m   [38;5;245mno driver; last iteration 12.3d ago[0m    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdriver (iterations)       [0m[38;5;167mNONE[0m        [38;5;245mnothing schedules an iteration[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtimers (housekeeping)     [0m[38;5;71m4 launchd[0m   [38;5;245mheal wrote 8m ago[0m                      [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlock                      [0m[1mcycle 0m[0m                                           [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mSWARM   measured just now[0m [38;5;240m──────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbees running              [0m[38;5;71m7[0m                                                  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdispatches finished       [0m[1m788[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtick refusal              [0m[1mDISPATCHED[0m                                         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mcandidates skipped        [0m[1m709[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  missing boundary        [0m[38;5;167m553[0m         [38;5;245m78% of all skips[0m                       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  claimed by a fence      [0m[1m94[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  done but still open     [0m[1m41[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mavailable to a bee        [0m[38;5;245m-[0m           [38;5;245mneeds a deep cycle[0m                     [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mTREE[0m [38;5;240m───────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbranch                    [0m[1mfeat/queen-supervisor[0m  [38;5;245mahead 0  behind 11[0m          [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245muncommitted source        [0m[38;5;179m0 mod / 4 new[0m  [38;5;245mgenerated files excluded[0m            [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mworktrees                 [0m[1m21[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mvolume used               [0m[38;5;167m96%[0m         [38;5;245mbees die at 0s when this fills[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mgates declared / wired    [0m[38;5;179m25 / 8[0m      [38;5;245m17 run only on a Mac[0m                   [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mANOMALIES   2 blocker  3 high  2 medium[0m [38;5;240m────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;167m![0m .claude/scheduled_tasks.json holds 0 tasks - that job does not exist       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;167m![0m it closed 295.7 hours ago (12.3 days) and no iteration has opened since    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m they last wrote 8.1 min ago and are doing no-op work (author filed 0, l…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the Queen's board says running 7 right now; the dashboard file is 29.6h…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the volume is 96% used; how much of it the loop owns was not measured t…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m●[0m 8 of them appear in a workflow CI will load; 17 run only on a developer…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m●[0m 4 untracked source file(s) and 0 modified one(s) exist only on this disk   [38;5;240m│[0m
+[38;5;240m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+cycle 30: 7 anomalies in 5.5s
+cycle: skipped - lock feed.mjs is running (the lock is not proof on its own)
+cycle: skipped - lock feed.mjs is running (the lock is not proof on its own)
+cycle: skipped - lock feed.mjs is running (the lock is not proof on its own)
+[38;5;240m╭─[0m [38;5;173mTRIOS[0m [1mCONTINUOUS LOOP[0m  [38;5;167m● STOPPED[0m [38;5;240m───────────────────────────────────────────╮[0m
+[38;5;240m│[0m [38;5;245mdrawn from a reading      [0m[38;5;245mjust now    [0m[38;5;245m2026-09-18 21:01:29Z[0m                   [38;5;240m│[0m
+[38;5;240m├──────────────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245miteration                 [0m[1m97[0m          [38;5;245mthe CLI that runs the loop was in no…[0m  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlast advanced             [0m[38;5;167m12.5d ago[0m   [38;5;245mno driver; last iteration 12.5d ago[0m    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdriver (iterations)       [0m[38;5;167mNONE[0m        [38;5;245mnothing schedules an iteration[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtimers (housekeeping)     [0m[38;5;71m4 launchd[0m   [38;5;245mheal wrote 5m ago[0m                      [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlock                      [0m[1mcycle 0m[0m                                           [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mSWARM   measured just now[0m [38;5;240m──────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbees running              [0m[38;5;71m2[0m                                                  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdispatches finished       [0m[1m793[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtick refusal              [0m[1mnothing to choose[0m                                  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mcandidates skipped        [0m[1m706[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  missing boundary        [0m[38;5;167m553[0m         [38;5;245m78% of all skips[0m                       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  claimed by a fence      [0m[1m98[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  done but still open     [0m[1m41[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mavailable to a bee        [0m[38;5;245m-[0m           [38;5;245mneeds a deep cycle[0m                     [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mTREE[0m [38;5;240m───────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbranch                    [0m[1mfeat/queen-supervisor[0m  [38;5;245mahead 0  behind 11[0m          [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245muncommitted source        [0m[38;5;179m0 mod / 4 new[0m  [38;5;245mgenerated files excluded[0m            [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mworktrees                 [0m[1m21[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mvolume used               [0m[38;5;167m96%[0m         [38;5;245mbees die at 0s when this fills[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mgates declared / wired    [0m[38;5;179m25 / 8[0m      [38;5;245m17 run only on a Mac[0m                   [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mANOMALIES   3 blocker  3 high  2 medium[0m [38;5;240m────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;167m![0m .claude/scheduled_tasks.json holds 0 tasks - that job does not exist       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;167m![0m it closed 299.7 hours ago (12.5 days) and no iteration has opened since    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;167m![0m 553 of 706 skipped candidates (78%) were refused for missingBoundary - …   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m they last wrote 4.7 min ago and are doing no-op work (author filed 0, l…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the Queen's board says running 2 right now; the dashboard file is 33.6h…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the volume is 96% used; how much of it the loop owns was not measured t…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m●[0m 8 of them appear in a workflow CI will load; 17 run only on a developer…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  +1 more - tri cycle-anomalies[0m                                              [38;5;240m│[0m
+[38;5;240m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+cycle 39: 8 anomalies in 5.4s
+[38;5;240m╭─[0m [38;5;173mTRIOS[0m [1mCONTINUOUS LOOP[0m  [38;5;167m● STOPPED[0m [38;5;240m───────────────────────────────────────────╮[0m
+[38;5;240m│[0m [38;5;245mdrawn from a reading      [0m[38;5;245mjust now    [0m[38;5;245m2026-09-18 22:01:34Z[0m                   [38;5;240m│[0m
+[38;5;240m├──────────────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245miteration                 [0m[1m97[0m          [38;5;245mthe CLI that runs the loop was in no…[0m  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlast advanced             [0m[38;5;167m12.5d ago[0m   [38;5;245mno driver; last iteration 12.5d ago[0m    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdriver (iterations)       [0m[38;5;167mNONE[0m        [38;5;245mnothing schedules an iteration[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtimers (housekeeping)     [0m[38;5;71m4 launchd[0m   [38;5;245mheal wrote 2m ago[0m                      [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlock                      [0m[1mcycle 0m[0m                                           [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mSWARM   measured just now[0m [38;5;240m──────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbees running              [0m[38;5;167m0[0m           [38;5;245mnothing is being worked on[0m             [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdispatches finished       [0m[1m795[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtick refusal              [0m[1mnothing to choose[0m                                  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mcandidates skipped        [0m[1m706[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  missing boundary        [0m[38;5;167m553[0m         [38;5;245m78% of all skips[0m                       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  claimed by a fence      [0m[1m98[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  done but still open     [0m[1m41[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mavailable to a bee        [0m[38;5;245m-[0m           [38;5;245mneeds a deep cycle[0m                     [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mTREE[0m [38;5;240m───────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbranch                    [0m[1mfeat/queen-supervisor[0m  [38;5;245mahead 0  behind 11[0m          [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245muncommitted source        [0m[38;5;179m0 mod / 4 new[0m  [38;5;245mgenerated files excluded[0m            [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mworktrees                 [0m[1m21[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mvolume used               [0m[38;5;167m96%[0m         [38;5;245mbees die at 0s when this fills[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mgates declared / wired    [0m[38;5;179m25 / 8[0m      [38;5;245m17 run only on a Mac[0m                   [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mANOMALIES   3 blocker  3 high  2 medium[0m [38;5;240m────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;167m![0m .claude/scheduled_tasks.json holds 0 tasks - that job does not exist       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;167m![0m it closed 300.7 hours ago (12.5 days) and no iteration has opened since    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;167m![0m 553 of 706 skipped candidates (78%) were refused for missingBoundary - …   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m they last wrote 1.7 min ago and are doing no-op work (author filed 0, l…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the Queen's board says running 0 right now; the dashboard file is 34.6h…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the volume is 96% used; how much of it the loop owns was not measured t…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m●[0m 8 of them appear in a workflow CI will load; 17 run only on a developer…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  +1 more - tri cycle-anomalies[0m                                              [38;5;240m│[0m
+[38;5;240m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+cycle 41: 8 anomalies in 5.2s
+cycle: skipped - lock feed.mjs is running (the lock is not proof on its own)
+[38;5;240m╭─[0m [38;5;173mTRIOS[0m [1mCONTINUOUS LOOP[0m  [38;5;167m● STOPPED[0m [38;5;240m───────────────────────────────────────────╮[0m
+[38;5;240m│[0m [38;5;245mdrawn from a reading      [0m[38;5;245mjust now    [0m[38;5;245m2026-09-19 00:01:40Z[0m                   [38;5;240m│[0m
+[38;5;240m├──────────────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245miteration                 [0m[1m97[0m          [38;5;245mthe CLI that runs the loop was in no…[0m  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlast advanced             [0m[38;5;167m12.6d ago[0m   [38;5;245mno driver; last iteration 12.6d ago[0m    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdriver (iterations)       [0m[38;5;167mNONE[0m        [38;5;245mnothing schedules an iteration[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtimers (housekeeping)     [0m[38;5;71m4 launchd[0m   [38;5;245mheal wrote 6m ago[0m                      [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlock                      [0m[1mcycle 0m[0m                                           [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mSWARM   measured just now[0m [38;5;240m──────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbees running              [0m[38;5;167m0[0m           [38;5;245mnothing is being worked on[0m             [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdispatches finished       [0m[1m795[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtick refusal              [0m[1mnothing to choose[0m                                  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mcandidates skipped        [0m[1m706[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  missing boundary        [0m[38;5;167m553[0m         [38;5;245m78% of all skips[0m                       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  claimed by a fence      [0m[1m98[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  done but still open     [0m[1m41[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mavailable to a bee        [0m[38;5;245m-[0m           [38;5;245mneeds a deep cycle[0m                     [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mTREE[0m [38;5;240m───────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbranch                    [0m[1mfeat/queen-supervisor[0m  [38;5;245mahead 0  behind 11[0m          [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245muncommitted source        [0m[38;5;179m0 mod / 4 new[0m  [38;5;245mgenerated files excluded[0m            [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mworktrees                 [0m[1m21[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mvolume used               [0m[38;5;167m96%[0m         [38;5;245mbees die at 0s when this fills[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mgates declared / wired    [0m[38;5;179m25 / 8[0m      [38;5;245m17 run only on a Mac[0m                   [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mANOMALIES   3 blocker  3 high  2 medium[0m [38;5;240m────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;167m![0m .claude/scheduled_tasks.json holds 0 tasks - that job does not exist       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;167m![0m it closed 302.7 hours ago (12.6 days) and no iteration has opened since    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;167m![0m 553 of 706 skipped candidates (78%) were refused for missingBoundary - …   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m they last wrote 5.6 min ago and are doing no-op work (author filed 0, l…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the Queen's board says running 0 right now; the dashboard file is 36.6h…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the volume is 96% used; how much of it the loop owns was not measured t…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m●[0m 8 of them appear in a workflow CI will load; 17 run only on a developer…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  +1 more - tri cycle-anomalies[0m                                              [38;5;240m│[0m
+[38;5;240m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+cycle 46: 8 anomalies in 5.4s
+cycle: skipped - lock feed.mjs is running (the lock is not proof on its own)
+[38;5;240m╭─[0m [38;5;173mTRIOS[0m [1mCONTINUOUS LOOP[0m  [38;5;167m● STOPPED[0m [38;5;240m───────────────────────────────────────────╮[0m
+[38;5;240m│[0m [38;5;245mdrawn from a reading      [0m[38;5;245mjust now    [0m[38;5;245m2026-09-19 02:01:46Z[0m                   [38;5;240m│[0m
+[38;5;240m├──────────────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245miteration                 [0m[1m97[0m          [38;5;245mthe CLI that runs the loop was in no…[0m  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlast advanced             [0m[38;5;167m12.7d ago[0m   [38;5;245mno driver; last iteration 12.7d ago[0m    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdriver (iterations)       [0m[38;5;167mNONE[0m        [38;5;245mnothing schedules an iteration[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtimers (housekeeping)     [0m[38;5;71m4 launchd[0m   [38;5;245mheal wrote 2m ago[0m                      [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlock                      [0m[1mcycle 0m[0m                                           [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mSWARM   measured just now[0m [38;5;240m──────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbees running              [0m[38;5;167m0[0m           [38;5;245mnothing is being worked on[0m             [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdispatches finished       [0m[1m795[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtick refusal              [0m[1mnothing to choose[0m                                  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mcandidates skipped        [0m[1m706[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  missing boundary        [0m[38;5;167m553[0m         [38;5;245m78% of all skips[0m                       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  claimed by a fence      [0m[1m98[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  done but still open     [0m[1m41[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mavailable to a bee        [0m[38;5;245m-[0m           [38;5;245mneeds a deep cycle[0m                     [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mTREE[0m [38;5;240m───────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbranch                    [0m[1mfeat/queen-supervisor[0m  [38;5;245mahead 0  behind 11[0m          [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245muncommitted source        [0m[38;5;179m0 mod / 4 new[0m  [38;5;245mgenerated files excluded[0m            [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mworktrees                 [0m[1m21[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mvolume used               [0m[38;5;167m96%[0m         [38;5;245mbees die at 0s when this fills[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mgates declared / wired    [0m[38;5;179m25 / 8[0m      [38;5;245m17 run only on a Mac[0m                   [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mANOMALIES   3 blocker  3 high  2 medium[0m [38;5;240m────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;167m![0m .claude/scheduled_tasks.json holds 0 tasks - that job does not exist       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;167m![0m it closed 304.7 hours ago (12.7 days) and no iteration has opened since    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;167m![0m 553 of 706 skipped candidates (78%) were refused for missingBoundary - …   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m they last wrote 1.7 min ago and are doing no-op work (author filed 0, l…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the Queen's board says running 0 right now; the dashboard file is 38.6h…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the volume is 96% used; how much of it the loop owns was not measured t…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m●[0m 8 of them appear in a workflow CI will load; 17 run only on a developer…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  +1 more - tri cycle-anomalies[0m                                              [38;5;240m│[0m
+[38;5;240m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+cycle 50: 8 anomalies in 5.3s
+cycle: skipped - lock feed.mjs is running (the lock is not proof on its own)
+[38;5;240m╭─[0m [38;5;173mTRIOS[0m [1mCONTINUOUS LOOP[0m  [38;5;167m● STOPPED[0m [38;5;240m───────────────────────────────────────────╮[0m
+[38;5;240m│[0m [38;5;245mdrawn from a reading      [0m[38;5;245mjust now    [0m[38;5;245m2026-09-19 04:01:52Z[0m                   [38;5;240m│[0m
+[38;5;240m├──────────────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245miteration                 [0m[1m97[0m          [38;5;245mthe CLI that runs the loop was in no…[0m  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlast advanced             [0m[38;5;167m12.8d ago[0m   [38;5;245mno driver; last iteration 12.8d ago[0m    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdriver (iterations)       [0m[38;5;167mNONE[0m        [38;5;245mnothing schedules an iteration[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtimers (housekeeping)     [0m[38;5;71m4 launchd[0m   [38;5;245mheal wrote 6m ago[0m                      [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlock                      [0m[1mcycle 0m[0m                                           [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mSWARM   measured just now[0m [38;5;240m──────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbees running              [0m[38;5;167m0[0m           [38;5;245mnothing is being worked on[0m             [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdispatches finished       [0m[1m795[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtick refusal              [0m[1mnothing to choose[0m                                  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mcandidates skipped        [0m[1m706[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  missing boundary        [0m[38;5;167m553[0m         [38;5;245m78% of all skips[0m                       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  claimed by a fence      [0m[1m98[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  done but still open     [0m[1m41[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mavailable to a bee        [0m[38;5;245m-[0m           [38;5;245mneeds a deep cycle[0m                     [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mTREE[0m [38;5;240m───────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbranch                    [0m[1mfeat/queen-supervisor[0m  [38;5;245mahead 0  behind 11[0m          [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245muncommitted source        [0m[38;5;179m0 mod / 4 new[0m  [38;5;245mgenerated files excluded[0m            [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mworktrees                 [0m[1m21[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mvolume used               [0m[38;5;167m96%[0m         [38;5;245mbees die at 0s when this fills[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mgates declared / wired    [0m[38;5;179m25 / 8[0m      [38;5;245m17 run only on a Mac[0m                   [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mANOMALIES   3 blocker  3 high  2 medium[0m [38;5;240m────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;167m![0m .claude/scheduled_tasks.json holds 0 tasks - that job does not exist       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;167m![0m it closed 306.7 hours ago (12.8 days) and no iteration has opened since    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;167m![0m 553 of 706 skipped candidates (78%) were refused for missingBoundary - …   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m they last wrote 5.6 min ago and are doing no-op work (author filed 0, l…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the Queen's board says running 0 right now; the dashboard file is 40.6h…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the volume is 96% used; how much of it the loop owns was not measured t…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m●[0m 8 of them appear in a workflow CI will load; 17 run only on a developer…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  +1 more - tri cycle-anomalies[0m                                              [38;5;240m│[0m
+[38;5;240m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+cycle 55: 8 anomalies in 5.6s
+[38;5;240m╭─[0m [38;5;173mTRIOS[0m [1mCONTINUOUS LOOP[0m  [38;5;167m● STOPPED[0m [38;5;240m───────────────────────────────────────────╮[0m
+[38;5;240m│[0m [38;5;245mdrawn from a reading      [0m[38;5;245mjust now    [0m[38;5;245m2026-09-19 05:01:59Z[0m                   [38;5;240m│[0m
+[38;5;240m├──────────────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245miteration                 [0m[1m97[0m          [38;5;245mthe CLI that runs the loop was in no…[0m  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlast advanced             [0m[38;5;167m12.8d ago[0m   [38;5;245mno driver; last iteration 12.8d ago[0m    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdriver (iterations)       [0m[38;5;167mNONE[0m        [38;5;245mnothing schedules an iteration[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtimers (housekeeping)     [0m[38;5;71m4 launchd[0m   [38;5;245mheal wrote 3m ago[0m                      [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlock                      [0m[1mcycle 0m[0m                                           [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mSWARM   measured just now[0m [38;5;240m──────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbees running              [0m[38;5;167m0[0m           [38;5;245mnothing is being worked on[0m             [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdispatches finished       [0m[1m795[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtick refusal              [0m[1mnothing to choose[0m                                  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mcandidates skipped        [0m[1m706[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  missing boundary        [0m[38;5;167m553[0m         [38;5;245m78% of all skips[0m                       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  claimed by a fence      [0m[1m98[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  done but still open     [0m[1m41[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mavailable to a bee        [0m[38;5;245m-[0m           [38;5;245mneeds a deep cycle[0m                     [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mTREE[0m [38;5;240m───────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbranch                    [0m[1mfeat/queen-supervisor[0m  [38;5;245mahead 0  behind 11[0m          [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245muncommitted source        [0m[38;5;179m0 mod / 4 new[0m  [38;5;245mgenerated files excluded[0m            [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mworktrees                 [0m[1m21[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mvolume used               [0m[38;5;167m96%[0m         [38;5;245mbees die at 0s when this fills[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mgates declared / wired    [0m[38;5;179m25 / 8[0m      [38;5;245m17 run only on a Mac[0m                   [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mANOMALIES   3 blocker  3 high  2 medium[0m [38;5;240m────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;167m![0m .claude/scheduled_tasks.json holds 0 tasks - that job does not exist       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;167m![0m it closed 307.7 hours ago (12.8 days) and no iteration has opened since    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;167m![0m 553 of 706 skipped candidates (78%) were refused for missingBoundary - …   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m they last wrote 2.6 min ago and are doing no-op work (author filed 0, l…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the Queen's board says running 0 right now; the dashboard file is 41.6h…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the volume is 96% used; how much of it the loop owns was not measured t…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m●[0m 8 of them appear in a workflow CI will load; 17 run only on a developer…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  +1 more - tri cycle-anomalies[0m                                              [38;5;240m│[0m
+[38;5;240m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+cycle 57: 8 anomalies in 5.9s
+cycle: skipped - lock heal.mjs is running (the lock is not proof on its own)
+[38;5;240m╭─[0m [38;5;173mTRIOS[0m [1mCONTINUOUS LOOP[0m  [38;5;167m● STOPPED[0m [38;5;240m───────────────────────────────────────────╮[0m
+[38;5;240m│[0m [38;5;245mdrawn from a reading      [0m[38;5;245mjust now    [0m[38;5;245m2026-09-19 07:02:05Z[0m                   [38;5;240m│[0m
+[38;5;240m├──────────────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245miteration                 [0m[1m97[0m          [38;5;245mthe CLI that runs the loop was in no…[0m  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlast advanced             [0m[38;5;167m12.9d ago[0m   [38;5;245mno driver; last iteration 12.9d ago[0m    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdriver (iterations)       [0m[38;5;167mNONE[0m        [38;5;245mnothing schedules an iteration[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtimers (housekeeping)     [0m[38;5;71m4 launchd[0m   [38;5;245mheal wrote 6m ago[0m                      [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlock                      [0m[1mcycle 0m[0m                                           [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mSWARM   measured just now[0m [38;5;240m──────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbees running              [0m[38;5;167m0[0m           [38;5;245mnothing is being worked on[0m             [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdispatches finished       [0m[1m795[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtick refusal              [0m[1mnothing to choose[0m                                  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mcandidates skipped        [0m[1m706[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  missing boundary        [0m[38;5;167m553[0m         [38;5;245m78% of all skips[0m                       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  claimed by a fence      [0m[1m98[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  done but still open     [0m[1m41[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mavailable to a bee        [0m[38;5;245m-[0m           [38;5;245mneeds a deep cycle[0m                     [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mTREE[0m [38;5;240m───────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbranch                    [0m[1mfeat/queen-supervisor[0m  [38;5;245mahead 0  behind 11[0m          [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245muncommitted source        [0m[38;5;179m0 mod / 4 new[0m  [38;5;245mgenerated files excluded[0m            [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mworktrees                 [0m[1m21[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mvolume used               [0m[38;5;167m97%[0m         [38;5;245mbees die at 0s when this fills[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mgates declared / wired    [0m[38;5;179m25 / 8[0m      [38;5;245m17 run only on a Mac[0m                   [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mANOMALIES   3 blocker  3 high  2 medium[0m [38;5;240m────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;167m![0m .claude/scheduled_tasks.json holds 0 tasks - that job does not exist       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;167m![0m it closed 309.7 hours ago (12.9 days) and no iteration has opened since    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;167m![0m 553 of 706 skipped candidates (78%) were refused for missingBoundary - …   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m they last wrote 6.4 min ago and are doing no-op work (author filed 0, l…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the Queen's board says running 0 right now; the dashboard file is 43.6h…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the volume is 97% used; how much of it the loop owns was not measured t…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m●[0m 8 of them appear in a workflow CI will load; 17 run only on a developer…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  +1 more - tri cycle-anomalies[0m                                              [38;5;240m│[0m
+[38;5;240m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+cycle 62: 8 anomalies in 5.5s
+cycle: skipped - lock heal.mjs is running (the lock is not proof on its own)
+cycle: skipped - lock feed.mjs is running (the lock is not proof on its own)
+cycle: skipped - lock feed.mjs is running (the lock is not proof on its own)
+[38;5;240m╭─[0m [38;5;173mTRIOS[0m [1mCONTINUOUS LOOP[0m  [38;5;167m● STOPPED[0m [38;5;240m───────────────────────────────────────────╮[0m
+[38;5;240m│[0m [38;5;245mdrawn from a reading      [0m[38;5;245mjust now    [0m[38;5;245m2026-09-19 11:02:12Z[0m                   [38;5;240m│[0m
+[38;5;240m├──────────────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245miteration                 [0m[1m97[0m          [38;5;245mthe CLI that runs the loop was in no…[0m  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlast advanced             [0m[38;5;167m13.1d ago[0m   [38;5;245mno driver; last iteration 13.1d ago[0m    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdriver (iterations)       [0m[38;5;167mNONE[0m        [38;5;245mnothing schedules an iteration[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtimers (housekeeping)     [0m[38;5;71m4 launchd[0m   [38;5;245mheal wrote 6m ago[0m                      [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlock                      [0m[1mcycle 0m[0m                                           [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mSWARM   measured just now[0m [38;5;240m──────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbees running              [0m[38;5;167m0[0m           [38;5;245mnothing is being worked on[0m             [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdispatches finished       [0m[1m795[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtick refusal              [0m[1mnothing to choose[0m                                  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mcandidates skipped        [0m[1m706[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  missing boundary        [0m[38;5;167m553[0m         [38;5;245m78% of all skips[0m                       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  claimed by a fence      [0m[1m98[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  done but still open     [0m[1m41[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mavailable to a bee        [0m[38;5;245m-[0m           [38;5;245mneeds a deep cycle[0m                     [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mTREE[0m [38;5;240m───────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbranch                    [0m[1mfeat/queen-supervisor[0m  [38;5;245mahead 0  behind 11[0m          [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245muncommitted source        [0m[38;5;179m0 mod / 4 new[0m  [38;5;245mgenerated files excluded[0m            [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mworktrees                 [0m[1m21[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mvolume used               [0m[38;5;167m96%[0m         [38;5;245mbees die at 0s when this fills[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mgates declared / wired    [0m[38;5;179m25 / 8[0m      [38;5;245m17 run only on a Mac[0m                   [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mANOMALIES   3 blocker  3 high  2 medium[0m [38;5;240m────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;167m![0m .claude/scheduled_tasks.json holds 0 tasks - that job does not exist       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;167m![0m it closed 313.7 hours ago (13.1 days) and no iteration has opened since    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;167m![0m 553 of 706 skipped candidates (78%) were refused for missingBoundary - …   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m they last wrote 6.3 min ago and are doing no-op work (author filed 0, l…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the Queen's board says running 0 right now; the dashboard file is 47.6h…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the volume is 96% used; how much of it the loop owns was not measured t…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m●[0m 8 of them appear in a workflow CI will load; 17 run only on a developer…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  +1 more - tri cycle-anomalies[0m                                              [38;5;240m│[0m
+[38;5;240m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+cycle 69: 8 anomalies in 5.6s
+[38;5;240m╭─[0m [38;5;173mTRIOS[0m [1mCONTINUOUS LOOP[0m  [38;5;167m● STOPPED[0m [38;5;240m───────────────────────────────────────────╮[0m
+[38;5;240m│[0m [38;5;245mdrawn from a reading      [0m[38;5;245mjust now    [0m[38;5;245m2026-09-19 12:02:18Z[0m                   [38;5;240m│[0m
+[38;5;240m├──────────────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245miteration                 [0m[1m97[0m          [38;5;245mthe CLI that runs the loop was in no…[0m  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlast advanced             [0m[38;5;167m13.1d ago[0m   [38;5;245mno driver; last iteration 13.1d ago[0m    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdriver (iterations)       [0m[38;5;167mNONE[0m        [38;5;245mnothing schedules an iteration[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtimers (housekeeping)     [0m[38;5;71m4 launchd[0m   [38;5;245mheal wrote 3m ago[0m                      [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlock                      [0m[1mcycle 0m[0m                                           [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mSWARM   measured just now[0m [38;5;240m──────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbees running              [0m[38;5;167m0[0m           [38;5;245mnothing is being worked on[0m             [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdispatches finished       [0m[1m795[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtick refusal              [0m[1mnothing to choose[0m                                  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mcandidates skipped        [0m[1m706[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  missing boundary        [0m[38;5;167m553[0m         [38;5;245m78% of all skips[0m                       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  claimed by a fence      [0m[1m98[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  done but still open     [0m[1m41[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mavailable to a bee        [0m[38;5;245m-[0m           [38;5;245mneeds a deep cycle[0m                     [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mwindow with no bee        [0m[38;5;71mnull%[0m                                              [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mrounds failed             [0m[38;5;245m-[0m                                                  [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mTREE[0m [38;5;240m───────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbranch                    [0m[1mfeat/queen-supervisor[0m  [38;5;245mahead 0  behind 11[0m          [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245muncommitted source        [0m[38;5;179m0 mod / 4 new[0m  [38;5;245mgenerated files excluded[0m            [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mworktrees                 [0m[1m21[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mvolume used               [0m[38;5;167m96%[0m         [38;5;245mbees die at 0s when this fills[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mgates declared / wired    [0m[38;5;179m25 / 8[0m      [38;5;245m17 run only on a Mac[0m                   [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mANOMALIES   3 blocker  3 high  2 medium[0m [38;5;240m────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;167m![0m .claude/scheduled_tasks.json holds 0 tasks - that job does not exist       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;167m![0m it closed 314.7 hours ago (13.1 days) and no iteration has opened since    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;167m![0m 553 of 706 skipped candidates (78%) were refused for missingBoundary - …   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m they last wrote 3.1 min ago and are doing no-op work (author filed 0, l…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the Queen's board says running 0 right now; the dashboard file is 48.6h…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the volume is 96% used; the loop's own worktrees are 2.5G of that, 0.6%…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m●[0m 8 of them appear in a workflow CI will load; 17 run only on a developer…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  +1 more - tri cycle-anomalies[0m                                              [38;5;240m│[0m
+[38;5;240m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+cycle 72: 8 anomalies in 21.7s
+cycle: skipped - lock heal.mjs is running (the lock is not proof on its own)
+cycle: skipped - lock heal.mjs is running (the lock is not proof on its own)
+cycle: skipped - lock heal.mjs is running (the lock is not proof on its own)
+cycle: skipped - lock feed.mjs is running (the lock is not proof on its own)
+cycle: skipped - lock feed.mjs is running (the lock is not proof on its own)
+cycle: skipped - lock feed.mjs is running (the lock is not proof on its own)
+[38;5;240m╭─[0m [38;5;173mTRIOS[0m [1mCONTINUOUS LOOP[0m  [38;5;167m● STOPPED[0m [38;5;240m───────────────────────────────────────────╮[0m
+[38;5;240m│[0m [38;5;245mdrawn from a reading      [0m[38;5;245mjust now    [0m[38;5;245m2026-09-19 19:41:13Z[0m                   [38;5;240m│[0m
+[38;5;240m├──────────────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245miteration                 [0m[1m97[0m          [38;5;245mthe CLI that runs the loop was in no…[0m  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlast advanced             [0m[38;5;167m13.4d ago[0m   [38;5;245mno driver; last iteration 13.4d ago[0m    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdriver (iterations)       [0m[38;5;167mNONE[0m        [38;5;245mnothing schedules an iteration[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtimers (housekeeping)     [0m[38;5;71m4 launchd[0m   [38;5;245mheal wrote 6m ago[0m                      [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlock                      [0m[1mcycle 0m[0m                                           [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mSWARM   measured just now[0m [38;5;240m──────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbees running              [0m[38;5;71m3[0m                                                  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdispatches finished       [0m[1m796[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtick refusal              [0m[1mnothing to choose[0m                                  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mcandidates skipped        [0m[1m686[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  missing boundary        [0m[38;5;167m553[0m         [38;5;245m81% of all skips[0m                       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  claimed by a fence      [0m[1m70[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  done but still open     [0m[1m37[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mavailable to a bee        [0m[38;5;245m-[0m           [38;5;245mneeds a deep cycle[0m                     [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mTREE[0m [38;5;240m───────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbranch                    [0m[1mfeat/queen-supervisor[0m  [38;5;245mahead 0  behind 18[0m          [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245muncommitted source        [0m[38;5;179m0 mod / 4 new[0m  [38;5;245mgenerated files excluded[0m            [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mworktrees                 [0m[1m21[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mvolume used               [0m[38;5;167m98%[0m         [38;5;245mbees die at 0s when this fills[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mgates declared / wired    [0m[38;5;179m25 / 8[0m      [38;5;245m17 run only on a Mac[0m                   [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mANOMALIES   3 blocker  3 high  2 medium[0m [38;5;240m────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;167m![0m .claude/scheduled_tasks.json holds 0 tasks - that job does not exist       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;167m![0m it closed 322.4 hours ago (13.4 days) and no iteration has opened since    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;167m![0m 553 of 686 skipped candidates (81%) were refused for missingBoundary - …   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m they last wrote 5.6 min ago and are doing no-op work (author filed 0, l…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the Queen's board says running 3 right now; the dashboard file is 56.2h…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the volume is 98% used; how much of it the loop owns was not measured t…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m●[0m 8 of them appear in a workflow CI will load; 17 run only on a developer…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  +1 more - tri cycle-anomalies[0m                                              [38;5;240m│[0m
+[38;5;240m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+cycle 83: 8 anomalies in 6.2s
+[38;5;240m╭─[0m [38;5;173mTRIOS[0m [1mCONTINUOUS LOOP[0m  [38;5;167m● STOPPED[0m [38;5;240m───────────────────────────────────────────╮[0m
+[38;5;240m│[0m [38;5;245mdrawn from a reading      [0m[38;5;245mjust now    [0m[38;5;245m2026-09-19 20:41:20Z[0m                   [38;5;240m│[0m
+[38;5;240m├──────────────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245miteration                 [0m[1m97[0m          [38;5;245mthe CLI that runs the loop was in no…[0m  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlast advanced             [0m[38;5;167m13.5d ago[0m   [38;5;245mno driver; last iteration 13.5d ago[0m    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdriver (iterations)       [0m[38;5;167mNONE[0m        [38;5;245mnothing schedules an iteration[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtimers (housekeeping)     [0m[38;5;71m4 launchd[0m   [38;5;245mheal wrote 4m ago[0m                      [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlock                      [0m[1mcycle 0m[0m                                           [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mSWARM   measured just now[0m [38;5;240m──────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbees running              [0m[38;5;167m0[0m           [38;5;245mnothing is being worked on[0m             [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdispatches finished       [0m[1m799[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtick refusal              [0m[1mnothing to choose[0m                                  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mcandidates skipped        [0m[1m685[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  missing boundary        [0m[38;5;167m553[0m         [38;5;245m81% of all skips[0m                       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  claimed by a fence      [0m[1m70[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  done but still open     [0m[1m38[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mavailable to a bee        [0m[38;5;245m-[0m           [38;5;245mneeds a deep cycle[0m                     [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mTREE[0m [38;5;240m───────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbranch                    [0m[1mfeat/queen-supervisor[0m  [38;5;245mahead 0  behind 18[0m          [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245muncommitted source        [0m[38;5;179m0 mod / 4 new[0m  [38;5;245mgenerated files excluded[0m            [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mworktrees                 [0m[1m21[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mvolume used               [0m[38;5;167m97%[0m         [38;5;245mbees die at 0s when this fills[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mgates declared / wired    [0m[38;5;179m25 / 8[0m      [38;5;245m17 run only on a Mac[0m                   [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mANOMALIES   3 blocker  3 high  2 medium[0m [38;5;240m────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;167m![0m .claude/scheduled_tasks.json holds 0 tasks - that job does not exist       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;167m![0m it closed 323.4 hours ago (13.5 days) and no iteration has opened since    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;167m![0m 553 of 685 skipped candidates (81%) were refused for missingBoundary - …   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m they last wrote 4.4 min ago and are doing no-op work (author filed 0, l…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the Queen's board says running 0 right now; the dashboard file is 57.2h…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the volume is 97% used; how much of it the loop owns was not measured t…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m●[0m 8 of them appear in a workflow CI will load; 17 run only on a developer…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  +1 more - tri cycle-anomalies[0m                                              [38;5;240m│[0m
+[38;5;240m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+cycle 85: 8 anomalies in 7.5s
+cycle: skipped - lock feed.mjs is running (the lock is not proof on its own)
+cycle: skipped - lock feed.mjs is running (the lock is not proof on its own)
+cycle: skipped - lock feed.mjs is running (the lock is not proof on its own)
+cycle: skipped - lock feed.mjs is running (the lock is not proof on its own)
+cycle: skipped - lock feed.mjs is running (the lock is not proof on its own)
+[38;5;240m╭─[0m [38;5;173mTRIOS[0m [1mCONTINUOUS LOOP[0m  [38;5;167m● STOPPED[0m [38;5;240m───────────────────────────────────────────╮[0m
+[38;5;240m│[0m [38;5;245mdrawn from a reading      [0m[38;5;245mjust now    [0m[38;5;245m2026-09-20 02:41:30Z[0m                   [38;5;240m│[0m
+[38;5;240m├──────────────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245miteration                 [0m[1m97[0m          [38;5;245mthe CLI that runs the loop was in no…[0m  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlast advanced             [0m[38;5;167m13.7d ago[0m   [38;5;245mno driver; last iteration 13.7d ago[0m    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdriver (iterations)       [0m[38;5;167mNONE[0m        [38;5;245mnothing schedules an iteration[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtimers (housekeeping)     [0m[38;5;71m4 launchd[0m   [38;5;245mheal wrote 7m ago[0m                      [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlock                      [0m[1mcycle 0m[0m                                           [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mSWARM   measured just now[0m [38;5;240m──────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbees running              [0m[38;5;167m0[0m           [38;5;245mnothing is being worked on[0m             [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdispatches finished       [0m[1m799[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtick refusal              [0m[1mnothing to choose[0m                                  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mcandidates skipped        [0m[1m685[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  missing boundary        [0m[38;5;167m553[0m         [38;5;245m81% of all skips[0m                       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  claimed by a fence      [0m[1m70[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  done but still open     [0m[1m38[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mavailable to a bee        [0m[38;5;245m-[0m           [38;5;245mneeds a deep cycle[0m                     [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mTREE[0m [38;5;240m───────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbranch                    [0m[1mfeat/queen-supervisor[0m  [38;5;245mahead 0  behind 18[0m          [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245muncommitted source        [0m[38;5;179m0 mod / 4 new[0m  [38;5;245mgenerated files excluded[0m            [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mworktrees                 [0m[1m21[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mvolume used               [0m[38;5;167m97%[0m         [38;5;245mbees die at 0s when this fills[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mgates declared / wired    [0m[38;5;179m25 / 8[0m      [38;5;245m17 run only on a Mac[0m                   [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mANOMALIES   3 blocker  3 high  2 medium[0m [38;5;240m────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;167m![0m .claude/scheduled_tasks.json holds 0 tasks - that job does not exist       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;167m![0m it closed 329.4 hours ago (13.7 days) and no iteration has opened since    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;167m![0m 553 of 685 skipped candidates (81%) were refused for missingBoundary - …   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m they last wrote 7.1 min ago and are doing no-op work (author filed 0, l…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the Queen's board says running 0 right now; the dashboard file is 63.2h…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the volume is 97% used; how much of it the loop owns was not measured t…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m●[0m 8 of them appear in a workflow CI will load; 17 run only on a developer…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  +1 more - tri cycle-anomalies[0m                                              [38;5;240m│[0m
+[38;5;240m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+cycle 98: 8 anomalies in 6s
+[38;5;240m╭─[0m [38;5;173mTRIOS[0m [1mCONTINUOUS LOOP[0m  [38;5;167m● STOPPED[0m [38;5;240m───────────────────────────────────────────╮[0m
+[38;5;240m│[0m [38;5;245mdrawn from a reading      [0m[38;5;245mjust now    [0m[38;5;245m2026-09-20 03:41:37Z[0m                   [38;5;240m│[0m
+[38;5;240m├──────────────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245miteration                 [0m[1m97[0m          [38;5;245mthe CLI that runs the loop was in no…[0m  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlast advanced             [0m[38;5;167m13.8d ago[0m   [38;5;245mno driver; last iteration 13.8d ago[0m    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdriver (iterations)       [0m[38;5;167mNONE[0m        [38;5;245mnothing schedules an iteration[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtimers (housekeeping)     [0m[38;5;71m4 launchd[0m   [38;5;245mheal wrote 7m ago[0m                      [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlock                      [0m[1mcycle 0m[0m                                           [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mSWARM   measured just now[0m [38;5;240m──────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbees running              [0m[38;5;167m0[0m           [38;5;245mnothing is being worked on[0m             [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdispatches finished       [0m[1m799[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtick refusal              [0m[1mnothing to choose[0m                                  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mcandidates skipped        [0m[1m685[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  missing boundary        [0m[38;5;167m553[0m         [38;5;245m81% of all skips[0m                       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  claimed by a fence      [0m[1m70[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  done but still open     [0m[1m38[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mavailable to a bee        [0m[38;5;245m-[0m           [38;5;245mneeds a deep cycle[0m                     [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mwindow with no bee        [0m[38;5;167m54%[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mrounds failed             [0m[38;5;245m-[0m                                                  [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mTREE[0m [38;5;240m───────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbranch                    [0m[1mfeat/queen-supervisor[0m  [38;5;245mahead 0  behind 18[0m          [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245muncommitted source        [0m[38;5;179m0 mod / 4 new[0m  [38;5;245mgenerated files excluded[0m            [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mworktrees                 [0m[1m21[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mvolume used               [0m[38;5;167m98%[0m         [38;5;245mbees die at 0s when this fills[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mgates declared / wired    [0m[38;5;179m25 / 8[0m      [38;5;245m17 run only on a Mac[0m                   [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mANOMALIES   3 blocker  3 high  2 medium[0m [38;5;240m────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;167m![0m .claude/scheduled_tasks.json holds 0 tasks - that job does not exist       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;167m![0m it closed 330.4 hours ago (13.8 days) and no iteration has opened since    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;167m![0m 553 of 685 skipped candidates (81%) were refused for missingBoundary - …   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m they last wrote 6.7 min ago and are doing no-op work (author filed 0, l…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the Queen's board says running 0 right now; the dashboard file is 64.2h…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the volume is 98% used; the loop's own worktrees are 2.5G of that, 0.6%…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m●[0m 8 of them appear in a workflow CI will load; 17 run only on a developer…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  +1 more - tri cycle-anomalies[0m                                              [38;5;240m│[0m
+[38;5;240m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+cycle 100: 8 anomalies in 21.1s
+cycle: skipped - lock feed.mjs is running (the lock is not proof on its own)
+cycle: skipped - lock feed.mjs is running (the lock is not proof on its own)
+cycle: skipped - lock feed.mjs is running (the lock is not proof on its own)
+[38;5;240m╭─[0m [38;5;173mTRIOS[0m [1mCONTINUOUS LOOP[0m  [38;5;167m● STOPPED[0m [38;5;240m───────────────────────────────────────────╮[0m
+[38;5;240m│[0m [38;5;245mdrawn from a reading      [0m[38;5;245mjust now    [0m[38;5;245m2026-09-20 07:42:01Z[0m                   [38;5;240m│[0m
+[38;5;240m├──────────────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245miteration                 [0m[1m97[0m          [38;5;245mthe CLI that runs the loop was in no…[0m  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlast advanced             [0m[38;5;167m13.9d ago[0m   [38;5;245mno driver; last iteration 13.9d ago[0m    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdriver (iterations)       [0m[38;5;167mNONE[0m        [38;5;245mnothing schedules an iteration[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtimers (housekeeping)     [0m[38;5;71m4 launchd[0m   [38;5;245mheal wrote 9m ago[0m                      [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlock                      [0m[1mcycle 0m[0m                                           [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mSWARM   measured just now[0m [38;5;240m──────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbees running              [0m[38;5;71m12[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdispatches finished       [0m[1m798[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtick refusal              [0m[1mDISPATCHED[0m                                         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mcandidates skipped        [0m[1m686[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  missing boundary        [0m[38;5;167m554[0m         [38;5;245m81% of all skips[0m                       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  claimed by a fence      [0m[1m64[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  done but still open     [0m[1m41[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mavailable to a bee        [0m[38;5;245m-[0m           [38;5;245mneeds a deep cycle[0m                     [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mTREE[0m [38;5;240m───────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbranch                    [0m[1mfeat/queen-supervisor[0m  [38;5;245mahead 0  behind 21[0m          [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245muncommitted source        [0m[38;5;179m0 mod / 4 new[0m  [38;5;245mgenerated files excluded[0m            [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mworktrees                 [0m[1m21[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mvolume used               [0m[38;5;167m99%[0m         [38;5;245mbees die at 0s when this fills[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mgates declared / wired    [0m[38;5;179m25 / 8[0m      [38;5;245m17 run only on a Mac[0m                   [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mANOMALIES   2 blocker  3 high  2 medium[0m [38;5;240m────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;167m![0m .claude/scheduled_tasks.json holds 0 tasks - that job does not exist       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;167m![0m it closed 334.4 hours ago (13.9 days) and no iteration has opened since    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m they last wrote 9.3 min ago and are doing no-op work (author filed 0, l…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the Queen's board says running 12 right now; the dashboard file is 68.2…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the volume is 99% used; how much of it the loop owns was not measured t…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m●[0m 8 of them appear in a workflow CI will load; 17 run only on a developer…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m●[0m 4 untracked source file(s) and 0 modified one(s) exist only on this disk   [38;5;240m│[0m
+[38;5;240m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+cycle 110: 7 anomalies in 12.2s
+cycle: skipped - lock heal.mjs is running (the lock is not proof on its own)
+cycle: skipped - lock heal.mjs is running (the lock is not proof on its own)
+[38;5;240m╭─[0m [38;5;173mTRIOS[0m [1mCONTINUOUS LOOP[0m  [38;5;167m● STOPPED[0m [38;5;240m───────────────────────────────────────────╮[0m
+[38;5;240m│[0m [38;5;245mdrawn from a reading      [0m[38;5;245mjust now    [0m[38;5;245m2026-09-20 10:42:16Z[0m                   [38;5;240m│[0m
+[38;5;240m├──────────────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245miteration                 [0m[1m97[0m          [38;5;245mthe CLI that runs the loop was in no…[0m  [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlast advanced             [0m[38;5;167m14.1d ago[0m   [38;5;245mno driver; last iteration 14.1d ago[0m    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdriver (iterations)       [0m[38;5;167mNONE[0m        [38;5;245mnothing schedules an iteration[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtimers (housekeeping)     [0m[38;5;71m4 launchd[0m   [38;5;245mheal wrote 9m ago[0m                      [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mlock                      [0m[1mcycle 0m[0m                                           [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mSWARM   measured just now[0m [38;5;240m──────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbees running              [0m[38;5;71m10[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mdispatches finished       [0m[1m803[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mtick refusal              [0m[1mDISPATCHED[0m                                         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mcandidates skipped        [0m[1m703[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  missing boundary        [0m[38;5;167m554[0m         [38;5;245m79% of all skips[0m                       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  claimed by a fence      [0m[1m47[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m  done but still open     [0m[1m43[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mavailable to a bee        [0m[38;5;245m-[0m           [38;5;245mneeds a deep cycle[0m                     [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mwindow with no bee        [0m[38;5;167m52%[0m                                                [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mrounds failed             [0m[38;5;245m-[0m                                                  [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mTREE[0m [38;5;240m───────────────────────────────────────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;245mbranch                    [0m[1mfeat/queen-supervisor[0m  [38;5;245mahead 0  behind 22[0m          [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245muncommitted source        [0m[38;5;179m0 mod / 4 new[0m  [38;5;245mgenerated files excluded[0m            [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mworktrees                 [0m[1m21[0m                                                 [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mvolume used               [0m[38;5;167m98%[0m         [38;5;245mbees die at 0s when this fills[0m         [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245mgates declared / wired    [0m[38;5;179m25 / 8[0m      [38;5;245m17 run only on a Mac[0m                   [38;5;240m│[0m
+[38;5;240m├─[0m [38;5;245mANOMALIES   2 blocker  3 high  2 medium[0m [38;5;240m────────────────────────────────────┤[0m
+[38;5;240m│[0m [38;5;167m![0m .claude/scheduled_tasks.json holds 0 tasks - that job does not exist       [38;5;240m│[0m
+[38;5;240m│[0m [38;5;167m![0m it closed 337.4 hours ago (14.1 days) and no iteration has opened since    [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m they last wrote 8.6 min ago and are doing no-op work (author filed 0, l…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the Queen's board says running 10 right now; the dashboard file is 71.3…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;179m![0m the volume is 98% used; the loop's own worktrees are 2.5G of that, 0.6%…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m●[0m 8 of them appear in a workflow CI will load; 17 run only on a developer…   [38;5;240m│[0m
+[38;5;240m│[0m [38;5;245m●[0m 4 untracked source file(s) and 0 modified one(s) exist only on this disk   [38;5;240m│[0m
+[38;5;240m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+cycle 112: 7 anomalies in 24.6s
+cycle: skipped - lock heal.mjs is running (the lock is not proof on its own)
+cycle: skipped - lock feed.mjs is running (the lock is not proof on its own)
+cycle: skipped - lock feed.mjs is running (the lock is not proof on its own)
