@@ -152,19 +152,43 @@ export const CRITERION_PROGRAMS: ReadonlySet<string> = new Set([
 /**
  * The `t27c` subcommands a criterion may name.
  *
- * `t27c --help` lists 180 of them, and they are not all readers. `battery` and
+ * `t27c --help` lists 155 of them, and they are not all readers. `battery` and
  * `gates` RUN every `check_*.py` in the tree, `silicon` drives a bitstream
  * build, `fpga-flash` writes to hardware, `serve` and `bridge` open sockets,
  * `fmt`, `rename` and `seal` edit files. The tree they would act on is the bee's
  * own commit, so an allowlist of programs alone hands a bee the ability to run
  * a script it just wrote by putting `t27c battery` in an issue's criteria.
  *
- * So the subcommand is allowlisted too, to the ones that only READ a spec and
- * print an answer - which is all an acceptance criterion in this repository has
- * ever needed (measured over the open backlog: spec-status, gen, parse and
- * typecheck cover every criterion that names the compiler).
+ * So the subcommand is allowlisted too. What belongs on this list is a command
+ * that READS a spec, prints an answer, and finishes well inside
+ * CRITERION_COMMAND_TIMEOUT_MS. The first version held five names, and the
+ * criteria written against it were greps - which is how 388 of the 837 specs
+ * the oracle reaches came to satisfy every criterion ever filed against them
+ * and still generate Zig that does not compile.
+ *
+ * Measured 2026-09-20 against master, on the corpus, per command: everything
+ * below except `test-report` answers in under 30 s and most in under one.
+ *
+ * `test-report` is the one that runs anything: it generates the reviewed spec
+ * and asks Zig to build and run that spec's own tests, which is the question
+ * the oracle asks and the only one that distinguishes a file that greps clean
+ * from a file that works. It is admitted deliberately. The bee already has a
+ * shell in this container - that is what a bee IS - so nothing here is reachable
+ * to it that was not reachable before; what the allowlist prevents is a
+ * criterion RIGGING its own measurement by running a script from the commit
+ * under review, and `test-report` runs the compiler on one named spec.
+ *
+ * Deliberately absent, with the reason:
+ *   - `dupes` (~50 s) and `check-calls` (~140 s) read the whole corpus. Past
+ *     the timeout a criterion is inconclusive, which spends a review and
+ *     establishes nothing. A bee may still run them; its shell has no
+ *     allowlist.
+ *   - `corpus`, `backlog`, `suite`, `battery`, `gates`: minutes, or they
+ *     execute the tree.
+ *   - `fmt`, `rename`, `seal`, `init`, `compile`, `doc`: they write.
  */
 export const CRITERION_T27C_SUBCOMMANDS: ReadonlySet<string> = new Set([
+  // The verdicts.
   'spec-status',
   'impl-status',
   'classify',
@@ -172,6 +196,42 @@ export const CRITERION_T27C_SUBCOMMANDS: ReadonlySet<string> = new Set([
   'parse-complete',
   'parse-conform',
   'typecheck',
+  'test-report',
+  // What the spec declares.
+  'symbols',
+  'inspect',
+  'outline',
+  'exports',
+  'depends',
+  'test',
+  'tree',
+  'strings',
+  // What it measures.
+  'count',
+  'loc',
+  'size',
+  'metrics',
+  'depth',
+  'stack',
+  'hash',
+  'coverage',
+  // What is wrong with it.
+  'lint',
+  'deadcode',
+  'orphans',
+  'spellcheck',
+  'validate',
+  'validate-vacuity',
+  'todo',
+  'check-deps',
+  'deps-tree',
+  'analyze',
+  // Comparisons and evaluation.
+  'xref',
+  'api-diff',
+  'diff',
+  'eval',
+  // What the generators emit.
   'gen',
   'gen-c',
   'gen-rust',
