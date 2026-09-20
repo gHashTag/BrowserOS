@@ -2850,8 +2850,38 @@ export async function reapWorktrees(
       60_000,
     )
     if (ahead.code !== 0 || Number(ahead.out.trim() || '1') > 0) {
-      result.keptUnpushed.push(c.path)
-      continue
+      // UNLESS THE REMOTE ALREADY HAS IT, byte for byte.
+      //
+      // "The only copy" is the whole of the argument above, and it stops being
+      // true the moment the branch is on origin at the same commit. Measured
+      // 2026-09-20: the container had twenty-one worktrees at boot, every one
+      // of them kept by this branch of the check, and the volume filled until
+      // the process was killed - then the entrypoint cleared them, the swarm
+      // ran for a few minutes, and it happened again. Six such restarts in one
+      // afternoon, at four lanes as readily as at twenty, because the leak is
+      // per FINISHED bee and not per running one.
+      //
+      // A read of the remote needs no push credential. If it cannot be read,
+      // the tree stays: unreachable is not published, for the same reason
+      // unreadable is not clean.
+      const branchName = c.path.slice(c.path.lastIndexOf('/') + 1)
+      const localHead = await run('git', ['rev-parse', 'HEAD'], c.path, 60_000)
+      const remote = await run(
+        'git',
+        ['ls-remote', 'origin', `refs/heads/${branchName}`],
+        c.path,
+        120_000,
+      )
+      const remoteSha = remote.out.trim().split(/\s+/)[0] ?? ''
+      const published =
+        localHead.code === 0 &&
+        remote.code === 0 &&
+        remoteSha.length > 0 &&
+        remoteSha === localHead.out.trim()
+      if (!published) {
+        result.keptUnpushed.push(c.path)
+        continue
+      }
     }
     // No `--force`, here or anywhere else in this project. A tree that refuses
     // to go is a tree a person should look at.
