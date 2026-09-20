@@ -662,6 +662,14 @@ export const WAIT_FROZEN_FLOOR_MS = 6 * 60 * 60 * 1000
 /** The floor on an empty attempt; see `stateOfDispatch`. */
 export const EMPTY_ATTEMPT_FLOOR_MS = 30 * 60 * 1000
 
+/**
+ * How long an attempt that spent the retry ceiling keeps holding its files.
+ *
+ * The same hour a single send-back waits out. Longer would be a lease nobody
+ * asked for: the work is a person's problem now, and the paths are not.
+ */
+export const CEILING_RELEASE_MS = 60 * 60 * 1000
+
 export function stateOfDispatch(
   finished: boolean,
   reviewState: unknown,
@@ -720,7 +728,22 @@ export function stateOfDispatch(
   if (verdict === 'sendBack') {
     if (idleMs >= SEND_BACK_IDLE_FLOOR_MS && sendBacks < ceiling)
       return 'failed'
-    return 'rejected'
+    // AT THE CEILING, THE ISSUE STOPS BEING THE SWARM'S - BUT ITS FILES MUST
+    // NOT STAY HELD.
+    //
+    // `rejected` had no clock at all, so an issue that spent its two attempts
+    // pinned its boundary until the dispatch row fell out of the 7-day window.
+    // Measured 2026-09-20, the morning after the adversarial review began
+    // refusing work the compiler cannot build: 71 of the swarm's issues were
+    // claimed, 0 of 8 lanes ran, and the tick refused 673 candidates with
+    // "nothing to choose". Every one of those refusals was honest - the Zig the
+    // bees generated did not compile - and the swarm still had to stop.
+    //
+    // A ceiling is a statement about ATTEMPTS, not a lease on files. After the
+    // same hour the first send-back waits out, the row stops holding: the
+    // escalation stays on the board for a person, and the boundary is free for
+    // any other issue that needs those paths.
+    return idleMs >= CEILING_RELEASE_MS ? 'failed' : 'rejected'
   }
   // A wait that has outlasted the frozen floor was never judged and never will
   // be, because nothing about its input can change. `escalate` is deliberately

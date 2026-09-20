@@ -98,3 +98,39 @@ describe('a row judged against criteria that have changed', () => {
     )
   })
 })
+
+describe('an attempt that spent the retry ceiling', () => {
+  it('keeps its files for an hour, then stops holding them', () => {
+    // Measured 2026-09-20: 71 issues claimed, 0 of 8 lanes running, 673
+    // candidates refused with "nothing to choose". Every send-back behind it
+    // was honest - the generated Zig did not compile - and the swarm still had
+    // to stop, because `rejected` had no clock.
+    const atCeiling = { sendBacks: 2, ceiling: 2 }
+    expect(stateOfDispatch(true, 'sendBack', { ...atCeiling, idleMs: 0 })).toBe(
+      'rejected',
+    )
+    expect(
+      stateOfDispatch(true, 'sendBack', { ...atCeiling, idleMs: 59 * 60_000 }),
+    ).toBe('rejected')
+    expect(
+      stateOfDispatch(true, 'sendBack', { ...atCeiling, idleMs: 61 * 60_000 }),
+    ).toBe('failed')
+  })
+
+  it('still releases a below-ceiling send-back at its own floor', () => {
+    expect(
+      stateOfDispatch(true, 'sendBack', {
+        sendBacks: 1,
+        ceiling: 2,
+        idleMs: 61 * 60_000,
+      }),
+    ).toBe('failed')
+  })
+
+  it('does not release an escalation, whatever the clock says', () => {
+    // An escalation asks for a person, and a timer is not a person.
+    expect(stateOfDispatch(true, 'escalate', { idleMs: 9e9 })).toBe(
+      'awaitingReview',
+    )
+  })
+})
