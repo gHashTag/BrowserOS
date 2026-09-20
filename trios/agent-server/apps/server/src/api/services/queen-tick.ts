@@ -2666,7 +2666,10 @@ export async function reviewFinishedDispatches(
   // board read that hands out work, so an unbounded sweep is a swarm that
   // dispatches nothing while its lease looks healthy.
   let measurementsLeft = deps.measurementsPerRound?.() ?? measurementsPerRound()
-  const measurementDeadline = Date.now() + MEASUREMENT_SWEEP_MS
+  // The whole sweep, not only its measurements: a review is a provider call and
+  // can sit on its own timeout, so a budget counted in reviews bounds the
+  // number and not the wall clock the dispatcher is waiting on.
+  const sweepDeadline = Date.now() + sweepDeadlineMs(tickIntervalSeconds())
   let takenKeys: number[] | null = null
   const repo = process.env.TRIOS_GITHUB_REPO || 'gHashTag/trios'
 
@@ -2985,7 +2988,7 @@ export async function reviewFinishedDispatches(
         measurementSkipped = 'the review budget for this round is spent'
       } else if (measurementsLeft <= 0) {
         measurementSkipped = 'the measurement budget for this round is spent'
-      } else if (Date.now() >= measurementDeadline) {
+      } else if (Date.now() >= sweepDeadline) {
         measurementSkipped = 'the round has measured for as long as it may'
       } else {
         measurementsLeft -= 1
@@ -3134,6 +3137,9 @@ export async function reviewFinishedDispatches(
         // as one past the review budget does: nothing spent, nothing charged,
         // measured next round.
         reviewerSkipped = `the criteria were not measured this round (${measurementSkipped})`
+      } else if (Date.now() >= sweepDeadline) {
+        reviewerSkipped =
+          'the round has reviewed for as long as it may before dispatching'
       } else if (reviewsLeft <= 0) {
         reviewerSkipped = 'the review budget for this round is spent'
       } else {
@@ -3710,6 +3716,31 @@ export const REVIEWER_LANE_TRIES = 3
  * is how long the swarm is willing to hand out no work at all.
  */
 export const MEASUREMENT_SWEEP_MS = 4 * 60 * 1000
+
+/**
+ * The share of one tick the sweep may spend before the round hands out work.
+ *
+ * Four minutes was an absolute number against a sixty-second tick, so a sweep
+ * could hold the dispatcher for four rounds while the lease heartbeat reported
+ * health. Measured 2026-09-20: the swarm went from 8.5 to 80 dispatches an
+ * hour when the worker model changed, and the review sweep - three a round,
+ * unchanged - fell behind; raising its COUNT to eight reviews and six
+ * measurements killed the container five minutes later, because the count
+ * bounds worktrees and not time.
+ *
+ * So the bound is a fraction of the tick, and the count can be generous: at a
+ * sixty-second tick the sweep reviews for at most forty-five seconds and the
+ * round always dispatches. `MEASUREMENT_SWEEP_MS` stays as the ceiling for a
+ * deployment whose tick is minutes long, and the floor keeps a very short tick
+ * from making review impossible.
+ */
+export const SWEEP_SHARE_OF_TICK = 0.75
+export const SWEEP_FLOOR_MS = 20 * 1000
+
+export function sweepDeadlineMs(intervalSeconds: number): number {
+  const share = Math.round(intervalSeconds * 1000 * SWEEP_SHARE_OF_TICK)
+  return Math.max(SWEEP_FLOOR_MS, Math.min(MEASUREMENT_SWEEP_MS, share))
+}
 
 /**
  * Rounds a bought review may fail to arrive for one commit before a person is
