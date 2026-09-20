@@ -393,6 +393,11 @@ async function ensureQueenColumns(pool: Pool): Promise<void> {
     ALTER TABLE queen_dispatch
       ADD COLUMN IF NOT EXISTS criteria jsonb NOT NULL DEFAULT '[]'::jsonb,
       ADD COLUMN IF NOT EXISTS criteria_source text NOT NULL DEFAULT 'none',
+      -- How many times a spent retry ceiling has been handed back to the
+      -- swarm. Bounded by MAX_CEILING_RELEASES: after that the row stays
+      -- rejected, because a third identical failure is evidence about the
+      -- issue and not about the attempt.
+      ADD COLUMN IF NOT EXISTS ceiling_releases integer NOT NULL DEFAULT 0,
       -- Who ran this bee and on what.
       --
       -- The spend cap added for the cloud could not see a single cloud
@@ -670,16 +675,33 @@ export const EMPTY_ATTEMPT_FLOOR_MS = 30 * 60 * 1000
  */
 export const CEILING_RELEASE_MS = 60 * 60 * 1000
 
+/**
+ * How many times a spent ceiling may be handed back to the swarm.
+ *
+ * One. The bee gets `maximumSendBacks` attempts, then an hour, then one more
+ * set - with the last review's findings in its brief and whatever the salvage
+ * committed already on the branch. After that the row stays rejected: a third
+ * identical failure is evidence about the issue, not about the attempt.
+ */
+export const MAX_CEILING_RELEASES = 1
+
 export function stateOfDispatch(
   finished: boolean,
   reviewState: unknown,
-  lease: { idleMs?: number; sendBacks?: number; ceiling?: number } = {},
+  lease: {
+    idleMs?: number
+    sendBacks?: number
+    ceiling?: number
+    /** How many times this issue's ceiling has already been handed back. */
+    releases?: number
+  } = {},
 ): 'running' | 'accepted' | 'rejected' | 'awaitingReview' | 'failed' {
   if (!finished) return 'running'
   const verdict = String(reviewState ?? '')
   if (verdict === 'accept') return 'accepted'
   const idleMs = lease.idleMs ?? 0
   const sendBacks = lease.sendBacks ?? 0
+  const releases = lease.releases ?? 0
   // Read from QueenRetryPolicy.maximumRealAttempts rather than restated, so
   // there is one ceiling and not two that agree until someone edits one.
   const ceiling = lease.ceiling ?? 2
@@ -739,10 +761,14 @@ export function stateOfDispatch(
     // "nothing to choose". Every one of those refusals was honest - the Zig the
     // bees generated did not compile - and the swarm still had to stop.
     //
-    // A ceiling is a statement about ATTEMPTS, not a lease on files. After the
-    // same hour the first send-back waits out, the row stops holding: the
-    // escalation stays on the board for a person, and the boundary is free for
-    // any other issue that needs those paths.
+    // A ceiling is a statement about ATTEMPTS, and the old rule read it as a
+    // lease with no clock: "a person decides, not a timer". That is right the
+    // second time it happens and wrong the first, because the person is asleep
+    // and the swarm is not. So the ceiling is spent ONCE more - after the same
+    // hour a single send-back waits out - and the count of those releases is
+    // itself bounded: past `MAX_CEILING_RELEASES` the row stays `rejected` and
+    // the issue really is a person's.
+    if (releases >= MAX_CEILING_RELEASES) return 'rejected'
     return idleMs >= CEILING_RELEASE_MS ? 'failed' : 'rejected'
   }
   // A wait that has outlasted the frozen floor was never judged and never will
@@ -769,6 +795,7 @@ export function dispatchRowState(
     finished_at?: unknown
     review_state?: unknown
     send_backs?: unknown
+    ceiling_releases?: unknown
   },
   now: number = Date.now(),
 ): ReturnType<typeof stateOfDispatch> {
@@ -779,6 +806,7 @@ export function dispatchRowState(
     // board's 48-hour rule already does for a timestamp that will not parse.
     idleMs: Number.isFinite(at) ? Math.max(0, now - at) : 0,
     sendBacks: Number(row.send_backs ?? 0) || 0,
+    releases: Number(row.ceiling_releases ?? 0) || 0,
   })
 }
 
@@ -1605,6 +1633,7 @@ export async function runRound(
         // It is the only honest measure of how long a verdict has stood.
         idleMs: finished ? Date.now() - Date.parse(String(row.finished_at)) : 0,
         sendBacks: Number(row.send_backs ?? 0),
+        releases: Number(row.ceiling_releases ?? 0),
       }),
       // The price, so the daily cap can see the work it exists to govern.
       // `estimatedCostUSD` returns nil unless BOTH provider and model are

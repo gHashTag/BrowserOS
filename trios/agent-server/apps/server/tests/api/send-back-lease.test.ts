@@ -65,12 +65,36 @@ describe('stateOfDispatch: the send-back lease', () => {
     ).toBe('failed')
   })
 
-  it('holds it at the ceiling however long it sits - a person decides, not a timer', () => {
+  // THIS RULE CHANGED ON 2026-09-20, and the old wording is kept so the change
+  // is legible: "holds it at the ceiling however long it sits - a person
+  // decides, not a timer". That is right the second time and wrong the first.
+  // Measured that morning, after the adversarial review began refusing work the
+  // compiler cannot build: 71 issues claimed by spent rows, 0 of 8 lanes
+  // running, 673 candidates refused with "nothing to choose". Every refusal was
+  // honest and the swarm still stopped, because nothing ever handed the issue
+  // back. It is handed back ONCE now, an hour later, with the last review's
+  // findings in the brief; the second time it stays a person's.
+  it('hands a spent ceiling back once, an hour later, and never again', () => {
+    const spent = { sendBacks: 2, ceiling: 2 }
+    expect(stateOfDispatch(true, 'sendBack', { ...spent, idleMs: 0 })).toBe(
+      'rejected',
+    )
     expect(
-      stateOfDispatch(true, 'sendBack', { idleMs: 1000 * HOUR, sendBacks: 2 }),
+      stateOfDispatch(true, 'sendBack', { ...spent, idleMs: 1000 * HOUR }),
+    ).toBe('failed')
+    expect(
+      stateOfDispatch(true, 'sendBack', {
+        ...spent,
+        idleMs: 1000 * HOUR,
+        releases: 1,
+      }),
     ).toBe('rejected')
     expect(
-      stateOfDispatch(true, 'sendBack', { idleMs: 1000 * HOUR, sendBacks: 9 }),
+      stateOfDispatch(true, 'sendBack', {
+        idleMs: 1000 * HOUR,
+        sendBacks: 9,
+        releases: 1,
+      }),
     ).toBe('rejected')
   })
 
@@ -87,6 +111,8 @@ describe('stateOfDispatch: the send-back lease', () => {
         idleMs: 19 * HOUR,
         sendBacks: 4,
         ceiling: 4,
+        // Handed back once already: from here a person decides.
+        releases: 1,
       }),
     ).toBe('rejected')
   })

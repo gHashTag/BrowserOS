@@ -4615,6 +4615,21 @@ export async function recordDispatch(
              WHEN EXCLUDED.started
                   AND queen_dispatch.review_state IN ('escalate', 'failed')
              THEN 0 ELSE queen_dispatch.free_attempts END,
+           -- A REDISPATCH AFTER A SPENT CEILING IS THE LAST ONE.
+           --
+           -- The row that spent maximumSendBacks is handed back once, an hour
+           -- later, with the last review's findings in the brief and whatever
+           -- the salvage committed already on the branch. That hand-back is
+           -- counted here and bounded by MAX_CEILING_RELEASES, so the swarm
+           -- cannot spend an issue's attempts twice over. send_backs starts
+           -- again with it: the new attempt is judged on its own work.
+           ceiling_releases = CASE
+             WHEN EXCLUDED.started AND queen_dispatch.send_backs >= 2
+             THEN queen_dispatch.ceiling_releases + 1
+             ELSE queen_dispatch.ceiling_releases END,
+           send_backs = CASE
+             WHEN EXCLUDED.started AND queen_dispatch.send_backs >= 2
+             THEN 0 ELSE queen_dispatch.send_backs END,
            -- Undelivered reviews are about ONE attempt's commit; a new
            -- attempt starts the count again.
            reviewer_misses = CASE WHEN EXCLUDED.started THEN 0

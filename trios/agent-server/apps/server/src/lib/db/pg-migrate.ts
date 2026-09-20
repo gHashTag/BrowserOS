@@ -258,6 +258,15 @@ ALTER TABLE queen_dispatch
 ALTER TABLE queen_dispatch
   ADD COLUMN IF NOT EXISTS salvage_left jsonb NOT NULL DEFAULT '[]'::jsonb;
 
+-- How many times a spent retry ceiling has been handed back to the swarm.
+-- Measured 2026-09-20: 71 issues were claimed by rows that had spent their two
+-- attempts, 0 of 8 lanes ran, and the tick refused 673 candidates with
+-- "nothing to choose" - every refusal honest (the generated Zig did not
+-- compile), and the swarm stopped anyway. A ceiling is handed back once, and
+-- this is the count that keeps "once" true.
+ALTER TABLE queen_dispatch
+  ADD COLUMN IF NOT EXISTS ceiling_releases integer NOT NULL DEFAULT 0;
+
 ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS review_state text;
 ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS review_note text;
 ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS reviewed_at timestamptz;
