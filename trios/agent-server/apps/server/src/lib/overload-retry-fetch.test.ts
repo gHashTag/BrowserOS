@@ -100,6 +100,47 @@ describe('createOverloadRetryFetch', () => {
     assert.strictEqual(bad.calls(), 1)
   })
 
+  it('retries a fetch that THREW, and gives up with the error it was given', async () => {
+    // Measured at concurrency four on one key against integrate.api.nvidia.com,
+    // 2026-09-20: two 200s, one 503, and one socket that never answered. The
+    // status branches cannot see the fourth - there is no response to branch on.
+    let calls = 0
+    const fetchImpl = (async () => {
+      calls += 1
+      if (calls < 3) throw new Error('read ECONNRESET')
+      return new Response('{"ok":true}', {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    }) as unknown as typeof fetch
+    const f = createOverloadRetryFetch({ fetchImpl, sleep: noSleep })
+    assert.strictEqual((await f('https://example.test/', {})).status, 200)
+    assert.strictEqual(calls, 3)
+
+    let always = 0
+    const dead = (async () => {
+      always += 1
+      throw new Error('read ECONNRESET')
+    }) as unknown as typeof fetch
+    const g = createOverloadRetryFetch({ fetchImpl: dead, sleep: noSleep, maxAttempts: 3 })
+    await assert.rejects(() => g('https://example.test/', {}), /ECONNRESET/)
+    assert.strictEqual(always, 3)
+  })
+
+  it('does not retry an abort the caller asked for', async () => {
+    // Retrying a cancelled request outlives the thing that cancelled it.
+    let calls = 0
+    const aborting = (async () => {
+      calls += 1
+      const error = new Error('aborted')
+      error.name = 'AbortError'
+      throw error
+    }) as unknown as typeof fetch
+    const f = createOverloadRetryFetch({ fetchImpl: aborting, sleep: noSleep })
+    await assert.rejects(() => f('https://example.test/', {}), /aborted/)
+    assert.strictEqual(calls, 1)
+  })
+
   it('replays a stream that arrives in many small chunks', async () => {
     const encoder = new TextEncoder()
     const pieces = GOOD.match(/.{1,7}/gs) ?? []

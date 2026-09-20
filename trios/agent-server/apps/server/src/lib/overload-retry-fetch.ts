@@ -130,6 +130,14 @@ function replay(
   })
 }
 
+/** An abort the caller asked for, rather than a network failure. */
+export function isAbort(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false
+  const name = (error as { name?: unknown }).name
+  return name === 'AbortError' || name === 'TimeoutError'
+}
+
+
 export function createOverloadRetryFetch(
   options: OverloadRetryOptions = {},
 ): typeof fetch {
@@ -141,9 +149,32 @@ export function createOverloadRetryFetch(
   return (async (url: RequestInfo | URL, init?: RequestInit) => {
     const signal = init?.signal
     for (let attempt = 1; ; attempt++) {
-      const response = await fetchImpl(url, init)
       const last = attempt >= maxAttempts
       const delayMs = delays[Math.min(attempt - 1, delays.length - 1)] ?? 0
+
+      // A THROW is the same outage wearing different clothes. Measured against
+      // integrate.api.nvidia.com on 2026-09-20 at concurrency four on one key:
+      // two answers 200, one 503, and one that never answered at all - the
+      // socket simply hung until the client gave up. The status branches below
+      // never saw that fourth one, because there was no response to branch on,
+      // so it reached the agent loop as a terminal error and ended the turn.
+      //
+      // An abort the CALLER asked for is not an outage and is re-thrown at
+      // once: retrying a cancelled request would outlive the thing that
+      // cancelled it.
+      let response: Response
+      try {
+        response = await fetchImpl(url, init)
+      } catch (error) {
+        if (signal?.aborted || isAbort(error) || last) throw error
+        options.onRetry?.({
+          attempt,
+          delayMs,
+          reason: `fetch threw: ${error instanceof Error ? error.message : String(error)}`,
+        })
+        await sleep(delayMs, signal)
+        continue
+      }
 
       if (response.status === 429 || response.status >= 500) {
         if (last) return response
