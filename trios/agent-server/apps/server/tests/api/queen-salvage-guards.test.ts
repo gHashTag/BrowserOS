@@ -49,6 +49,9 @@ import {
   noteWithSalvage,
   reviewFinishedDispatches,
 } from '../../src/api/services/queen-tick'
+import { resolveQueendPath } from '../__helpers__/queend-path'
+
+const queendPresent = existsSync(resolveQueendPath())
 
 const REAL_GIT = Bun.which('git') || '/usr/bin/git'
 const ISSUE = 1627
@@ -724,7 +727,10 @@ function reviewDeps(reviewerText: string) {
     }),
     laneCandidates: () => [LANE],
     reviewsPerRound: () => 1,
-    measurementsPerRound: () => 0,
+    // One, not zero: a review now waits for its criteria to be measured, so a
+    // zero budget turned every row here into `wait` and the reviewer was
+    // never asked. The fake measurement (branchDeps) returns no runs.
+    measurementsPerRound: () => 1,
     llm: async () => ({ ok: true as const, text: reviewerText }),
   }
 }
@@ -747,26 +753,33 @@ const LONG_REFUTATION = [
 ].join('\n')
 
 describe('the note says who committed the branch, where it can be read', () => {
-  it('puts the salvage fact where the 1500-character cap cannot cut it', async () => {
-    const salvagedRow = finishedRow({
-      salvaged_at: new Date(),
-      salvaged_sha: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
-      salvaged_files: ['trios/docs/note.md'],
-      salvage_left: ['README.md'],
-    })
-    const pool = reviewPool(salvagedRow)
-    await reviewFinishedDispatches(pool.pool, {
-      ...reviewDeps(LONG_REFUTATION),
-      ...branchDeps(),
-    } as unknown as Parameters<typeof reviewFinishedDispatches>[1])
+  // The verdict is queend's (the Swift policy binary): without it every row
+  // stays `wait` and the reviewer's refutation never becomes a send-back, so
+  // this needs the binary exactly as queen-adversarial-review.test.ts does.
+  // It failed in CI for that reason alone - CI builds no queend.
+  it.if(queendPresent)(
+    'puts the salvage fact where the 1500-character cap cannot cut it',
+    async () => {
+      const salvagedRow = finishedRow({
+        salvaged_at: new Date(),
+        salvaged_sha: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+        salvaged_files: ['trios/docs/note.md'],
+        salvage_left: ['README.md'],
+      })
+      const pool = reviewPool(salvagedRow)
+      await reviewFinishedDispatches(pool.pool, {
+        ...reviewDeps(LONG_REFUTATION),
+        ...branchDeps(),
+      } as unknown as Parameters<typeof reviewFinishedDispatches>[1])
 
-    const note = String(pool.verdict()?.params[2] ?? '')
-    // Stored at the cap, which is the case the fact used to be lost in...
-    expect(note.length).toBe(1500)
-    // ...and the fact is still there, because it goes first.
-    expect(note).toContain('committed by the container')
-    expect(note.indexOf('committed by the container')).toBeLessThan(400)
-  })
+      const note = String(pool.verdict()?.params[2] ?? '')
+      // Stored at the cap, which is the case the fact used to be lost in...
+      expect(note.length).toBe(1500)
+      // ...and the fact is still there, because it goes first.
+      expect(note).toContain('committed by the container')
+      expect(note.indexOf('committed by the container')).toBeLessThan(400)
+    },
+  )
 
   // The composer itself: provenance first, body second, and a body alone when
   // nothing was salvaged.
@@ -784,29 +797,32 @@ describe('a turn the provider killed does not spend the issue', () => {
   // minutes, not evidence about the issue". The salvage removed that
   // coincidence: the container commits the killed turn's edits, files.length
   // is non-zero, and the attempt arrives on the MAIN path, which charged it.
-  it('is judged and sent back, but charges neither counter', async () => {
-    const killed = finishedRow({
-      outcome: 'the stream ended without a completion',
-      said: '',
-      salvaged_at: new Date(),
-      salvaged_sha: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
-      salvaged_files: ['trios/docs/note.md'],
-      salvage_left: [],
-    })
-    const pool = reviewPool(killed)
-    const result = await reviewFinishedDispatches(pool.pool, {
-      ...reviewDeps(LONG_REFUTATION),
-      ...branchDeps(),
-    } as unknown as Parameters<typeof reviewFinishedDispatches>[1])
+  it.if(queendPresent)(
+    'is judged and sent back, but charges neither counter',
+    async () => {
+      const killed = finishedRow({
+        outcome: 'the stream ended without a completion',
+        said: '',
+        salvaged_at: new Date(),
+        salvaged_sha: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+        salvaged_files: ['trios/docs/note.md'],
+        salvage_left: [],
+      })
+      const pool = reviewPool(killed)
+      const result = await reviewFinishedDispatches(pool.pool, {
+        ...reviewDeps(LONG_REFUTATION),
+        ...branchDeps(),
+      } as unknown as Parameters<typeof reviewFinishedDispatches>[1])
 
-    // The work IS judged - that is the whole point of salvaging it...
-    expect(result.acted).toEqual([`#${ISSUE}:sendBack`])
-    const params = pool.verdict()?.params ?? []
-    // ...and it is not escalated past the bee (`beyondThePatch`)...
-    expect(String(params[1])).toBe('sendBack')
-    // ...and `send_backs` does not move: countsAgainstTheIssue is false...
-    expect(params[4]).toBe(false)
-    // ...and neither does free_attempts.
-    expect(params[5]).toBe(0)
-  })
+      // The work IS judged - that is the whole point of salvaging it...
+      expect(result.acted).toEqual([`#${ISSUE}:sendBack`])
+      const params = pool.verdict()?.params ?? []
+      // ...and it is not escalated past the bee (`beyondThePatch`)...
+      expect(String(params[1])).toBe('sendBack')
+      // ...and `send_backs` does not move: countsAgainstTheIssue is false...
+      expect(params[4]).toBe(false)
+      // ...and neither does free_attempts.
+      expect(params[5]).toBe(0)
+    },
+  )
 })

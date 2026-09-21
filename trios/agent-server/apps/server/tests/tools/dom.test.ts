@@ -356,10 +356,24 @@ describe('search_dom', () => {
       const newResult = await execute(new_page, { url: RICH_PAGE })
       const pageId = pageIdOf(newResult)
 
-      const result = await execute(search_dom, {
+      // Asked until the page has rendered, for up to five seconds: once, it
+      // raced the load and failed in CI on one run of two (2026-09-21) with
+      // the same page and the same query.
+      let result = await execute(search_dom, {
         page: pageId,
         query: '//button[@type="submit"]',
       })
+      for (
+        let tries = 0;
+        tries < 10 && !result.isError && !textOf(result).includes('Found');
+        tries++
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 500))
+        result = await execute(search_dom, {
+          page: pageId,
+          query: '//button[@type="submit"]',
+        })
+      }
       assert.ok(!result.isError, textOf(result))
       const text = textOf(result)
       assert.ok(text.includes('Found'), 'Should find the submit button')

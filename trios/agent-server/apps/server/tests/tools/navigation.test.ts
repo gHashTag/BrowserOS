@@ -28,7 +28,6 @@ function structuredOf<T>(result: { structuredContent?: unknown }): T {
   return result.structuredContent as T
 }
 
-
 /**
  * Did the browser refuse because this platform cannot hide a window at all?
  *
@@ -51,7 +50,14 @@ function structuredOf<T>(result: { structuredContent?: unknown }): T {
  * and `move_page` refuses it. That is a product question, not a fixture one,
  * and it is recorded rather than guessed at.
  */
-const HIDDEN_UNSUPPORTED = 'Hidden windows are not yet supported on this platform'
+const HIDDEN_UNSUPPORTED =
+  'Hidden windows are not yet supported on this platform'
+// Newer BrowserOS builds say the second one (seen in CI 2026-09-21); both mean
+// the platform cannot open a hidden window, which is a skip, not a failure.
+const HIDDEN_UNSUPPORTED_TEXTS = [
+  HIDDEN_UNSUPPORTED,
+  'Hidden windows are no longer supported',
+]
 
 /** Set by the tests below; read by the last test in this file. */
 const hiddenGate = { ran: false, skipped: false }
@@ -60,7 +66,10 @@ function skipIfHiddenUnsupported(result: {
   isError?: boolean
   content: { type: string; text?: string }[]
 }): boolean {
-  if (result.isError && textOf(result).includes(HIDDEN_UNSUPPORTED)) {
+  if (
+    result.isError &&
+    HIDDEN_UNSUPPORTED_TEXTS.some((text) => textOf(result).includes(text))
+  ) {
     hiddenGate.skipped = true
     console.error(
       `  HIDDEN-WINDOW TESTS SKIPPED: ${HIDDEN_UNSUPPORTED}.\n` +
