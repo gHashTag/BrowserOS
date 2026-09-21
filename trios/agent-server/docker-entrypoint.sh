@@ -51,6 +51,18 @@ set -e
 # twelve misses in a row are needed: roughly twelve minutes of silence. A hang
 # of the kind this exists for - nine hours of `Application failed to respond`
 # - is caught all the same; a busy stretch is not.
+#
+# A STALLED LOOP IS DEAD, and sooner. Twelve minutes of silence was the price of
+# telling busy from dead with /health alone. The server now tells them apart
+# itself (apps/server/src/lib/stall-watch.ts): its main thread touches
+# TRIOS_LOOP_HEARTBEAT_FILE from a timer, which fires only when the event loop
+# turns. Twenty busy bees slow the loop; they do not stop it. Measured
+# 2026-09-21 14:44 a server spun one core for twelve minutes with the loop
+# stopped - so a file older than LIVENESS_STALL (180 s) ends the server without
+# waiting for the twelfth missed probe. By then the stall watcher's own thread
+# has written the last things the main thread did to the log ([stall] lines).
+# No file (an older image, or a server that could not write it) leaves the
+# /health rule alone in charge.
 # One line per reading of the hung server and every process under it, from
 # /proc alone (python3 is in the image; ps is not).
 liveness_forensics() {
@@ -108,10 +120,17 @@ run_supervised() {
     interval="${LIVENESS_INTERVAL:-30}"
     fails_allowed="${LIVENESS_FAILS:-12}"
     probe_timeout="${LIVENESS_TIMEOUT:-30}"
+    stall_allowed="${LIVENESS_STALL:-180}"
+    heartbeat="${TRIOS_LOOP_HEARTBEAT_FILE:-/tmp/trios-loop-heartbeat}"
     sleep "${LIVENESS_GRACE:-240}"
     fails=0
     while kill -0 "$server" 2>/dev/null; do
-      if python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:$port/health', timeout=$probe_timeout)" >/dev/null 2>&1; then
+      stalled=$(python3 -c "import os,sys,time; print(int(time.time()-os.stat(sys.argv[1]).st_mtime))" "$heartbeat" 2>/dev/null || true)
+      if [ -n "$stalled" ] && [ "$stalled" -ge "$stall_allowed" ]; then
+        echo "[liveness] the server's event loop has not turned for ${stalled}s (limit ${stall_allowed}s)"
+        liveness_forensics "$server"
+        fails="$fails_allowed"
+      elif python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:$port/health', timeout=$probe_timeout)" >/dev/null 2>&1; then
         fails=0
       else
         fails=$((fails + 1))

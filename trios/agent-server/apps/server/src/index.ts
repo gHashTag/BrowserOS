@@ -22,6 +22,7 @@ import { CommanderError } from 'commander'
 import { loadServerConfig } from './config'
 import { isPortInUseError } from './lib/port-binding'
 import { Sentry } from './lib/sentry'
+import { startStallWatch } from './lib/stall-watch'
 import { Application } from './main'
 
 const configResult = loadServerConfig()
@@ -31,6 +32,8 @@ if (!configResult.ok) {
   console.error(configResult.error)
   process.exit(EXIT_CODES.GENERAL_ERROR)
 }
+
+startStallWatch()
 
 const app = new Application(configResult.value)
 
