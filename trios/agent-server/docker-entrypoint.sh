@@ -22,6 +22,64 @@
 set -e
 
 # ---------------------------------------------------------------------------
+# LIVENESS: a server that stops answering is ended, so the platform restarts it.
+#
+# Measured 2026-09-20/21: the agent server twice stopped answering HTTP WITHOUT
+# EXITING - the edge said `Application failed to respond` - and Railway's
+# restart policy never fired, because a restart policy fires on an exit and
+# there was none. The first time it stayed down for nine hours. Raising
+# restartPolicyMaxRetries to 10000 did not help the second time, for the same
+# reason. An outside watchdog can redeploy, but only with a platform token; a
+# process inside the container needs nothing but the loopback interface.
+#
+# So the entrypoint no longer `exec`s the server. It starts it, and a second
+# process asks `/health` on loopback every LIVENESS_INTERVAL seconds after a
+# LIVENESS_GRACE boot allowance. LIVENESS_FAILS answers in a row missing and the
+# server is sent SIGTERM, then SIGKILL; the entrypoint then exits non-zero and
+# `restartPolicyType: ON_FAILURE` brings the container back - with the boot
+# clean-up that frees the disk. python3 does the asking because the image
+# declares it; curl is not installed here.
+#
+# One healthy answer resets the count: a slow minute is not a dead server.
+run_supervised() {
+  "$@" &
+  server=$!
+  trap 'kill -TERM "$server" 2>/dev/null' TERM INT
+  (
+    port="${PORT:-8080}"
+    interval="${LIVENESS_INTERVAL:-30}"
+    fails_allowed="${LIVENESS_FAILS:-4}"
+    sleep "${LIVENESS_GRACE:-240}"
+    fails=0
+    while kill -0 "$server" 2>/dev/null; do
+      if python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:$port/health', timeout=10)" >/dev/null 2>&1; then
+        fails=0
+      else
+        fails=$((fails + 1))
+        echo "[liveness] /health did not answer ($fails of $fails_allowed)"
+      fi
+      if [ "$fails" -ge "$fails_allowed" ]; then
+        echo "[liveness] the server stopped answering; ending it so the platform restarts the container"
+        kill -TERM "$server" 2>/dev/null || true
+        sleep 15
+        kill -KILL "$server" 2>/dev/null || true
+        break
+      fi
+      sleep "$interval"
+    done
+  ) &
+  set +e
+  wait "$server"
+  code=$?
+  # A server that was ended for not answering exits by signal, which `wait`
+  # reports as 128+N. Anything but a clean 0 must read as a failure to the
+  # platform, or ON_FAILURE would not restart it.
+  [ "$code" -eq 0 ] && code=1
+  echo "[liveness] the server exited ($code); exiting so the platform restarts the container"
+  exit "$code"
+}
+
+# ---------------------------------------------------------------------------
 # HOW MANY BEES: derived from what is connected, not typed by hand.
 #
 # TRIOS_QUEEN_MAX_WORKERS was a number somebody set. It read 8 on 2026-09-20
@@ -176,7 +234,7 @@ echo "[entrypoint] TRIOS_QUEEN_MAX_WORKERS=$TRIOS_QUEEN_MAX_WORKERS (derived)"
 
 if [ -z "$TRIOS_REPO_URL" ]; then
   echo "[entrypoint] TRIOS_REPO_URL unset; starting without a checkout"
-  exec "$@"
+  run_supervised "$@"
 fi
 
 WORKSPACE_DIR="${WORKSPACE_DIR:-/workspace}"
@@ -326,7 +384,7 @@ else
   # still arrives.
   $AS_USER "git clone --filter=blob:none --branch '$TRIOS_REPO_REF' \
     '$TRIOS_REPO_URL' '$REPO_DIR'" \
-    || { echo "[entrypoint] clone FAILED; starting without a checkout"; exec "$@"; }
+    || { echo "[entrypoint] clone FAILED; starting without a checkout"; run_supervised "$@"; }
 fi
 
 $AS_USER "git -C '$REPO_DIR' config user.name '${GIT_AUTHOR_NAME:-Trinity Bee}' \
@@ -334,4 +392,4 @@ $AS_USER "git -C '$REPO_DIR' config user.name '${GIT_AUTHOR_NAME:-Trinity Bee}' 
 
 echo "[entrypoint] checkout ready: $($AS_USER "git -C '$REPO_DIR' rev-parse --short HEAD") on $TRIOS_REPO_REF"
 echo "[entrypoint] this checkout can read and commit; it cannot push, by design"
-exec "$@"
+run_supervised "$@"
