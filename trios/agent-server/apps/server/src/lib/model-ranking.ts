@@ -84,10 +84,19 @@ const SWITCH_MARGIN = 0.8
 /** A model that answered 404/410 is re-probed after this long, not forgotten. */
 const GONE_RETRY_MS = 60 * 60_000
 const MAX_EVENTS = 2_000
+/**
+ * How long a choice stands before a challenger may replace it. Measured
+ * 2026-09-21 11:48: three switches in 35 seconds, each on a handful of
+ * samples - a single refusal moved a lightly-sampled model's cost by half.
+ * A switch changes nothing for a bee mid-step; flapping only muddies the
+ * evidence both models are being judged on.
+ */
+const MIN_DWELL_MS = 3 * 60_000
 
 export class ModelRanking {
   private readonly states = new Map<string, ModelState>()
   private current: string
+  private chosenAt = Number.NEGATIVE_INFINITY
 
   constructor(
     readonly candidates: string[],
@@ -178,6 +187,13 @@ export class ModelRanking {
     if (currentScore === null && this.current !== primary) {
       this.current = primary
     }
+    // Hold a live choice for MIN_DWELL_MS; only its death ends it sooner.
+    if (
+      this.score(this.current) !== null &&
+      this.now() - this.chosenAt < MIN_DWELL_MS
+    ) {
+      return this.current
+    }
     let bestModel = this.current
     let bestScore = this.score(this.current)
     for (const model of this.candidates) {
@@ -195,6 +211,7 @@ export class ModelRanking {
         bestScore = score
       }
     }
+    if (bestModel !== this.current) this.chosenAt = this.now()
     this.current = bestModel
     return bestModel
   }

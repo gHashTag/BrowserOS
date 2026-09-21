@@ -275,6 +275,8 @@ describe('GET /queen/status', () => {
         finished: 8,
         running: 0,
         unreviewed: 2,
+        finishedLastHour: 0,
+        dispatchedLastHour: 0,
         latest: {
           issue: 1290,
           dispatchedAt: '2026-08-31T17:07:16.580Z',
@@ -534,6 +536,8 @@ describe('GET /queen/status', () => {
         finished: 0,
         running: 0,
         unreviewed: 0,
+        finishedLastHour: 0,
+        dispatchedLastHour: 0,
         latest: null,
       },
     })
