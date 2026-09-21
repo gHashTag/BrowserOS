@@ -39,7 +39,12 @@ export interface OverloadRetryOptions {
    */
   routeModel?: (requested: string, attempt: number) => string | undefined
   /** Every answer, attributed to the model that gave it. */
-  onOutcome?: (model: string, outcome: 'ok' | 'overloaded' | 'gone') => void
+  onOutcome?: (
+    model: string,
+    outcome: 'ok' | 'overloaded' | 'gone',
+    /** Why a request was refused: '429', '503', 'stream', 'threw'. */
+    cause?: string,
+  ) => void
   /** Injectable for tests. */
   fetchImpl?: typeof fetch
   sleep?: (ms: number, signal?: AbortSignal | null) => Promise<void>
@@ -205,8 +210,11 @@ export function createOverloadRetryFetch(
       const routed = route(body, attempt, options.routeModel)
       const sent = routed ? { ...init, body: routed.body } : init
       const model = routed?.model ?? body?.model
-      const outcome = (result: 'ok' | 'overloaded' | 'gone') => {
-        if (model) options.onOutcome?.(model, result)
+      const outcome = (
+        result: 'ok' | 'overloaded' | 'gone',
+        cause?: string,
+      ) => {
+        if (model) options.onOutcome?.(model, result, cause)
       }
 
       // A THROW is the same outage wearing different clothes. Measured against
@@ -224,7 +232,7 @@ export function createOverloadRetryFetch(
         response = await fetchImpl(url, sent)
       } catch (error) {
         if (signal?.aborted || isAbort(error)) throw error
-        outcome('overloaded')
+        outcome('overloaded', 'threw')
         if (last) throw error
         options.onRetry?.({
           attempt,
@@ -237,7 +245,7 @@ export function createOverloadRetryFetch(
 
       if (response.status === 404 || response.status === 410) outcome('gone')
       if (response.status === 429 || response.status >= 500) {
-        outcome('overloaded')
+        outcome('overloaded', String(response.status))
         if (last) return response
         await response.body?.cancel().catch(() => {})
         options.onRetry?.({
@@ -271,7 +279,7 @@ export function createOverloadRetryFetch(
         })
       }
       await reader.cancel().catch(() => {})
-      outcome('overloaded')
+      outcome('overloaded', 'stream')
       if (last) {
         // Out of attempts: surface it as the status the body claimed, so the
         // SDK raises a real error with the endpoint's own words in it.

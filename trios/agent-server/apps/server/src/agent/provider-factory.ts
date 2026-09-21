@@ -209,7 +209,8 @@ function workerModelRouting(
       }
       return chosen
     },
-    onOutcome: (model, outcome) => ranking.recordLive(model, outcome),
+    onOutcome: (model, outcome, cause) =>
+      ranking.recordLive(model, outcome, cause),
   }
 }
 
