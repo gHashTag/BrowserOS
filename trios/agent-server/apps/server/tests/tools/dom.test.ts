@@ -79,6 +79,30 @@ function cleanupSavedDom(domPath: string): void {
 
 // ── get_dom ──
 
+/**
+ * search_dom, asked until its answer contains `marker` or five seconds pass.
+ * new_page can return before the page has rendered, and a single search then
+ * races the load: two of these tests failed in CI on one run each
+ * (2026-09-21) with the same page and query that passed on the next.
+ */
+async function searchUntil(
+  execute: Parameters<Parameters<typeof withBrowser>[0]>[0]['execute'],
+  page: number,
+  query: string,
+  marker: string,
+) {
+  let result = await execute(search_dom, { page, query })
+  for (
+    let tries = 0;
+    tries < 10 && !result.isError && !textOf(result).includes(marker);
+    tries++
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    result = await execute(search_dom, { page, query })
+  }
+  return result
+}
+
 describe('get_dom', () => {
   it('returns full page HTML', async () => {
     await withBrowser(async ({ execute }) => {
@@ -356,24 +380,12 @@ describe('search_dom', () => {
       const newResult = await execute(new_page, { url: RICH_PAGE })
       const pageId = pageIdOf(newResult)
 
-      // Asked until the page has rendered, for up to five seconds: once, it
-      // raced the load and failed in CI on one run of two (2026-09-21) with
-      // the same page and the same query.
-      let result = await execute(search_dom, {
-        page: pageId,
-        query: '//button[@type="submit"]',
-      })
-      for (
-        let tries = 0;
-        tries < 10 && !result.isError && !textOf(result).includes('Found');
-        tries++
-      ) {
-        await new Promise((resolve) => setTimeout(resolve, 500))
-        result = await execute(search_dom, {
-          page: pageId,
-          query: '//button[@type="submit"]',
-        })
-      }
+      const result = await searchUntil(
+        execute,
+        pageId,
+        '//button[@type="submit"]',
+        'Found',
+      )
       assert.ok(!result.isError, textOf(result))
       const text = textOf(result)
       assert.ok(text.includes('Found'), 'Should find the submit button')
@@ -571,10 +583,12 @@ describe('search_dom', () => {
       const newResult = await execute(new_page, { url: RICH_PAGE })
       const pageId = pageIdOf(newResult)
 
-      const result = await execute(search_dom, {
-        page: pageId,
-        query: '#submit-btn',
-      })
+      const result = await searchUntil(
+        execute,
+        pageId,
+        '#submit-btn',
+        'nodeId:',
+      )
       assert.ok(!result.isError, textOf(result))
       const text = textOf(result)
       assert.ok(
