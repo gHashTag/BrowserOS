@@ -203,3 +203,33 @@ describe('overload retry routing', () => {
     assert.strictEqual(body, original)
   })
 })
+
+describe('refusal causes', () => {
+  it('counts 429 and 503 apart, so the right lever is visible', () => {
+    const r = new ModelRanking([FAST, SLOW])
+    r.recordLive(FAST, 'overloaded', '429')
+    r.recordLive(FAST, 'overloaded', '429')
+    r.recordLive(FAST, 'overloaded', '503')
+    r.recordLive(FAST, 'ok')
+    const fast = r.snapshot().find((m) => m.model === FAST)
+    assert.deepStrictEqual(fast?.refusals, { '429': 2, '503': 1 })
+  })
+
+  it('the retry wrapper names the status it was refused with', async () => {
+    const causes: (string | undefined)[] = []
+    let calls = 0
+    const fetchImpl = (async () =>
+      calls++ === 0
+        ? new Response('slow down', { status: 429 })
+        : new Response('{}', {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          })) as unknown as typeof fetch
+    await createOverloadRetryFetch({
+      fetchImpl,
+      sleep: async () => {},
+      onOutcome: (_model, _outcome, cause) => causes.push(cause),
+    })('http://x', { method: 'POST', body: JSON.stringify({ model: 'm' }) })
+    assert.deepStrictEqual(causes, ['429', undefined])
+  })
+})

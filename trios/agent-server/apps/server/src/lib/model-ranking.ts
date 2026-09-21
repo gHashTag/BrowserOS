@@ -48,6 +48,8 @@ export interface ProbeResult {
 interface Event {
   at: number
   ok: boolean
+  /** For a refusal: '429', '503', 'stream', 'threw'. */
+  cause?: string
 }
 
 interface ModelState {
@@ -67,6 +69,12 @@ export interface RankedModel {
   tokensPerSecond?: number
   toolCalls?: boolean
   gone: boolean
+  /**
+   * Refusals in the window by cause. 503 means the MODEL is overloaded and
+   * switching helps; 429 means one KEY is over its rate and fewer lanes per
+   * key helps. One number for both hid which lever to pull.
+   */
+  refusals: Record<string, number>
 }
 
 const STEP_TOKENS = 500
@@ -99,7 +107,7 @@ export class ModelRanking {
     return this.states.has(model)
   }
 
-  recordLive(model: string, outcome: LiveOutcome): void {
+  recordLive(model: string, outcome: LiveOutcome, cause?: string): void {
     const state = this.states.get(model)
     if (!state) return
     if (outcome === 'gone') {
@@ -107,7 +115,7 @@ export class ModelRanking {
       state.goneAt = this.now()
       return
     }
-    state.events.push({ at: this.now(), ok: outcome === 'ok' })
+    state.events.push({ at: this.now(), ok: outcome === 'ok', cause })
     if (state.events.length > MAX_EVENTS)
       state.events.splice(0, state.events.length - MAX_EVENTS)
   }
@@ -197,6 +205,13 @@ export class ModelRanking {
       .map((model) => {
         const state = this.states.get(model) as ModelState
         const { rate, samples } = this.successRate(state)
+        const since = this.now() - (this.options.windowMs ?? DEFAULT_WINDOW_MS)
+        const refusals: Record<string, number> = {}
+        for (const event of state.events) {
+          if (event.at < since || event.ok) continue
+          const cause = event.cause ?? 'probe'
+          refusals[cause] = (refusals[cause] ?? 0) + 1
+        }
         return {
           model,
           score: this.score(model),
@@ -208,6 +223,7 @@ export class ModelRanking {
               : Math.round(state.tokensPerSecond),
           toolCalls: state.toolCalls,
           gone: state.gone,
+          refusals,
         }
       })
       .sort((a, b) => (a.score ?? Infinity) - (b.score ?? Infinity))

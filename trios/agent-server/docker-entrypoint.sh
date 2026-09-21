@@ -51,6 +51,54 @@ set -e
 # twelve misses in a row are needed: roughly twelve minutes of silence. A hang
 # of the kind this exists for - nine hours of `Application failed to respond`
 # - is caught all the same; a busy stretch is not.
+# One line per reading of the hung server and every process under it, from
+# /proc alone (python3 is in the image; ps is not).
+liveness_forensics() {
+  python3 - "$1" <<'PYEOF' 2>&1 | sed 's/^/[liveness] /'
+import os, sys, time
+root = int(sys.argv[1])
+tick = os.sysconf("SC_CLK_TCK")
+boot = time.time() - float(open("/proc/uptime").read().split()[0])
+def stat(pid):
+    raw = open(f"/proc/{pid}/stat").read()
+    head, rest = raw.rsplit(")", 1)
+    f = rest.split()
+    return {"state": f[0], "ppid": int(f[1]), "cpu": (int(f[11]) + int(f[12])) / tick,
+            "age": time.time() - (boot + int(f[19]) / tick), "threads": int(f[17]),
+            "rss_mb": int(f[21]) * os.sysconf("SC_PAGE_SIZE") // 2**20}
+def args(pid):
+    try:
+        return open(f"/proc/{pid}/cmdline", "rb").read().replace(b"\0", b" ").decode(errors="replace")[:160]
+    except OSError:
+        return "?"
+def wchan(pid):
+    try:
+        return open(f"/proc/{pid}/wchan").read() or "-"
+    except OSError:
+        return "?"
+procs = {}
+for d in os.listdir("/proc"):
+    if d.isdigit():
+        try:
+            procs[int(d)] = stat(int(d))
+        except OSError:
+            pass
+s = procs.get(root)
+if not s:
+    print(f"server {root} is gone"); sys.exit()
+print(f"server pid={root} state={s['state']} cpu={s['cpu']:.0f}s threads={s['threads']} rss={s['rss_mb']}MB wchan={wchan(root)}")
+seen, queue = set(), [root]
+while queue:
+    parent = queue.pop()
+    for pid, st in procs.items():
+        if st["ppid"] == parent and pid not in seen:
+            seen.add(pid); queue.append(pid)
+            print(f"  child pid={pid} parent={parent} state={st['state']} age={st['age']:.0f}s cpu={st['cpu']:.0f}s rss={st['rss_mb']}MB {args(pid)}")
+if not seen:
+    print("  no child processes")
+PYEOF
+}
+
 run_supervised() {
   "$@" &
   server=$!
@@ -68,6 +116,15 @@ run_supervised() {
       else
         fails=$((fails + 1))
         echo "[liveness] /health did not answer ($fails of $fails_allowed)"
+        # Say WHY before anything is killed. Measured 2026-09-21 11:19: the
+        # server logged nothing for thirteen minutes and was ended with no
+        # record of what it was doing, so the cause of the hang died with it.
+        # Three readings - early, midway, last - separate a CPU loop (state R,
+        # cpu seconds climbing) from a wait on a child (state S, a long-lived
+        # git or t27c under the server) from memory pressure (rss).
+        if [ "$fails" -eq 3 ] || [ "$fails" -eq $((fails_allowed / 2)) ] || [ "$fails" -eq "$fails_allowed" ]; then
+          liveness_forensics "$server"
+        fi
       fi
       if [ "$fails" -ge "$fails_allowed" ]; then
         echo "[liveness] the server stopped answering; ending it so the platform restarts the container"
