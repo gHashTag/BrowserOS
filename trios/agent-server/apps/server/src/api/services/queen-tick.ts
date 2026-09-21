@@ -1942,6 +1942,24 @@ export function briefFor(
     `Your branch is queen-${issue} and this worktree is yours alone - no other`,
     'worker and no build reads or writes it while you have it.',
     '',
+    // Every reply the model gives is one request against a key's rate limit,
+    // and measured 2026-09-21 the swarm's ceiling was those requests: 826 of
+    // one model's calls in fifteen minutes were answered 429. A turn of forty
+    // one-tool replies costs twice what twenty two-tool replies cost for the
+    // same work. Stated once, where the bee reads its task, not in a style
+    // guide written for a browser.
+    '## Your request budget',
+    '',
+    'Every reply you send is one request against a shared rate limit, and the',
+    'swarm waits on those requests. Spend them well:',
+    '- Put independent tool calls in ONE reply: read all the files you need',
+    '  together, run independent checks together.',
+    '- Chain shell steps in one `filesystem_bash` call (`a && b && c`) rather',
+    '  than one call each.',
+    '- Do not list a directory to confirm a path you already know; a missing',
+    '  path answers with what its directory holds.',
+    '- Finish when the criteria are answered. Do not re-read files to be sure.',
+    '',
     '## What you will be judged by',
     '',
     // Named here, in the brief, because the Queen judges the finished work

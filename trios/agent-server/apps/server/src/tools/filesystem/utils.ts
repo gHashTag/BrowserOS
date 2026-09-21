@@ -1,7 +1,7 @@
 import type { Dirent } from 'node:fs'
 import { realpathSync } from 'node:fs'
 import { readdir } from 'node:fs/promises'
-import { dirname, join, relative, resolve, sep } from 'node:path'
+import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { TOOL_LIMITS } from '@browseros/shared/constants/limits'
 import { logger } from '../../lib/logger'
 import { metrics } from '../../lib/metrics'
@@ -317,6 +317,57 @@ export function toModelOutput({
   return { type: 'text' as const, value: result.text || 'Success' }
 }
 
+/**
+ * For a path that does not exist: what the nearest existing directory holds,
+ * and which of its entries look like the name that was asked for.
+ *
+ * A bare ENOENT costs the agent a second request to find out where it is -
+ * measured 2026-09-21, 16 of 20 filesystem failures in a sample were ENOENT
+ * on read or ls, and on a rate-limited key every request is the budget. The
+ * listing answers the follow-up `ls` in the same reply. Empty for any other
+ * error, and never fatal: a hint that cannot be built is just left out.
+ */
+export async function missingPathHint(error: unknown): Promise<string> {
+  const err = error as { code?: unknown; path?: unknown }
+  if (err?.code !== 'ENOENT' || typeof err.path !== 'string') return ''
+  try {
+    let dir = dirname(err.path)
+    let wanted = basename(err.path)
+    for (let depth = 0; depth < 8; depth++) {
+      try {
+        const entries = await readdir(dir, { withFileTypes: true })
+        const names = entries
+          .map((e) => (e.isDirectory() ? `${e.name}/` : e.name))
+          .sort()
+        const stem = wanted.replace(/\.[^.]+$/, '').toLowerCase()
+        const close = names.filter((name) => {
+          const n = name.toLowerCase()
+          return (
+            stem.length >= 3 &&
+            (n.includes(stem) || stem.includes(n.replace(/[/.].*$/, '')))
+          )
+        })
+        const shown = names.slice(0, 40)
+        return (
+          `\n\n${err.path} does not exist. ${dir} holds ${names.length} entr${names.length === 1 ? 'y' : 'ies'}: ` +
+          `${shown.join(', ')}${names.length > shown.length ? ', ...' : ''}.` +
+          (close.length > 0
+            ? ` Close to what you asked for: ${close.slice(0, 5).join(', ')}.`
+            : '')
+        )
+      } catch {
+        wanted = basename(dir)
+        const parent = dirname(dir)
+        if (parent === dir) return ''
+        dir = parent
+      }
+    }
+  } catch {
+    // A hint is a courtesy; its failure must not change the tool's answer.
+  }
+  return ''
+}
+
 export function executeWithMetrics(
   toolName: string,
   fn: () => Promise<FilesystemToolResult>,
@@ -332,8 +383,10 @@ export function executeWithMetrics(
       })
       return result
     },
-    (error) => {
-      const errorText = error instanceof Error ? error.message : String(error)
+    async (error) => {
+      const errorText =
+        (error instanceof Error ? error.message : String(error)) +
+        (await missingPathHint(error))
       logger.error('Filesystem tool execution failed', {
         tool: toolName,
         error: errorText,
