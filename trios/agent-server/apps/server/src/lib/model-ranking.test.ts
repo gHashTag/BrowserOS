@@ -295,3 +295,68 @@ describe('an unscored primary that is failing', () => {
     assert.strictEqual(r.best(), FAST)
   })
 })
+
+describe('per-key spill (13:25, 2026-09-21)', () => {
+  const measured = () => {
+    let t = 1_000_000
+    const r = new ModelRanking([FAST, SLOW], { now: () => t })
+    r.recordProbe(FAST, { ok: true, tokensPerSecond: 66, toolCalls: true })
+    r.recordProbe(SLOW, { ok: true, tokensPerSecond: 20, toolCalls: true })
+    return { r, advance: (ms: number) => (t += ms) }
+  }
+
+  it('sends a key refused for the best model to the runner-up, for a minute', () => {
+    const { r, advance } = measured()
+    assert.strictEqual(r.routeFor('k1'), FAST)
+    r.recordLive(FAST, 'overloaded', '429', 'k1')
+    assert.strictEqual(r.routeFor('k1'), SLOW)
+    // Other keys are untouched by k1's limit.
+    assert.strictEqual(r.routeFor('k2'), FAST)
+    advance(61_000)
+    assert.strictEqual(r.routeFor('k1'), FAST)
+  })
+
+  it('does not spill on a 503: that is the model, not the key', () => {
+    const { r } = measured()
+    r.recordLive(FAST, 'overloaded', '503', 'k1')
+    assert.strictEqual(r.routeFor('k1'), FAST)
+  })
+
+  it('stays on the best model when every candidate is spent on the key', () => {
+    const { r } = measured()
+    r.recordLive(FAST, 'overloaded', '429', 'k1')
+    r.recordLive(SLOW, 'overloaded', '429', 'k1')
+    assert.strictEqual(r.routeFor('k1'), FAST)
+  })
+
+  it('the retry wrapper skips the backoff when the next attempt changes model', async () => {
+    const { r } = measured()
+    const slept: number[] = []
+    const seen: string[] = []
+    let calls = 0
+    const fetchImpl = (async (_url: unknown, init?: RequestInit) => {
+      seen.push(JSON.parse(String(init?.body)).model)
+      return calls++ === 0
+        ? new Response('slow down', { status: 429 })
+        : new Response('{}', {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          })
+    }) as unknown as typeof fetch
+    await createOverloadRetryFetch({
+      fetchImpl,
+      sleep: async (ms) => {
+        slept.push(ms)
+      },
+      routeModel: (_requested, _attempt, keyTag) => r.routeFor(keyTag),
+      onOutcome: (model, outcome, cause, keyTag) =>
+        r.recordLive(model, outcome, cause, keyTag),
+    })('http://x', {
+      method: 'POST',
+      headers: { authorization: 'Bearer not-a-real-key' },
+      body: JSON.stringify({ model: FAST }),
+    })
+    assert.deepStrictEqual(seen, [FAST, SLOW])
+    assert.deepStrictEqual(slept, [250])
+  })
+})
