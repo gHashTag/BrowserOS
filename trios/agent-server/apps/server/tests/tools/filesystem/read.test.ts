@@ -154,6 +154,25 @@ describe('filesystem_read', () => {
     expect(result.text).toContain(`${MAX_READ_CHARS}-character limit`)
   })
 
+  it('returns what fits instead of refusing, with the offset to continue', async () => {
+    // A refusal costs a provider call and returns nothing. Measured on the
+    // running deployment 2026-09-20: 18 of 19 filesystem failures in one window
+    // were this refusal, on files of 159 and 500 lines.
+    const line = 'y'.repeat(200)
+    const lines = Array.from({ length: 200 }, () => line)
+    await writeFile(join(tmpDir, 'wide.txt'), lines.join('\n'))
+    const result = await exec({ path: 'wide.txt', limit: 200 })
+    expect(result.isError).toBeFalsy()
+    expect(result.text.length).toBeLessThanOrEqual(MAX_READ_CHARS)
+    expect(result.text).toContain('cut at the')
+    const offset = Number(/offset=(\d+)/.exec(result.text)?.[1])
+    expect(Number.isInteger(offset)).toBe(true)
+    expect(offset).toBeGreaterThan(1)
+    // The offset it names must actually be the next unread line.
+    const rest = await exec({ path: 'wide.txt', offset, limit: 1 })
+    expect(rest.text).toContain(`${offset} | `)
+  })
+
   it('handles files with UTF-8 BOM', async () => {
     await writeFile(join(tmpDir, 'bom.txt'), '\uFEFFhello bom')
     const result = await exec({ path: 'bom.txt' })
