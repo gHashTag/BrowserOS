@@ -42,6 +42,7 @@
 import { Hono } from 'hono'
 import { createQueenPool } from '../../lib/db/queen-pool'
 import { logger } from '../../lib/logger'
+import { workerModelRanking } from '../../lib/model-ranking'
 import { configuredWorkerCapacity } from '../services/queen-dispatch'
 
 interface QueryResult {
@@ -621,6 +622,16 @@ export function createQueenPublicStatusRoute(deps: QueenPublicStatusDeps = {}) {
         // half of the paid-slot story, with its denominator explained in the
         // projection above.
         workers: workerProjection(capacity, startedUnfinished),
+        // Which model the bees are on and why: the ranking's own evidence.
+        // Absent when switching is not configured.
+        ...(workerModelRanking()
+          ? {
+              models: {
+                chosen: workerModelRanking()?.best(),
+                ranking: workerModelRanking()?.snapshot(),
+              },
+            }
+          : {}),
         // The queue reading of the same three rows, on the same
         // started-unfinished count `workers.active` reports: the two
         // projections are two readings of one number, so a hive that reads

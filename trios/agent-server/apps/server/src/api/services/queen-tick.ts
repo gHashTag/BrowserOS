@@ -40,6 +40,7 @@ import { spawn } from 'node:child_process'
 import type { Pool } from 'pg'
 import { createQueenPool } from '../../lib/db/queen-pool'
 import { logger } from '../../lib/logger'
+import { startModelProbes, workerModelRanking } from '../../lib/model-ranking'
 import { outstandingEscalations } from '../routes/queen-needs-you'
 import {
   type CriterionRun,
@@ -58,6 +59,7 @@ import {
   type Witness,
   type WorkerProvider,
   witnessVerdicts,
+  workerProbeEndpoint,
   workspaceRoot,
 } from './queen-dispatch'
 import {
@@ -4318,6 +4320,24 @@ export function startQueenTick(): void {
     intervalSeconds: interval,
     holder: queenHolderName(),
   })
+
+  // The worker model follows a measurement, not a variable (model-ranking.ts).
+  const ranking = workerModelRanking()
+  const probeEndpoint = workerProbeEndpoint()
+  if (ranking && probeEndpoint) {
+    startModelProbes(ranking, probeEndpoint, {
+      onRound: (snapshot, chosen) =>
+        logger.info('Queen worker models ranked', {
+          chosen,
+          ranking: snapshot
+            .map(
+              (m) =>
+                `${m.model} cost=${m.score?.toFixed(1) ?? '-'}s ok=${m.successRate} n=${m.samples} tps=${m.tokensPerSecond ?? '-'} tools=${m.toolCalls ?? '-'}${m.gone ? ' GONE' : ''}`,
+            )
+            .join(' | '),
+        }),
+    })
+  }
 
   // Clear the previous container's phantoms before the first round reads the
   // board. A row still in flight belongs to a process that died with the

@@ -777,6 +777,19 @@ function endpointPoolProvider(
   }
 }
 
+/**
+ * The first pool's URL and keys, for the model probes (lib/model-ranking.ts).
+ * Undefined for a local Ollama: it serves one model and has nothing to rank.
+ */
+export function workerProbeEndpoint():
+  | { baseUrl: string; keys: string[] }
+  | undefined {
+  const pool = configuredEndpointPools()[0]
+  if (!pool || pool.provider === 'ollama' || pool.keys.length === 0)
+    return undefined
+  return { baseUrl: pool.baseUrl, keys: pool.keys }
+}
+
 function configuredEndpointProvider(
   override: string | undefined,
   takenKeyIndices: number[],

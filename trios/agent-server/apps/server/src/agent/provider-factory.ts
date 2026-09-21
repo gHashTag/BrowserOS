@@ -16,6 +16,7 @@ import {
 import { createCodexFetch } from '../lib/clients/oauth/codex-fetch'
 import { createCopilotFetch } from '../lib/clients/oauth/copilot-fetch'
 import { logger } from '../lib/logger'
+import { workerModelRanking } from '../lib/model-ranking'
 import { createOpenRouterCompatibleFetch } from '../lib/openrouter-fetch'
 import { createOverloadRetryFetch } from '../lib/overload-retry-fetch'
 import type { ResolvedAgentConfig } from './types'
@@ -159,6 +160,7 @@ function createOpenAICompatibleFactory(
     baseURL: config.baseUrl,
     ...(config.apiKey && { apiKey: config.apiKey }),
     fetch: createOverloadRetryFetch({
+      ...workerModelRouting(config.baseUrl),
       onRetry: ({ attempt, delayMs, reason }) =>
         logger.warn('OpenAI-compatible endpoint overloaded, retrying', {
           baseUrl: config.baseUrl,
@@ -168,6 +170,47 @@ function createOpenAICompatibleFactory(
         }),
     }),
   })
+}
+
+/**
+ * Route the bees' endpoint through the measured model ranking
+ * (lib/model-ranking.ts). Only the worker endpoint, and only a request that
+ * already names one of the ranked candidates: a reviewer or an app asking for
+ * a model outside the list is left exactly as it asked.
+ */
+let lastRoutedModel: string | undefined
+function workerModelRouting(
+  baseUrl: string,
+): Pick<
+  Parameters<typeof createOverloadRetryFetch>[0] & object,
+  'routeModel' | 'onOutcome'
+> {
+  const workerUrl = process.env.TRIOS_QUEEN_WORKER_BASE_URL?.trim().replace(
+    /\/+$/,
+    '',
+  )
+  const ranking = workerModelRanking()
+  if (!ranking || !workerUrl || baseUrl.replace(/\/+$/, '') !== workerUrl)
+    return {}
+  return {
+    routeModel: (requested) => {
+      if (!ranking.has(requested)) return undefined
+      const chosen = ranking.best()
+      if (chosen !== lastRoutedModel) {
+        logger.info('Queen worker model switched', {
+          from: lastRoutedModel ?? requested,
+          to: chosen,
+          ranking: ranking
+            .snapshot()
+            .map((m) => `${m.model}:${m.score?.toFixed(1) ?? '-'}`)
+            .join(' '),
+        })
+        lastRoutedModel = chosen
+      }
+      return chosen
+    },
+    onOutcome: (model, outcome) => ranking.recordLive(model, outcome),
+  }
 }
 
 function createMoonshotFactory(
