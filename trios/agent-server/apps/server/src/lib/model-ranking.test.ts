@@ -253,3 +253,26 @@ describe('dwell', () => {
     assert.strictEqual(r.best(), FAST)
   })
 })
+
+describe('probe schedule', () => {
+  it('retries a failed probe after a minute, doubling, and a measured one every five', () => {
+    let t = 1_000_000
+    const r = new ModelRanking([FAST, SLOW], { now: () => t })
+    assert.strictEqual(r.dueForProbe(SLOW), true)
+    r.recordProbe(SLOW, { ok: false })
+    t += 59_000
+    assert.strictEqual(r.dueForProbe(SLOW), false)
+    t += 2_000
+    assert.strictEqual(r.dueForProbe(SLOW), true)
+    r.recordProbe(SLOW, { ok: false })
+    t += 61_000
+    assert.strictEqual(r.dueForProbe(SLOW), false)
+    t += 60_000
+    assert.strictEqual(r.dueForProbe(SLOW), true)
+    r.recordProbe(SLOW, { ok: true, tokensPerSecond: 60, toolCalls: true })
+    t += 4 * 60_000
+    assert.strictEqual(r.dueForProbe(SLOW), false)
+    t += 61_000
+    assert.strictEqual(r.dueForProbe(SLOW), true)
+  })
+})

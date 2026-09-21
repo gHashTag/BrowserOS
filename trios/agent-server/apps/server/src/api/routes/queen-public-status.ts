@@ -571,7 +571,20 @@ export function createQueenPublicStatusRoute(deps: QueenPublicStatusDeps = {}) {
                 ) AS finished_last_hour,
                 count(*) FILTER (
                   WHERE dispatched_at > now() - interval '1 hour'
-                ) AS dispatched_last_hour
+                ) AS dispatched_last_hour,
+                -- unreviewed above counts every finished row with no verdict.
+                -- The review sweep takes fewer: started, not reaped, still
+                -- 'wait' or unjudged. With 44 unreviewed and no review logged
+                -- for eight minutes (2026-09-21), nobody could say whether the
+                -- sweep was stuck or the rows were never its to take.
+                count(*) FILTER (
+                  WHERE started = true AND finished_at IS NOT NULL
+                    AND (review_state IS NULL OR review_state = 'wait')
+                    AND outcome NOT LIKE 'reaped%'
+                ) AS reviewable,
+                count(*) FILTER (
+                  WHERE reviewer_at > now() - interval '1 hour'
+                ) AS reviewed_last_hour
            FROM queen_dispatch`,
       )
       const latest = await pool.query(
@@ -690,6 +703,8 @@ export function createQueenPublicStatusRoute(deps: QueenPublicStatusDeps = {}) {
           unreviewed: asCount(countRow.unreviewed),
           finishedLastHour: asCount(countRow.finished_last_hour),
           dispatchedLastHour: asCount(countRow.dispatched_last_hour),
+          reviewable: asCount(countRow.reviewable),
+          reviewedLastHour: asCount(countRow.reviewed_last_hour),
           latest: latestRow
             ? {
                 issue: asCount(latestRow.issue),
