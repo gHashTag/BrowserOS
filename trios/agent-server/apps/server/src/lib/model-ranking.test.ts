@@ -123,6 +123,8 @@ describe('probeModel', () => {
     let call = 0
     const fetchImpl = (async () => {
       call++
+      // A zero-duration answer has no speed; a real one never takes 0 ms.
+      await new Promise((resolve) => setTimeout(resolve, 5))
       const message =
         call === 1
           ? { content: 'hi' }
@@ -231,5 +233,23 @@ describe('refusal causes', () => {
       onOutcome: (_model, _outcome, cause) => causes.push(cause),
     })('http://x', { method: 'POST', body: JSON.stringify({ model: 'm' }) })
     assert.deepStrictEqual(causes, ['429', undefined])
+  })
+})
+
+describe('dwell', () => {
+  it('holds a fresh choice for three minutes, then lets the evidence decide', () => {
+    let t = 1_000_000
+    const r = new ModelRanking([FAST, SLOW], { now: () => t })
+    r.recordProbe(FAST, { ok: true, tokensPerSecond: 66, toolCalls: true })
+    r.recordProbe(SLOW, { ok: true, tokensPerSecond: 60, toolCalls: true })
+    for (let i = 0; i < 50; i++) r.recordLive(FAST, 'overloaded', '429')
+    assert.strictEqual(r.best(), SLOW)
+    // One bad minute for the new choice does not send it straight back.
+    for (let i = 0; i < 30; i++) r.recordLive(SLOW, 'overloaded', 'stream')
+    t += 60_000
+    assert.strictEqual(r.best(), SLOW)
+    t += 3 * 60_000
+    for (let i = 0; i < 40; i++) r.recordLive(FAST, 'ok')
+    assert.strictEqual(r.best(), FAST)
   })
 })

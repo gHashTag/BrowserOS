@@ -561,7 +561,17 @@ export function createQueenPublicStatusRoute(deps: QueenPublicStatusDeps = {}) {
                 -- started, and such a row is owed an ending, not a slot.
                 count(*) FILTER (
                   WHERE started = true AND finished_at IS NULL
-                ) AS started_running
+                ) AS started_running,
+                -- Throughput. total cannot be: the table holds one row per
+                -- ISSUE, and a bee sent back to an issue reuses its row, so
+                -- total stood at 955 for forty minutes of real work
+                -- (measured 2026-09-21). These count events in the last hour.
+                count(*) FILTER (
+                  WHERE finished_at > now() - interval '1 hour'
+                ) AS finished_last_hour,
+                count(*) FILTER (
+                  WHERE dispatched_at > now() - interval '1 hour'
+                ) AS dispatched_last_hour
            FROM queen_dispatch`,
       )
       const latest = await pool.query(
@@ -678,6 +688,8 @@ export function createQueenPublicStatusRoute(deps: QueenPublicStatusDeps = {}) {
           finished: asCount(countRow.finished),
           running: asCount(countRow.running),
           unreviewed: asCount(countRow.unreviewed),
+          finishedLastHour: asCount(countRow.finished_last_hour),
+          dispatchedLastHour: asCount(countRow.dispatched_last_hour),
           latest: latestRow
             ? {
                 issue: asCount(latestRow.issue),
