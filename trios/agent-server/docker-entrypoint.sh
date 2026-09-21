@@ -206,6 +206,52 @@ if [ -n "$TRIOS_TOOL_SHELL_USER" ] && id "$TRIOS_TOOL_SHELL_USER" >/dev/null 2>&
     echo "[entrypoint] $WORKSPACE_DIR is not owned by $TRIOS_TOOL_SHELL_USER; settling ownership once"
     chown -R "$TRIOS_TOOL_SHELL_USER" "$WORKSPACE_DIR"
   fi
+  # AND INSIDE THE CHECKOUT, which the test above cannot see. Measured on the
+  # running deployment 2026-09-20:
+  #
+  #   error: Your local changes to the following files would be overwritten by checkout:
+  #   error: unable to create file specs/port/tools/gft_deep_demo.t27: Permission denied
+  #
+  # $WORKSPACE_DIR was owned by the bee, so the walk above was skipped, while
+  # files underneath were not - left by a root-run git from an older image. A
+  # bee that cannot write the checkout produces an EMPTY branch and a turn that
+  # looks like a model failure: 80 of 101 stuck issues on that day had one.
+  #
+  # `find ! -user -print -quit` stops at the FIRST wrong file, so the healthy
+  # case costs one stat and the 45 GB walk that once outlasted the 300 s
+  # healthcheck (2026-09-03) cannot come back. The repair walks the checkout
+  # only - never the worktrees beside it - and changes only what is wrong.
+  if [ -d "$REPO_DIR" ] && [ -n "$(find "$REPO_DIR" ! -user "$TRIOS_TOOL_SHELL_USER" -print -quit 2>/dev/null)" ]; then
+    echo "[entrypoint] files inside $REPO_DIR are not owned by $TRIOS_TOOL_SHELL_USER; repairing those"
+    find "$REPO_DIR" ! -user "$TRIOS_TOOL_SHELL_USER" -exec chown "$TRIOS_TOOL_SHELL_USER" {} + 2>/dev/null || true
+  fi
+  # BEE WORKTREES FROM A PREVIOUS LIFE. At entrypoint time no bee is running -
+  # this process is what starts the server that starts them - so every
+  # directory under .worktrees/ belongs to a container that is already gone.
+  #
+  # They are not free. Measured on the running deployment 2026-09-20: every
+  # tick for six minutes chose an issue and then refused to start it -
+  #
+  #   Queen tick chose an issue but the container cannot carry another bee
+  #     issue=4438 resource="disk"
+  #
+  # - with twenty lanes open and 684 candidates waiting. The volume had filled
+  # with worktrees nobody could use; an earlier reading of the same volume
+  # found 41 of them holding 45 GB and three million inodes.
+  #
+  # `git worktree prune` alone does not do it: it drops the ADMIN records for
+  # directories that are already gone, and these directories are still there.
+  if [ -d "$REPO_DIR/.worktrees" ]; then
+    stale=$(ls -1 "$REPO_DIR/.worktrees" 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$stale" != "0" ]; then
+      free_before=$(df -Pm "$REPO_DIR" 2>/dev/null | awk 'NR==2 {print $4}')
+      echo "[entrypoint] removing $stale bee worktree(s) left by a previous container (${free_before:-?} MiB free)"
+      $AS_USER "rm -rf '$REPO_DIR/.worktrees'/* '$REPO_DIR/.worktrees'/.[!.]*" 2>/dev/null || true
+      $AS_USER "git -C '$REPO_DIR' worktree prune" >/dev/null 2>&1 || true
+      free_after=$(df -Pm "$REPO_DIR" 2>/dev/null | awk 'NR==2 {print $4}')
+      echo "[entrypoint] worktrees cleared; ${free_after:-?} MiB free now"
+    fi
+  fi
   echo "[entrypoint] git runs as $TRIOS_TOOL_SHELL_USER; root does not enter the checkout"
 else
   AS_USER="sh -c"
