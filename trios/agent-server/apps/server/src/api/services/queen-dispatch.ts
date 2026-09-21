@@ -387,6 +387,33 @@ function configuredRemoteLanesPerCredential(): number {
   return Math.min(parsed, 4)
 }
 
+/**
+ * Lanes per credential a REVIEW may use beyond the bees' own.
+ *
+ * Bees always fill every lane dispatch offers, so a review asking for a lane
+ * the bees count against found none: measured 2026-09-21 with ten keys at one
+ * lane each, ten bees held all ten, the sweep answered "no reviewer lane is
+ * free" every round, and forty-four finished turns waited for a verdict that
+ * could not start - with nothing logged, because a skipped row logs nothing.
+ * A review is one request, a few a minute, and it is the step that turns a
+ * bee's work into something that can ship; it gets one lane of its own on
+ * every key. TRIOS_QUEEN_REVIEW_EXTRA_LANES=0 restores the old arithmetic.
+ */
+export function reviewExtraLanesPerCredential(
+  provider: string,
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  // z.ai refuses the third concurrent request on a key in under half a
+  // second with 1302 (measured 2026-09-15): there the bees' lanes ARE the
+  // key's limit, and an extra review lane would only buy a refusal.
+  const fallback = provider === 'zai' ? 0 : 1
+  const raw = env.TRIOS_QUEEN_REVIEW_EXTRA_LANES
+  if (raw === undefined || raw.trim() === '') return fallback
+  const parsed = Number(raw)
+  if (!Number.isInteger(parsed) || parsed < 0) return fallback
+  return Math.min(parsed, 2)
+}
+
 export function workerCapacityBreakdown(): WorkerCapacityBreakdown {
   const endpoint = configuredWorkerBaseUrl()
   if (endpoint) {
@@ -975,7 +1002,10 @@ export function reviewLaneCandidates(
       const keys = local
         ? [keysFor(GENERIC_WORKER_KEY_ENV)[0] || 'local']
         : pool.keys
-      const laneCount = local ? 1 : configuredRemoteLanesPerCredential()
+      const laneCount = local
+        ? 1
+        : configuredRemoteLanesPerCredential() +
+          reviewExtraLanesPerCredential(pool.provider)
       keys.forEach((key, position) => {
         const durableIndex = (pool.number - 1) * POOL_KEY_STRIDE + position
         const occupancy = busy(durableIndex)

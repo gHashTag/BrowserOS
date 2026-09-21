@@ -404,6 +404,25 @@ describe('which model reviews', () => {
     expect(reviewLaneCandidates([0, 0])).toEqual([])
   })
 
+  it('keeps one review lane on a key the bees have filled, off z.ai (2026-09-21)', () => {
+    process.env.TRIOS_QUEEN_WORKER_BASE_URL =
+      'https://nvidia.example.invalid/v1'
+    process.env.TRIOS_QUEEN_WORKER_PROVIDER = 'openai-compatible'
+    process.env.TRIOS_QUEEN_WORKER_MODEL = 'nvidia/some-model'
+    process.env.TRIOS_QUEEN_WORKER_API_KEY = 'not-a-real-key-a'
+    process.env.TRIOS_QUEEN_WORKER_LANES_PER_KEY = '1'
+    // Ten keys at one lane each held by ten bees answered "no reviewer lane
+    // is free" every round; the review now has a lane of its own.
+    expect(reviewLaneCandidates([0])).toHaveLength(1)
+    expect(reviewLaneCandidates([0, 0])).toEqual([])
+    process.env.TRIOS_QUEEN_REVIEW_EXTRA_LANES = '0'
+    try {
+      expect(reviewLaneCandidates([0])).toEqual([])
+    } finally {
+      delete process.env.TRIOS_QUEEN_REVIEW_EXTRA_LANES
+    }
+  })
+
   it('logs which model delivered the verdict', async () => {
     const said: Array<Record<string, unknown>> = []
     const original = logger.info.bind(logger)
