@@ -97,6 +97,8 @@ const PROBE_EVERY_MS = 5 * 60_000
 const PROBE_RETRY_MIN_MS = 60_000
 const PROBE_RETRY_MAX_MS = 30 * 60_000
 const MAX_EVENTS = 2_000
+/** Live answers needed before an unscored model counts as failing. */
+const FAILING_MIN_SAMPLES = 5
 /**
  * How long a choice stands before a challenger may replace it. Measured
  * 2026-09-21 11:48: three switches in 35 seconds, each on a handful of
@@ -195,6 +197,14 @@ export class ModelRanking {
     return { rate: (ok + 1) / (recent.length + 2), samples: recent.length }
   }
 
+  /** At least FAILING_MIN_SAMPLES live answers, fewer than half of them ok. */
+  private failingLive(model: string): boolean {
+    const state = this.states.get(model)
+    if (!state) return false
+    const { rate, samples } = this.successRate(state)
+    return samples >= FAILING_MIN_SAMPLES && rate < 0.5
+  }
+
   /** Expected seconds per step; null when the model cannot be chosen. */
   private score(model: string): number | null {
     const state = this.states.get(model)
@@ -226,10 +236,15 @@ export class ModelRanking {
       if (score === null || model === bestModel) continue
       const beats =
         bestScore === null
-          ? // The current model is unmeasured or gone. A measured model only
-            // replaces the PRIMARY when the primary itself is known gone -
-            // "not yet probed" is not a reason to leave it.
-            this.states.get(bestModel)?.gone === true
+          ? // The current model is unmeasured or gone. A measured model
+            // replaces it when it is known gone, or when it is FAILING: its
+            // own probe can be refused by the same 429s that are failing the
+            // bees, and then it has no score at all. Measured 2026-09-21
+            // 12:41: super-120b answered 31% of live calls, had no score
+            // because its probe drew a 429, and "not yet probed" kept every
+            // bee on it. Unmeasured and quiet still keeps the primary.
+            this.states.get(bestModel)?.gone === true ||
+            this.failingLive(bestModel)
           : score < bestScore * SWITCH_MARGIN
       if (beats) {
         bestModel = model

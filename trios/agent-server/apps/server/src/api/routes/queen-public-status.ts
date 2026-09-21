@@ -577,11 +577,31 @@ export function createQueenPublicStatusRoute(deps: QueenPublicStatusDeps = {}) {
                 -- 'wait' or unjudged. With 44 unreviewed and no review logged
                 -- for eight minutes (2026-09-21), nobody could say whether the
                 -- sweep was stuck or the rows were never its to take.
+                -- Exactly the sweep's own filter (reviewFinishedDispatches),
+                -- including its still-open test: a row whose issue left the
+                -- board is never reviewed, so counting it here showed a queue
+                -- of 194 that the sweep would never take.
                 count(*) FILTER (
                   WHERE started = true AND finished_at IS NOT NULL
                     AND (review_state IS NULL OR review_state = 'wait')
                     AND outcome NOT LIKE 'reaped%'
+                    AND (
+                      NOT EXISTS (SELECT 1 FROM queen_issues)
+                      OR EXISTS (
+                        SELECT 1 FROM queen_issues i
+                         WHERE i.number = queen_dispatch.issue
+                      )
+                    )
                 ) AS reviewable,
+                count(*) FILTER (
+                  WHERE finished_at IS NOT NULL
+                    AND (review_state IS NULL OR review_state = 'wait')
+                    AND EXISTS (SELECT 1 FROM queen_issues)
+                    AND NOT EXISTS (
+                      SELECT 1 FROM queen_issues i
+                       WHERE i.number = queen_dispatch.issue
+                    )
+                ) AS unreviewable_closed,
                 count(*) FILTER (
                   WHERE reviewer_at > now() - interval '1 hour'
                 ) AS reviewed_last_hour
@@ -704,6 +724,8 @@ export function createQueenPublicStatusRoute(deps: QueenPublicStatusDeps = {}) {
           finishedLastHour: asCount(countRow.finished_last_hour),
           dispatchedLastHour: asCount(countRow.dispatched_last_hour),
           reviewable: asCount(countRow.reviewable),
+          // Finished, never judged, and never going to be: the issue closed.
+          unreviewableClosed: asCount(countRow.unreviewable_closed),
           reviewedLastHour: asCount(countRow.reviewed_last_hour),
           latest: latestRow
             ? {

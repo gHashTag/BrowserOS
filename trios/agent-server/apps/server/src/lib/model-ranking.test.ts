@@ -276,3 +276,22 @@ describe('probe schedule', () => {
     assert.strictEqual(r.dueForProbe(SLOW), true)
   })
 })
+
+describe('an unscored primary that is failing', () => {
+  it('gives way to a measured model (12:41, 2026-09-21)', () => {
+    const r = new ModelRanking([FAST, SLOW])
+    r.recordProbe(FAST, { ok: false })
+    r.recordProbe(SLOW, { ok: true, tokensPerSecond: 60, toolCalls: true })
+    for (let i = 0; i < 4; i++) r.recordLive(FAST, 'overloaded', '429')
+    r.recordLive(FAST, 'ok')
+    // 5 samples, 1 ok: Laplace 2/7 < 0.5.
+    assert.strictEqual(r.best(), SLOW)
+  })
+
+  it('keeps an unscored primary that is merely quiet', () => {
+    const r = new ModelRanking([FAST, SLOW])
+    r.recordProbe(SLOW, { ok: true, tokensPerSecond: 60, toolCalls: true })
+    r.recordLive(FAST, 'overloaded', '429')
+    assert.strictEqual(r.best(), FAST)
+  })
+})
