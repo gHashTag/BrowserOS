@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test'
+import { resolve } from 'node:path'
 import {
   deriveCandidates,
   FILE_LENGTH_THRESHOLD,
@@ -19,6 +20,12 @@ import {
  * it carries the one thing a candidate needs to be delegatable - a boundary,
  * which is the file itself.
  */
+// The checkout this test runs in, not one developer's home directory: the
+// path used to be /Users/playra/BrowserOS, which exists on one laptop, so on
+// every other machine and in CI readdir found nothing and three tests failed
+// on an empty list.
+const REPO_ROOT = resolve(import.meta.dir, '../../../../../..')
+
 describe('deriving work the repository already measured', () => {
   const fake = (sizes: Record<string, number>) => async (path: string) => {
     const key = Object.keys(sizes).find((k) => path.endsWith(k))
@@ -38,7 +45,7 @@ describe('deriving work the repository already measured', () => {
   // Evidence, not opinion: the candidate must carry the command that produced
   // it, or a reader cannot tell a measurement from a preference.
   it('carries the command that produced it', async () => {
-    const out = await deriveCandidates('/Users/playra/BrowserOS')
+    const out = await deriveCandidates(REPO_ROOT)
     // Not vacuous. A `for` over an empty list passes and proves nothing, which
     // is the exact shape of test this session has caught three times.
     expect(out.length).toBeGreaterThan(0)
@@ -52,7 +59,7 @@ describe('deriving work the repository already measured', () => {
   // The boundary is the file. A candidate with no path is not delegatable and
   // must never be produced.
   it('gives every candidate a path that can be a boundary', async () => {
-    const out = await deriveCandidates('/Users/playra/BrowserOS')
+    const out = await deriveCandidates(REPO_ROOT)
     expect(out.length).toBeGreaterThan(0)
     for (const c of out) {
       expect(c.path.startsWith('agent-server/')).toBe(true)
@@ -64,7 +71,7 @@ describe('deriving work the repository already measured', () => {
   // runtime, klavis - and splitting them would create merge pain in code this
   // project does not own for a gate it did not write.
   it('proposes nothing from code this project does not own', async () => {
-    const out = await deriveCandidates('/Users/playra/BrowserOS')
+    const out = await deriveCandidates(REPO_ROOT)
     expect(out.length).toBeGreaterThan(0)
     for (const c of out) {
       expect(c.path).not.toContain('openclaw')
@@ -74,7 +81,7 @@ describe('deriving work the repository already measured', () => {
   })
 
   it('puts the longest first, which is the one the gate complains about most', async () => {
-    const out = await deriveCandidates('/Users/playra/BrowserOS')
+    const out = await deriveCandidates(REPO_ROOT)
     for (let i = 1; i < out.length; i++) {
       expect(out[i - 1].lines).toBeGreaterThanOrEqual(out[i].lines)
     }

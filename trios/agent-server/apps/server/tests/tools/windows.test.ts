@@ -39,7 +39,6 @@ function fakeWindow(
   }
 }
 
-
 /**
  * Did the browser refuse because this platform cannot hide a window at all?
  *
@@ -56,7 +55,14 @@ function fakeWindow(
  *
  * The same guard, for the same reason, is in tests/tools/navigation.test.ts.
  */
-const HIDDEN_UNSUPPORTED = 'Hidden windows are not yet supported on this platform'
+const HIDDEN_UNSUPPORTED =
+  'Hidden windows are not yet supported on this platform'
+// Newer BrowserOS builds say the second one (seen in CI 2026-09-21); both mean
+// the platform cannot open a hidden window, which is a skip, not a failure.
+const HIDDEN_UNSUPPORTED_TEXTS = [
+  HIDDEN_UNSUPPORTED,
+  'Hidden windows are no longer supported',
+]
 
 /** Set below; read by the last test in this file. */
 const hiddenGate = { ran: false, skipped: false }
@@ -65,12 +71,15 @@ function skipIfHiddenUnsupported(result: {
   isError?: boolean
   content: { type: string; text?: string }[]
 }): boolean {
-  if (result.isError && textOf(result).includes(HIDDEN_UNSUPPORTED)) {
+  if (
+    result.isError &&
+    HIDDEN_UNSUPPORTED_TEXTS.some((text) => textOf(result).includes(text))
+  ) {
     hiddenGate.skipped = true
     console.error(
       `  HIDDEN-WINDOW TEST SKIPPED: ${HIDDEN_UNSUPPORTED}.\n` +
         '  A platform limit, not a failure, and counted by the last test in this\n' +
-        '  file so the absence is in the output rather than in nobody else\'s head.\n',
+        "  file so the absence is in the output rather than in nobody else's head.\n",
     )
     return true
   }
@@ -214,7 +223,9 @@ describe('window tools', () => {
   // success it never earned; this one either ran or said why it did not.
   it('the hidden-window test ran, or its absence is on the record', () => {
     if (hiddenGate.skipped) {
-      console.error('  HIDDEN-WINDOW GATE: SKIPPED - this platform cannot hide a window.\n')
+      console.error(
+        '  HIDDEN-WINDOW GATE: SKIPPED - this platform cannot hide a window.\n',
+      )
       return
     }
     assert.ok(

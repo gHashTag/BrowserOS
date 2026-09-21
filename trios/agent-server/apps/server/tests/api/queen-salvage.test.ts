@@ -371,7 +371,23 @@ describe('salvaging a turn that ended with its work uncommitted', () => {
     ])
     git(f.worktree, ['fetch', '-q', 'origin', 'theirs:refs/remotes/origin/x'])
     // The merge is MEANT to fail: that is how the unmerged entry gets there.
-    expect(tryGit(f.worktree, ['merge', 'refs/remotes/origin/x'])).not.toBe(0)
+    // With an identity, like the commit above. GIT_CONFIG_GLOBAL is /dev/null
+    // here, so git guesses user@hostname - which works on a laptop named
+    // `x.local` and is refused on a CI runner named `runnervmlun5p` ("unable
+    // to auto-detect email address"). The merge then failed for the wrong
+    // reason, before touching the index, and left a clean worktree.
+    expect(
+      tryGit(f.worktree, [
+        '-c',
+        'user.email=bee@example.com',
+        '-c',
+        'user.name=Bee',
+        'merge',
+        'refs/remotes/origin/x',
+      ]),
+    ).not.toBe(0)
+    // And it failed the RIGHT way: the index holds the conflict.
+    expect(git(f.worktree, ['status', '--porcelain'])).toContain('UU ')
     const before = f.log()
 
     const result = await salvageWorktree(
