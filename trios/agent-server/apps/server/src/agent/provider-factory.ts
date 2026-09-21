@@ -193,8 +193,10 @@ function workerModelRouting(
   if (!ranking || !workerUrl || baseUrl.replace(/\/+$/, '') !== workerUrl)
     return {}
   return {
-    routeModel: (requested) => {
+    routeModel: (requested, _attempt, keyTag) => {
       if (!ranking.has(requested)) return undefined
+      // Logged when the ranking's choice moves, not per request: a key
+      // spilling to the runner-up for a minute is routing, not a switch.
       const chosen = ranking.best()
       if (chosen !== lastRoutedModel) {
         logger.info('Queen worker model switched', {
@@ -207,10 +209,10 @@ function workerModelRouting(
         })
         lastRoutedModel = chosen
       }
-      return chosen
+      return ranking.routeFor(keyTag)
     },
-    onOutcome: (model, outcome, cause) =>
-      ranking.recordLive(model, outcome, cause),
+    onOutcome: (model, outcome, cause, keyTag) =>
+      ranking.recordLive(model, outcome, cause, keyTag),
   }
 }
 

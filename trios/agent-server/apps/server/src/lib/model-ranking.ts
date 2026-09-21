@@ -97,6 +97,14 @@ const PROBE_EVERY_MS = 5 * 60_000
 const PROBE_RETRY_MIN_MS = 60_000
 const PROBE_RETRY_MAX_MS = 30 * 60_000
 const MAX_EVENTS = 2_000
+/**
+ * How long a 429 marks one model as spent on one key. NVIDIA's rate limit is
+ * per key AND model: measured 2026-09-21 13:25, super-120b drew 826 x 429 in
+ * fifteen minutes (27% answered) while ultra-550b on the same ten keys drew
+ * none. A key refused for one model still has the other's quota, so the
+ * key's next request goes there instead of waiting out a backoff.
+ */
+const KEY_COOL_MS = 60_000
 /** Live answers needed before an unscored model counts as failing. */
 const FAILING_MIN_SAMPLES = 5
 /**
@@ -112,6 +120,8 @@ export class ModelRanking {
   private readonly states = new Map<string, ModelState>()
   private current: string
   private chosenAt = Number.NEGATIVE_INFINITY
+  /** `${model}\u0000${keyTag}` -> when that pair last drew a 429. */
+  private readonly refusedAt = new Map<string, number>()
 
   constructor(
     readonly candidates: string[],
@@ -131,9 +141,17 @@ export class ModelRanking {
     return this.states.has(model)
   }
 
-  recordLive(model: string, outcome: LiveOutcome, cause?: string): void {
+  recordLive(
+    model: string,
+    outcome: LiveOutcome,
+    cause?: string,
+    keyTag?: string,
+  ): void {
     const state = this.states.get(model)
     if (!state) return
+    if (cause === '429' && keyTag) {
+      this.refusedAt.set(`${model}\u0000${keyTag}`, this.now())
+    }
     if (outcome === 'gone') {
       state.gone = true
       state.goneAt = this.now()
@@ -254,6 +272,32 @@ export class ModelRanking {
     if (bestModel !== this.current) this.chosenAt = this.now()
     this.current = bestModel
     return bestModel
+  }
+
+  private refusedOnKey(model: string, keyTag: string): boolean {
+    const at = this.refusedAt.get(`${model}\u0000${keyTag}`)
+    return at !== undefined && this.now() - at < KEY_COOL_MS
+  }
+
+  /**
+   * The model for the next request on one key: the best model, unless that
+   * key drew a 429 for it in the last KEY_COOL_MS - then the best measured
+   * model the key has NOT been refused for. Falls back to the best model when
+   * every candidate is spent on this key.
+   */
+  routeFor(keyTag?: string): string {
+    const best = this.best()
+    if (!keyTag || !this.refusedOnKey(best, keyTag)) return best
+    const spill = this.candidates
+      .map((model) => ({ model, score: this.score(model) }))
+      .filter(
+        (c): c is { model: string; score: number } =>
+          c.score !== null &&
+          c.model !== best &&
+          !this.refusedOnKey(c.model, keyTag),
+      )
+      .sort((a, b) => a.score - b.score)[0]
+    return spill?.model ?? best
   }
 
   /** The ranking with its evidence, best first; for /queen/status and logs. */

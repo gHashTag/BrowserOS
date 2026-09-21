@@ -37,13 +37,19 @@ export interface OverloadRetryOptions {
    * See model-ranking.ts: this is how the swarm follows the best-measured
    * model without every caller knowing there is a choice.
    */
-  routeModel?: (requested: string, attempt: number) => string | undefined
+  routeModel?: (
+    requested: string,
+    attempt: number,
+    /** An opaque tag of the credential this request carries; never the key. */
+    keyTag?: string,
+  ) => string | undefined
   /** Every answer, attributed to the model that gave it. */
   onOutcome?: (
     model: string,
     outcome: 'ok' | 'overloaded' | 'gone',
     /** Why a request was refused: '429', '503', 'stream', 'threw'. */
     cause?: string,
+    keyTag?: string,
   ) => void
   /** Injectable for tests. */
   fetchImpl?: typeof fetch
@@ -176,13 +182,34 @@ function requestBody(init?: RequestInit): ParsedBody | undefined {
   }
 }
 
+/**
+ * A short, stable tag for the credential in a request, so a rate limit can be
+ * remembered per key without the key itself being kept or logged: FNV-1a over
+ * the Authorization header, 32 bits.
+ */
+export function credentialTag(init?: RequestInit): string | undefined {
+  const headers = new Headers(init?.headers)
+  const auth = headers.get('authorization')
+  if (!auth) return undefined
+  let hash = 0x811c9dc5
+  for (let i = 0; i < auth.length; i++) {
+    hash ^= auth.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193) >>> 0
+  }
+  return hash.toString(16)
+}
+
+/** A switch to another model waits this long, not the backoff: its quota is untouched. */
+const SPILL_DELAY_MS = 250
+
 function route(
   body: ParsedBody | undefined,
   attempt: number,
   routeModel: OverloadRetryOptions['routeModel'],
+  keyTag?: string,
 ): { model: string; body: string } | undefined {
   if (!body?.model || !routeModel) return undefined
-  const chosen = routeModel(body.model, attempt)
+  const chosen = routeModel(body.model, attempt, keyTag)
   if (!chosen || chosen === body.model) return undefined
   return {
     model: chosen,
@@ -204,17 +231,28 @@ export function createOverloadRetryFetch(
   return (async (url: RequestInfo | URL, init?: RequestInit) => {
     const signal = init?.signal
     const body = requestBody(init)
+    const keyTag = options.routeModel ? credentialTag(init) : undefined
     for (let attempt = 1; ; attempt++) {
       const last = attempt >= maxAttempts
-      const delayMs = delays[Math.min(attempt - 1, delays.length - 1)] ?? 0
-      const routed = route(body, attempt, options.routeModel)
+      const routed = route(body, attempt, options.routeModel, keyTag)
       const sent = routed ? { ...init, body: routed.body } : init
       const model = routed?.model ?? body?.model
       const outcome = (
         result: 'ok' | 'overloaded' | 'gone',
         cause?: string,
       ) => {
-        if (model) options.onOutcome?.(model, result, cause)
+        if (model) options.onOutcome?.(model, result, cause, keyTag)
+      }
+      // The wait before the next attempt: the backoff, unless the next
+      // attempt goes to a different model (read AFTER the outcome is
+      // recorded, so a 429 just drawn can move it).
+      const waitBeforeNext = (): number => {
+        const backoff = delays[Math.min(attempt - 1, delays.length - 1)] ?? 0
+        const next = route(body, attempt + 1, options.routeModel, keyTag)
+        const nextModel = next?.model ?? body?.model
+        return nextModel && model && nextModel !== model
+          ? Math.min(backoff, SPILL_DELAY_MS)
+          : backoff
       }
 
       // A THROW is the same outage wearing different clothes. Measured against
@@ -234,6 +272,7 @@ export function createOverloadRetryFetch(
         if (signal?.aborted || isAbort(error)) throw error
         outcome('overloaded', 'threw')
         if (last) throw error
+        const delayMs = waitBeforeNext()
         options.onRetry?.({
           attempt,
           delayMs,
@@ -248,6 +287,7 @@ export function createOverloadRetryFetch(
         outcome('overloaded', String(response.status))
         if (last) return response
         await response.body?.cancel().catch(() => {})
+        const delayMs = waitBeforeNext()
         options.onRetry?.({
           attempt,
           delayMs,
@@ -289,6 +329,7 @@ export function createOverloadRetryFetch(
           headers: { 'content-type': 'application/json' },
         })
       }
+      const delayMs = waitBeforeNext()
       options.onRetry?.({ attempt, delayMs, reason })
       await sleep(delayMs, signal)
     }
