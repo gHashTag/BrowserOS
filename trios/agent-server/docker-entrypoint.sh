@@ -41,6 +41,16 @@ set -e
 # declares it; curl is not installed here.
 #
 # One healthy answer resets the count: a slow minute is not a dead server.
+#
+# BUSY IS NOT DEAD. The first version allowed four misses of a ten-second probe,
+# and measured 2026-09-21 it killed the server itself - twice, at fourteen lanes
+# and at twenty, each time about two minutes after the lanes filled. With every
+# lane working, the event loop is saturated and /health takes longer than ten
+# seconds; the server was alive and making progress, and ending it destroyed
+# every bee's turn in flight. So a probe now waits LIVENESS_TIMEOUT (30 s) and
+# twelve misses in a row are needed: roughly twelve minutes of silence. A hang
+# of the kind this exists for - nine hours of `Application failed to respond`
+# - is caught all the same; a busy stretch is not.
 run_supervised() {
   "$@" &
   server=$!
@@ -48,11 +58,12 @@ run_supervised() {
   (
     port="${PORT:-8080}"
     interval="${LIVENESS_INTERVAL:-30}"
-    fails_allowed="${LIVENESS_FAILS:-4}"
+    fails_allowed="${LIVENESS_FAILS:-12}"
+    probe_timeout="${LIVENESS_TIMEOUT:-30}"
     sleep "${LIVENESS_GRACE:-240}"
     fails=0
     while kill -0 "$server" 2>/dev/null; do
-      if python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:$port/health', timeout=10)" >/dev/null 2>&1; then
+      if python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:$port/health', timeout=$probe_timeout)" >/dev/null 2>&1; then
         fails=0
       else
         fails=$((fails + 1))
