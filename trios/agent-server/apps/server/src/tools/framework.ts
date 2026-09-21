@@ -4,6 +4,7 @@ import type { ToolApprovalCategoryId } from '@browseros/shared/constants/tool-ap
 import type { AclRule } from '@browseros/shared/types/acl'
 import type { z } from 'zod'
 import type { Browser } from '../browser/browser'
+import { markActivity } from '../lib/stall-watch'
 import { ToolResponse, type ToolResult } from './response'
 
 export interface ToolDefinition {
@@ -128,6 +129,14 @@ export async function executeTool(
     }
   }
 
+  // Breadcrumbs for lib/stall-watch.ts: a tool that stalls the main thread
+  // (a regex over a huge output, a sync walk of a big tree) is named, with the
+  // start of its arguments, in the report the watcher writes.
+  let argText = ''
+  try {
+    argText = JSON.stringify(args).slice(0, 120)
+  } catch {}
+  markActivity(`tool ${tool.name} start ${argText}`)
   try {
     await tool.handler(args, ctx, response)
   } catch (err) {
@@ -135,7 +144,9 @@ export async function executeTool(
     response.error(`Internal error in ${tool.name}: ${message}`)
   }
 
+  markActivity(`tool ${tool.name} build response`)
   const result = await response.build(ctx.browser)
+  markActivity(`tool ${tool.name} done`)
 
   const pageId = (args as Record<string, unknown>).page
   if (typeof pageId === 'number') {

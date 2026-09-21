@@ -15,6 +15,7 @@ import path from 'node:path'
 import { CONTENT_LIMITS } from '@browseros/shared/constants/limits'
 import type { LoggerInterface, LogLevel } from '@browseros/shared/types/logger'
 import pino from 'pino'
+import { markActivity } from './stall-watch'
 
 const isDev = process.env.NODE_ENV === 'development'
 const LOG_FILE_NAME = 'browseros-server.log'
@@ -184,6 +185,9 @@ export class Logger implements LoggerInterface {
     message: string,
     meta?: Record<string, unknown>,
   ): void {
+    // Before any I/O: the console write below is asynchronous, and a main
+    // thread that stalls right after it never flushes the line (stall-watch.ts).
+    markActivity(`${level} ${message}`)
     const logFn = this.consoleLogger[level].bind(this.consoleLogger)
     const fileLogFn = this.fileLogger?.[level].bind(this.fileLogger)
 

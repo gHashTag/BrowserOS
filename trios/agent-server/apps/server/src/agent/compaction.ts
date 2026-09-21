@@ -6,6 +6,7 @@ import {
   streamText,
 } from 'ai'
 import { logger } from '../lib/logger'
+import { markActivity } from '../lib/stall-watch'
 import { stripBinaryContent } from './compaction/content'
 import {
   buildSummarizationPrompt,
@@ -150,6 +151,7 @@ async function compactMessages(
     config,
   )
 
+  markActivity(`compaction: find split point (${messages.length} messages)`)
   const { splitIndex, turnStartIndex, isSplitTurn } = findSafeSplitPoint(
     messages,
     config.keepRecentTokens,
@@ -353,6 +355,7 @@ export function createCompactionPrepareStep(
       return { messages, experimental_context: state }
     }
 
+    markActivity(`compaction: strip binary (${messages.length} messages)`)
     let current = stripBinaryContent(messages)
     currentTokens = estimateTokensForThreshold(current, config)
     if (currentTokens <= config.triggerThreshold) {
@@ -360,6 +363,7 @@ export function createCompactionPrepareStep(
     }
 
     const keepRecent = AGENT_LIMITS.COMPACTION_PRUNE_KEEP_RECENT_MESSAGES
+    markActivity(`compaction: prune tool calls (${current.length} messages)`)
     const pruned = pruneMessages({
       messages: current,
       toolCalls: `before-last-${keepRecent}-messages`,
@@ -378,10 +382,12 @@ export function createCompactionPrepareStep(
       }
     }
 
+    markActivity(`compaction: reduce tool outputs (${current.length} messages)`)
     const reduced = reduceToolOutputs(current, {
       maxChars: config.toolOutputMaxChars,
       keepRecentCount: 2,
     })
+    markActivity(`compaction: estimate tokens (${reduced.length} messages)`)
     currentTokens = estimateTokensForThreshold(reduced, config)
     if (currentTokens <= config.triggerThreshold) {
       return { messages: reduced, experimental_context: state }

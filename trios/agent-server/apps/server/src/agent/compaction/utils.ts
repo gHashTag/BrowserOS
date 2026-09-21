@@ -6,6 +6,7 @@ import type {
   UserContent,
 } from 'ai'
 import { logger } from '../../lib/logger'
+import { markActivity } from '../../lib/stall-watch'
 import {
   estimateToolResultOutput,
   stripToolResultOutput,
@@ -459,6 +460,9 @@ export function slidingWindow(
   messages: ModelMessage[],
   maxTokens: number,
 ): ModelMessage[] {
+  markActivity(
+    `compaction: sliding window (${messages.length} messages, ${maxTokens} tokens)`,
+  )
   let totalTokens = estimateTokens(messages)
   let startIndex = 0
 
