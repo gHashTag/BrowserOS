@@ -59,6 +59,8 @@ interface ModelState {
   tokensPerSecond?: number
   toolCalls?: boolean
   probedAt?: number
+  /** Probes in a row that did not succeed; drives the retry backoff. */
+  probeFailures: number
 }
 
 export interface RankedModel {
@@ -83,6 +85,17 @@ const DEFAULT_WINDOW_MS = 15 * 60_000
 const SWITCH_MARGIN = 0.8
 /** A model that answered 404/410 is re-probed after this long, not forgotten. */
 const GONE_RETRY_MS = 60 * 60_000
+/** A measured model is re-probed this often. */
+const PROBE_EVERY_MS = 5 * 60_000
+/**
+ * A failed probe is retried after a minute, doubling to half an hour. Every
+ * deploy starts the ranking from nothing, and measured 2026-09-21 12:02 the
+ * first probe of ultra-550b failed under boot load: the model the swarm had
+ * been using for an hour sat unscored for five minutes, and the bees went
+ * back to the one that was drawing 429s.
+ */
+const PROBE_RETRY_MIN_MS = 60_000
+const PROBE_RETRY_MAX_MS = 30 * 60_000
 const MAX_EVENTS = 2_000
 /**
  * How long a choice stands before a challenger may replace it. Measured
@@ -104,7 +117,7 @@ export class ModelRanking {
   ) {
     if (candidates.length === 0) throw new Error('no candidate models')
     for (const model of candidates)
-      this.states.set(model, { events: [], gone: false })
+      this.states.set(model, { events: [], gone: false, probeFailures: 0 })
     this.current = candidates[0]
   }
 
@@ -133,6 +146,7 @@ export class ModelRanking {
     const state = this.states.get(model)
     if (!state) return
     state.probedAt = this.now()
+    state.probeFailures = result.ok ? 0 : state.probeFailures + 1
     if (result.gone) {
       state.gone = true
       state.goneAt = this.now()
@@ -154,12 +168,23 @@ export class ModelRanking {
     }
   }
 
-  /** Models whose 404/410 is old enough to be worth asking again. */
+  /**
+   * Whether a probe is owed: never probed, a measured model every five
+   * minutes, a failing one on backoff, a gone one hourly.
+   */
   dueForProbe(model: string): boolean {
     const state = this.states.get(model)
     if (!state) return false
-    if (!state.gone) return true
-    return this.now() - (state.goneAt ?? 0) >= GONE_RETRY_MS
+    if (state.gone) return this.now() - (state.goneAt ?? 0) >= GONE_RETRY_MS
+    if (state.probedAt === undefined) return true
+    const wait =
+      state.probeFailures > 0
+        ? Math.min(
+            PROBE_RETRY_MIN_MS * 2 ** (state.probeFailures - 1),
+            PROBE_RETRY_MAX_MS,
+          )
+        : PROBE_EVERY_MS
+    return this.now() - state.probedAt >= wait
   }
 
   private successRate(state: ModelState): { rate: number; samples: number } {
@@ -388,7 +413,8 @@ export async function probeModel(
 }
 
 /**
- * Probe every candidate now and then every `intervalMs`, rotating keys so no
+ * Check every `intervalMs` which candidates are owed a probe (see
+ * ModelRanking.dueForProbe) and probe those, rotating keys so no
  * single account carries the probes. Returns a stop function.
  */
 export function startModelProbes(
@@ -407,8 +433,10 @@ export function startModelProbes(
     if (running) return
     running = true
     try {
+      let probed = 0
       for (const model of ranking.candidates) {
         if (!ranking.dueForProbe(model)) continue
+        probed++
         const key = endpoint.keys[keyCursor++ % endpoint.keys.length]
         ranking.recordProbe(
           model,
@@ -417,7 +445,7 @@ export function startModelProbes(
           }),
         )
       }
-      options.onRound?.(ranking.snapshot(), ranking.best())
+      if (probed > 0) options.onRound?.(ranking.snapshot(), ranking.best())
     } finally {
       running = false
     }
@@ -425,7 +453,7 @@ export function startModelProbes(
   void round()
   const timer = setInterval(
     () => void round(),
-    options.intervalMs ?? 5 * 60_000,
+    options.intervalMs ?? PROBE_RETRY_MIN_MS,
   )
   timer.unref?.()
   return () => clearInterval(timer)
