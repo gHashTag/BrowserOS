@@ -365,6 +365,26 @@ export function resetWorkerModelRanking(): void {
   shared = undefined
 }
 
+/** Extra tries for a probe request that is refused (429/5xx). */
+const PROBE_RETRIES = 2
+
+/** A probe request, asked again after a refusal: a refusal says nothing about the model. */
+async function retryRefused(
+  ask: () => Promise<{ status: number; json?: any; seconds: number }>,
+  delayMs = 5_000,
+): Promise<{ status: number; json?: any; seconds: number }> {
+  let answer = await ask()
+  for (
+    let retry = 0;
+    retry < PROBE_RETRIES && (answer.status === 429 || answer.status >= 500);
+    retry++
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, delayMs))
+    answer = await ask()
+  }
+  return answer
+}
+
 const PROBE_TOOL = {
   type: 'function',
   function: {
@@ -414,27 +434,35 @@ export async function probeModel(
   baseUrl: string,
   apiKey: string,
   model: string,
-  options: { fetchImpl?: typeof fetch; timeoutMs?: number } = {},
+  options: {
+    fetchImpl?: typeof fetch
+    timeoutMs?: number
+    retryDelayMs?: number
+  } = {},
 ): Promise<ProbeResult> {
   const fetchImpl = options.fetchImpl ?? globalThis.fetch
   const timeoutMs = options.timeoutMs ?? 90_000
   try {
-    const speed = await post(
-      fetchImpl,
-      baseUrl,
-      apiKey,
-      {
-        model,
-        messages: [
+    const speed = await retryRefused(
+      () =>
+        post(
+          fetchImpl,
+          baseUrl,
+          apiKey,
           {
-            role: 'user',
-            content:
-              'Write a TypeScript function that parses an ISO date and returns the weekday name, with two tests.',
+            model,
+            messages: [
+              {
+                role: 'user',
+                content:
+                  'Write a TypeScript function that parses an ISO date and returns the weekday name, with two tests.',
+              },
+            ],
+            max_tokens: 300,
           },
-        ],
-        max_tokens: 300,
-      },
-      timeoutMs,
+          timeoutMs,
+        ),
+      options.retryDelayMs,
     )
     if (speed.status === 404 || speed.status === 410)
       return { ok: false, gone: true }
@@ -443,23 +471,29 @@ export async function probeModel(
     const tokensPerSecond =
       speed.seconds > 0 ? tokens / speed.seconds : undefined
 
-    const tool = await post(
-      fetchImpl,
-      baseUrl,
-      apiKey,
-      {
-        model,
-        messages: [
-          {
-            role: 'user',
-            content: 'Read src/app.ts with the tool, then say what it does.',
-          },
-        ],
-        tools: [PROBE_TOOL],
-        max_tokens: 300,
-      },
-      timeoutMs,
-    )
+    // Both questions are retried on a refusal: measured 2026-09-21 13:44,
+    // ultra-550b answered the speed probe at 47 tok/s and the tool probe with
+    // a transient error, so it sat unscored - and unable to take any key's
+    // spill - until its next probe. A refusal says nothing about tool calls.
+    const askTool = () =>
+      post(
+        fetchImpl,
+        baseUrl,
+        apiKey,
+        {
+          model,
+          messages: [
+            {
+              role: 'user',
+              content: 'Read src/app.ts with the tool, then say what it does.',
+            },
+          ],
+          tools: [PROBE_TOOL],
+          max_tokens: 300,
+        },
+        timeoutMs,
+      )
+    const tool = await retryRefused(askTool, options.retryDelayMs)
     const toolCalls =
       tool.status === 200
         ? Array.isArray(tool.json?.choices?.[0]?.message?.tool_calls) &&

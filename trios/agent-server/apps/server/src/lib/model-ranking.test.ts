@@ -360,3 +360,40 @@ describe('per-key spill (13:25, 2026-09-21)', () => {
     assert.deepStrictEqual(slept, [250])
   })
 })
+
+describe('tool probe retry (13:44, 2026-09-21)', () => {
+  it('asks the tool question again after a refusal', async () => {
+    let call = 0
+    const fetchImpl = (async () => {
+      call++
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      if (call === 1)
+        return Response.json({
+          choices: [{ message: { content: 'x' } }],
+          usage: { completion_tokens: 50 },
+        })
+      if (call === 2) return new Response('busy', { status: 503 })
+      return Response.json({
+        choices: [
+          {
+            message: {
+              tool_calls: [
+                {
+                  id: '1',
+                  type: 'function',
+                  function: { name: 'read_file', arguments: '{}' },
+                },
+              ],
+            },
+          },
+        ],
+      })
+    }) as unknown as typeof fetch
+    const result = await probeModel('http://x', 'k', 'm', {
+      fetchImpl,
+      retryDelayMs: 1,
+    })
+    assert.strictEqual(result.toolCalls, true)
+    assert.strictEqual(call, 3)
+  })
+})
