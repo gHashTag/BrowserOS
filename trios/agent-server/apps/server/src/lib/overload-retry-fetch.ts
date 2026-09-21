@@ -31,6 +31,15 @@ export interface OverloadRetryOptions {
   delaysMs?: number[]
   /** Called once per retry, with why. */
   onRetry?: (info: { attempt: number; delayMs: number; reason: string }) => void
+  /**
+   * The model this attempt should be sent to, given the one the caller asked
+   * for. Returning the same name (or undefined) leaves the body untouched.
+   * See model-ranking.ts: this is how the swarm follows the best-measured
+   * model without every caller knowing there is a choice.
+   */
+  routeModel?: (requested: string, attempt: number) => string | undefined
+  /** Every answer, attributed to the model that gave it. */
+  onOutcome?: (model: string, outcome: 'ok' | 'overloaded' | 'gone') => void
   /** Injectable for tests. */
   fetchImpl?: typeof fetch
   sleep?: (ms: number, signal?: AbortSignal | null) => Promise<void>
@@ -67,9 +76,12 @@ export function streamErrorInFirstEvent(text: string): string | null {
     .join('')
   if (!data.startsWith('{')) return null
   try {
-    const parsed = JSON.parse(data) as { error?: { message?: string; code?: unknown } }
+    const parsed = JSON.parse(data) as {
+      error?: { message?: string; code?: unknown }
+    }
     if (parsed && typeof parsed === 'object' && parsed.error) {
-      const code = parsed.error.code !== undefined ? `[${String(parsed.error.code)}] ` : ''
+      const code =
+        parsed.error.code !== undefined ? `[${String(parsed.error.code)}] ` : ''
       return `${code}${parsed.error.message ?? 'error in stream'}`
     }
   } catch {
@@ -137,20 +149,65 @@ export function isAbort(error: unknown): boolean {
   return name === 'AbortError' || name === 'TimeoutError'
 }
 
+interface ParsedBody {
+  model?: string
+  json: Record<string, unknown>
+}
+
+/** The JSON request body, when there is one we can read and rewrite. */
+function requestBody(init?: RequestInit): ParsedBody | undefined {
+  if (typeof init?.body !== 'string') return undefined
+  try {
+    const json = JSON.parse(init.body) as unknown
+    if (!json || typeof json !== 'object' || Array.isArray(json))
+      return undefined
+    const model = (json as { model?: unknown }).model
+    return {
+      model: typeof model === 'string' ? model : undefined,
+      json: json as Record<string, unknown>,
+    }
+  } catch {
+    return undefined
+  }
+}
+
+function route(
+  body: ParsedBody | undefined,
+  attempt: number,
+  routeModel: OverloadRetryOptions['routeModel'],
+): { model: string; body: string } | undefined {
+  if (!body?.model || !routeModel) return undefined
+  const chosen = routeModel(body.model, attempt)
+  if (!chosen || chosen === body.model) return undefined
+  return {
+    model: chosen,
+    body: JSON.stringify({ ...body.json, model: chosen }),
+  }
+}
 
 export function createOverloadRetryFetch(
   options: OverloadRetryOptions = {},
 ): typeof fetch {
-  const maxAttempts = Math.max(1, options.maxAttempts ?? DEFAULT_DELAYS_MS.length + 1)
+  const maxAttempts = Math.max(
+    1,
+    options.maxAttempts ?? DEFAULT_DELAYS_MS.length + 1,
+  )
   const delays = options.delaysMs?.length ? options.delaysMs : DEFAULT_DELAYS_MS
   const fetchImpl = options.fetchImpl ?? globalThis.fetch
   const sleep = options.sleep ?? defaultSleep
 
   return (async (url: RequestInfo | URL, init?: RequestInit) => {
     const signal = init?.signal
+    const body = requestBody(init)
     for (let attempt = 1; ; attempt++) {
       const last = attempt >= maxAttempts
       const delayMs = delays[Math.min(attempt - 1, delays.length - 1)] ?? 0
+      const routed = route(body, attempt, options.routeModel)
+      const sent = routed ? { ...init, body: routed.body } : init
+      const model = routed?.model ?? body?.model
+      const outcome = (result: 'ok' | 'overloaded' | 'gone') => {
+        if (model) options.onOutcome?.(model, result)
+      }
 
       // A THROW is the same outage wearing different clothes. Measured against
       // integrate.api.nvidia.com on 2026-09-20 at concurrency four on one key:
@@ -164,9 +221,11 @@ export function createOverloadRetryFetch(
       // cancelled it.
       let response: Response
       try {
-        response = await fetchImpl(url, init)
+        response = await fetchImpl(url, sent)
       } catch (error) {
-        if (signal?.aborted || isAbort(error) || last) throw error
+        if (signal?.aborted || isAbort(error)) throw error
+        outcome('overloaded')
+        if (last) throw error
         options.onRetry?.({
           attempt,
           delayMs,
@@ -176,16 +235,27 @@ export function createOverloadRetryFetch(
         continue
       }
 
+      if (response.status === 404 || response.status === 410) outcome('gone')
       if (response.status === 429 || response.status >= 500) {
+        outcome('overloaded')
         if (last) return response
         await response.body?.cancel().catch(() => {})
-        options.onRetry?.({ attempt, delayMs, reason: `HTTP ${response.status}` })
+        options.onRetry?.({
+          attempt,
+          delayMs,
+          reason: `HTTP ${response.status}`,
+        })
         await sleep(delayMs, signal)
         continue
       }
 
       const contentType = response.headers.get('content-type') ?? ''
-      if (!response.ok || !response.body || !contentType.includes('text/event-stream')) {
+      if (
+        !response.ok ||
+        !response.body ||
+        !contentType.includes('text/event-stream')
+      ) {
+        if (response.ok) outcome('ok')
         return response
       }
 
@@ -193,6 +263,7 @@ export function createOverloadRetryFetch(
       const { bytes, done } = await peekFirstEvent(reader)
       const reason = streamErrorInFirstEvent(new TextDecoder().decode(bytes))
       if (reason === null) {
+        outcome('ok')
         return new Response(replay(bytes, reader, done), {
           status: response.status,
           statusText: response.statusText,
@@ -200,6 +271,7 @@ export function createOverloadRetryFetch(
         })
       }
       await reader.cancel().catch(() => {})
+      outcome('overloaded')
       if (last) {
         // Out of attempts: surface it as the status the body claimed, so the
         // SDK raises a real error with the endpoint's own words in it.
