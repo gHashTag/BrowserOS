@@ -37,6 +37,7 @@ import { randomBytes } from 'node:crypto'
 import { userInfo } from 'node:os'
 import { Pool } from 'pg'
 import { MIGRATION_SQL, runPgMigrations } from '../../src/lib/db/pg-migrate'
+import { queenSchema } from '../../src/lib/db/queen-pool'
 import { logger } from '../../src/lib/logger'
 import { factsFor } from '../api/pg-migrate-sql-facts'
 
@@ -182,11 +183,15 @@ describe('the migration block, applied to a real PostgreSQL', () => {
 
       const pool = new Pool({ connectionString: scratchUrl, max: 1 })
       try {
+        // The schema the pool pins, not 'public': the tables live where
+        // every Queen connection's search_path points.
         const columns = await pool.query(
-          "SELECT table_name, column_name, data_type FROM information_schema.columns WHERE table_schema = 'public'",
+          'SELECT table_name, column_name, data_type FROM information_schema.columns WHERE table_schema = $1',
+          [queenSchema()],
         )
         const indexes = await pool.query(
-          "SELECT indexname, tablename, indexdef FROM pg_indexes WHERE schemaname = 'public'",
+          'SELECT indexname, tablename, indexdef FROM pg_indexes WHERE schemaname = $1',
+          [queenSchema()],
         )
         inspection = {
           columns: columns.rows as Record<string, string>[],

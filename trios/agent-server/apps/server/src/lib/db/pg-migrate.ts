@@ -9,7 +9,7 @@
 
 import type { Pool } from 'pg'
 import { logger } from '../logger'
-import { createQueenPool } from './queen-pool'
+import { createQueenPool, queenSchema } from './queen-pool'
 
 function getDatabaseUrl(): string | undefined {
   return process.env.DATABASE_URL || process.env.RAILWAY_SSOT_URL || undefined
@@ -303,6 +303,14 @@ export async function runPgMigrations(): Promise<void> {
 
   const pool = createPool(databaseUrl)
   try {
+    // The pool pins search_path to queenSchema() on every connection, and
+    // nothing created that schema: production had it from a hand-typed
+    // command, so the migrations only ever ran where it already existed. On a
+    // fresh database - CI, a restore, a new environment - every statement
+    // below failed with "no schema has been selected to create in" (measured
+    // in the pglive gate, 2026-09-21). queenSchema() is validated as a plain
+    // identifier before it is interpolated.
+    await pool.query(`CREATE SCHEMA IF NOT EXISTS ${queenSchema()}`)
     await pool.query(MIGRATION_SQL)
     logger.info('PostgreSQL migrations completed successfully')
   } catch (error) {
