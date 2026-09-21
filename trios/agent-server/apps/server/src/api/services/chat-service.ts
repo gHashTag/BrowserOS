@@ -39,6 +39,18 @@ export interface ChatServiceDeps {
 interface UsageTally {
   inputTokens: number
   outputTokens: number
+  /**
+   * Where the turn's model calls went. Every step is one request to the
+   * provider, and on a rate-limited key requests are the budget: measured
+   * 2026-09-21 a bee turn could take up to MAX_TURNS (100) of them, and nobody
+   * could say how many it did take, how many were one tool call each, or how
+   * many answered a tool error. Logged once per turn as 'Agent turn profile'.
+   */
+  steps?: number
+  toolCalls?: number
+  singleCallSteps?: number
+  toolErrors?: number
+  byTool?: Record<string, number>
 }
 
 /**
@@ -114,12 +126,44 @@ function withUsageFrame(response: Response, tally: UsageTally): Response {
 }
 
 /** onStepFinish accumulator feeding a UsageTally. */
-function accumulateUsage(tally: UsageTally) {
+export function accumulateUsage(tally: UsageTally) {
   return (step: {
     usage: { inputTokens: number | undefined; outputTokens: number | undefined }
+    toolCalls?: ReadonlyArray<{ toolName?: string }>
+    content?: ReadonlyArray<{ type?: string }>
   }) => {
     tally.inputTokens += step.usage.inputTokens ?? 0
     tally.outputTokens += step.usage.outputTokens ?? 0
+    tally.steps = (tally.steps ?? 0) + 1
+    const calls = step.toolCalls ?? []
+    tally.toolCalls = (tally.toolCalls ?? 0) + calls.length
+    if (calls.length === 1)
+      tally.singleCallSteps = (tally.singleCallSteps ?? 0) + 1
+    tally.byTool ??= {}
+    for (const call of calls) {
+      const name = call.toolName ?? '?'
+      tally.byTool[name] = (tally.byTool[name] ?? 0) + 1
+    }
+    const errors = (step.content ?? []).filter((p) => p.type === 'tool-error')
+    tally.toolErrors = (tally.toolErrors ?? 0) + errors.length
+  }
+}
+
+/** One log line per turn: where its model calls went. */
+export function turnProfile(tally: UsageTally): Record<string, unknown> {
+  const top = Object.entries(tally.byTool ?? {})
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8)
+    .map(([name, n]) => `${name}:${n}`)
+    .join(' ')
+  return {
+    steps: tally.steps ?? 0,
+    toolCalls: tally.toolCalls ?? 0,
+    singleCallSteps: tally.singleCallSteps ?? 0,
+    toolErrors: tally.toolErrors ?? 0,
+    inputTokens: tally.inputTokens,
+    outputTokens: tally.outputTokens,
+    byTool: top,
   }
 }
 
@@ -482,6 +526,10 @@ export class ChatService {
           logger.info('Agent execution complete', {
             conversationId: request.conversationId,
             totalMessages: restored.length,
+          })
+          logger.info('Agent turn profile', {
+            conversationId: request.conversationId,
+            ...turnProfile(turnTally),
           })
 
           if (session?.hiddenPageId) {

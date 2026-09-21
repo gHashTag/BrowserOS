@@ -235,3 +235,29 @@ describe('walkFiles', () => {
     expect(files.length).toBe(0)
   })
 })
+
+describe('missingPathHint', () => {
+  it('names what the nearest existing directory holds, and what is close', async () => {
+    const { mkdtempSync, mkdirSync, writeFileSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const { readFile } = await import('node:fs/promises')
+    const { missingPathHint } = await import(
+      '../../../src/tools/filesystem/utils'
+    )
+    const root = mkdtempSync(join(tmpdir(), 'hint-'))
+    mkdirSync(join(root, 'specs'))
+    writeFileSync(join(root, 'specs', 'diff.t27'), '')
+    let error: unknown
+    try {
+      await readFile(join(root, 'specs', 'diffs.t27'))
+    } catch (e) {
+      error = e
+    }
+    const hint = await missingPathHint(error)
+    expect(hint).toContain('does not exist')
+    expect(hint).toContain('diff.t27')
+    expect(hint).toContain('Close to what you asked for: diff.t27')
+    expect(await missingPathHint(new Error('refused'))).toBe('')
+  })
+})
