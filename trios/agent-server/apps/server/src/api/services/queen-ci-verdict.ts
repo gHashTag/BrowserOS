@@ -154,10 +154,21 @@ export async function takeBackRefusedAcceptances(
 
   // Oldest-asked first, so eight a round walks the whole accepted set rather
   // than asking about the same eight for ever.
+  //
+  // Only issues still OPEN (queen_issues is the round's mirror of them, the
+  // same test the review sweep uses). The first deploy asked about every
+  // accept ever recorded - 494 rows, 460 of them closed long ago - so the one
+  // open issue this exists for (#4385) was an hour of rounds away.
   const rows = await pool.query(
     `SELECT issue, branch, send_backs
        FROM queen_dispatch
       WHERE review_state = 'accept' AND finished_at IS NOT NULL
+        AND (
+          NOT EXISTS (SELECT 1 FROM queen_issues)
+          OR EXISTS (
+            SELECT 1 FROM queen_issues i WHERE i.number = queen_dispatch.issue
+          )
+        )
       ORDER BY ci_checked_at ASC NULLS FIRST, issue
       LIMIT $1`,
     [limit],
