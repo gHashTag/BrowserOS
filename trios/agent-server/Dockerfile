@@ -79,6 +79,16 @@ RUN cp "$(swift build -c release --show-bin-path)/queend" /queen-core/queend \
 FROM rust:1-bookworm AS t27c
 ARG T27_REF=master
 WORKDIR /src
+# THE CACHE KEY IS THE COMPILER'S LAST COMMIT. "Bump the ARG to rebuild" above
+# was a rule nobody followed: measured 2026-09-22, the review's t27c accepted
+# `mut coq_count: i32 = 0;` in #4385 while the t27c the required parse-ratchet
+# builds from master refused it (parse error in fn 'is_coq' near line 17), so
+# the Queen accepted work the pull request could never land. ADD of a URL is
+# re-fetched on every build and invalidates the layers below it only when its
+# content changes; this URL answers the newest commit that touched bootstrap/,
+# so the 15-minute compiler build reruns exactly when the compiler changed and
+# never for the hundreds of spec-only commits in between.
+ADD https://api.github.com/repos/gHashTag/t27/commits?path=bootstrap&sha=master&per_page=1 /src/t27c-bootstrap-head.json
 RUN git clone --depth 1 --filter=blob:none --sparse --branch "${T27_REF}" \
         https://github.com/gHashTag/t27.git t27 \
  && cd t27 \
