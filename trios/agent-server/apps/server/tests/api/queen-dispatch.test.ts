@@ -17,6 +17,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Pool } from 'pg'
 import {
+  beesRunElsewhere,
   classifyQuotaExhaustion,
   closeDispatch,
   committedFileCount,
@@ -36,8 +37,10 @@ import {
   reapWorktrees,
   recordDispatch,
   resolveWorkerProvider,
+  runClaimedBee,
   setDurableCloseListener,
   workerCapacityBreakdown,
+  workerProviderForKeyIndex,
   workspaceRoot,
 } from '../../src/api/services/queen-dispatch'
 import { resetYoungBees } from '../../src/api/services/queen-resources'
@@ -94,6 +97,7 @@ const KEYS = [
   'TRIOS_QUEEN_BEE_DISK_MB',
   'TRIOS_QUEEN_DISK_HEADROOM_PERCENT',
   'TRIOS_QUEEN_MEMORY_LIMIT_MB',
+  'TRIOS_QUEEN_BEES_RUN_ELSEWHERE',
   // The far end of the key list (MAX_KEYS_PER_POOL) and the first name past it.
   'TRIOS_QUEEN_WORKER_API_KEY_17',
   'TRIOS_QUEEN_WORKER_API_KEY_1024',
@@ -1213,6 +1217,44 @@ describe('the container is asked before a worktree is cut', () => {
     }
   })
 
+  it('lets a runner start an order it claimed, and books it as an update, not a new row', async () => {
+    // The order already holds the issue, the boundary, the criteria and the
+    // key. A success must say what happened on it - and reset the clock the
+    // two-hour rule reads, or a bee that waited an hour for a runner would be
+    // reaped an hour into its work - without inserting it again, which would
+    // archive a history row and clear what it is to be judged against.
+    oneFreeKey()
+    hive()
+    const turns = realStarts()
+    const { pool, queries } = recordingPool()
+    try {
+      const outcome = await runClaimedBee(
+        pool,
+        {
+          issue: 1530,
+          branch: 'queen-1530',
+          brief: 'the order the Queen wrote',
+          ownedPaths: ['docs/a.md'],
+          conversationId: 'conv-ordered-by-the-queen',
+          keyIndex: 0,
+        },
+        { memory: calm, volume: roomy, volumeUsed: () => 40 },
+      )
+      expect(outcome.started).toBe(true)
+      expect(outcome.conversationId).toBe('conv-ordered-by-the-queen')
+      expect(outcome.detail).toContain('zai/')
+      const touched = queries.filter((q) => /queen_dispatch\b/.test(q.text))
+      expect(
+        touched.some((q) => /INSERT INTO queen_dispatch\b/.test(q.text)),
+      ).toBe(false)
+      const update = touched.find((q) => q.text.includes('SET detail = $2'))
+      expect(update?.text).toContain('dispatched_at = now()')
+      expect(update?.values).toEqual([1530, outcome.detail])
+    } finally {
+      await turns.restore()
+    }
+  })
+
   it('never reaps the tree of the issue it is about to dispatch again', async () => {
     // A redeploy killed the swarm; #1520 was reaped at boot and its tree holds
     // one committed, unpushed attempt. The container carries no push
@@ -1310,6 +1352,164 @@ describe('the container is asked before a worktree is cut', () => {
     expect(outcome.room).toBeUndefined()
     expect(outcome.detail).not.toContain('container memory is')
     expect(outcome.detail).not.toContain('unknown is not room')
+  })
+})
+
+/**
+ * A bee that runs somewhere else.
+ *
+ * The Queen decides exactly what she decided before and writes it down; the
+ * turn happens in another container. Measured 2026-09-18, which is why: her own
+ * container held about a gigabyte a bee against a 24 GB limit, so the swarm
+ * could never be wider than one machine however many credentials it had.
+ */
+describe('handing a bee to a runner', () => {
+  const pool = () => {
+    const queries: Array<{ text: string; values?: unknown[] }> = []
+    const fake = {
+      query: async (text: string, values?: unknown[]) => {
+        queries.push({ text, values })
+        return { rowCount: 0, rows: [] }
+      },
+    } as unknown as Pool
+    return { fake, queries }
+  }
+  const oneKey = () => {
+    process.env.TRIOS_QUEEN_WORKER_PROVIDER = 'zai'
+    process.env.TRIOS_QUEEN_WORKER_BASE_URL = 'https://api.z.ai/api/paas/v4'
+    process.env.TRIOS_QUEEN_WORKER_API_KEY = 'first'
+    process.env.TRIOS_QUEEN_WORKER_API_KEY_2 = 'second'
+  }
+
+  it('writes the order and starts nothing here', async () => {
+    oneKey()
+    process.env.TRIOS_QUEEN_BEES_RUN_ELSEWHERE = 'on'
+    const { fake, queries } = pool()
+    const realFetch = globalThis.fetch
+    let calls = 0
+    globalThis.fetch = (async () => {
+      calls += 1
+      return new Response('{}')
+    }) as unknown as typeof fetch
+    let measured = 0
+    try {
+      const outcome = await dispatchBee(
+        fake,
+        1600,
+        'the brief for this bee',
+        ['docs/a.md'],
+        [],
+        undefined,
+        ['the tab opens'],
+        'stated',
+        {
+          memory: () => {
+            measured += 1
+            return { kind: 'unsupported', platform: 'darwin' }
+          },
+        },
+      )
+      // In flight from this moment: the boundary is held and the key is taken
+      // exactly as they were when she ran the bee herself.
+      expect(outcome.started).toBe(true)
+      expect(outcome.keyIndex).toBe(0)
+      expect(outcome.conversationId).toMatch(/[0-9a-f-]{36}/)
+      expect(outcome.detail).toContain('queued for a runner; zai/')
+      // Nothing was run here: no turn asked for, and the container not even
+      // measured, because the bee will not live in it.
+      expect(calls).toBe(0)
+      expect(measured).toBe(0)
+    } finally {
+      globalThis.fetch = realFetch
+    }
+    const insert = queries.find((q) =>
+      /INSERT INTO queen_dispatch\b/.test(q.text),
+    )
+    expect(insert?.text).toContain('queued_at')
+    // The brief travels with the order: a runner has no issue body to build one
+    // from. The credential does not - only its index.
+    expect(insert?.values?.[13]).toBe('the brief for this bee')
+    expect(insert?.values?.[12]).toBeInstanceOf(Date)
+    expect(JSON.stringify(insert?.values)).not.toContain('first')
+  })
+
+  it('runs the bee here when nobody was told otherwise', async () => {
+    oneKey()
+    const { fake } = pool()
+    let measured = 0
+    const outcome = await dispatchBee(
+      fake,
+      1601,
+      'brief',
+      [],
+      [],
+      undefined,
+      [],
+      'none',
+      {
+        memory: () => {
+          measured += 1
+          return {
+            kind: 'measured',
+            usedBytes: 23 * 1_000_000_000,
+            limitBytes: 24 * 1_000_000_000,
+            source: 'cgroup v2',
+            limitSource: 'cgroup',
+          }
+        },
+        volume: () => ({ totalBytes: 50e9, freeBytes: 19e9 }),
+      },
+    )
+    expect(measured).toBeGreaterThan(0)
+    expect(outcome.detail).not.toContain('queued for a runner')
+    expect(beesRunElsewhere()).toBe(false)
+  })
+
+  it('remembers which credential an index names, without storing one', () => {
+    oneKey()
+    process.env.TRIOS_QUEEN_WORKER_POOL_2_BASE_URL =
+      'https://integrate.api.nvidia.com/v1'
+    process.env.TRIOS_QUEEN_WORKER_POOL_2_MODEL = 'nvidia/nemotron'
+    process.env.TRIOS_QUEEN_WORKER_POOL_2_API_KEY = 'nv-one'
+    process.env.TRIOS_QUEEN_WORKER_POOL_2_API_KEY_2 = 'nv-two'
+    // Whatever the allocator hands out, the index it stamps on the row must
+    // name the same credential when a different process reads it back.
+    for (const taken of [[], [0], [0, 1], [0, 1, 10_000]]) {
+      const chosen = resolveWorkerProvider(taken)
+      const again = workerProviderForKeyIndex(chosen?.keyIndex ?? -1)
+      expect(again?.apiKey).toBe(chosen?.apiKey)
+      expect(again?.model).toBe(chosen?.model)
+      expect(again?.baseUrl).toBe(chosen?.baseUrl)
+    }
+    expect(workerProviderForKeyIndex(0)?.apiKey).toBe('first')
+    expect(workerProviderForKeyIndex(10_001)?.apiKey).toBe('nv-two')
+    // An index this environment cannot explain. The next key along is a
+    // different account, so there is no answer but none.
+    expect(workerProviderForKeyIndex(7)).toBeNull()
+    expect(workerProviderForKeyIndex(20_000)).toBeNull()
+  })
+
+  it('hands the issue back when the runner cannot resolve the credential', async () => {
+    // The runner's variables are not the Queen's. Reaching for the next key
+    // would put two bees on one account while the ledger says otherwise.
+    oneKey()
+    const { fake, queries } = pool()
+    const outcome = await runClaimedBee(fake, {
+      issue: 1602,
+      branch: 'queen-1602',
+      brief: 'brief',
+      ownedPaths: [],
+      conversationId: 'conv-1602',
+      keyIndex: 4242,
+    })
+    expect(outcome.started).toBe(false)
+    expect(outcome.detail).toContain('cannot resolve key_index 4242')
+    // Recorded as a refusal, which ends the row and gives the issue and its
+    // boundary back to the next round.
+    const insert = queries.find((q) =>
+      /INSERT INTO queen_dispatch\b/.test(q.text),
+    )
+    expect(insert?.values?.[2]).toBe(false)
   })
 })
 

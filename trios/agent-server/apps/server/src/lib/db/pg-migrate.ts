@@ -202,6 +202,54 @@ ALTER TABLE queen_dispatch
 ALTER TABLE queen_dispatch
   ADD COLUMN IF NOT EXISTS output_tokens bigint;
 
+-- A dispatch that is WAITING for a runner, and the runner that took it.
+--
+-- A bee used to be a thread of the Queen: dispatch cut a worktree on her volume
+-- and sent the turn to her own /chat, so every bee shared her memory and her
+-- disk and the swarm could never be wider than one container. Measured
+-- 2026-09-18: about a gigabyte of memory a bee against a 24 GB limit.
+--
+-- So the row becomes the handover. The Queen writes it with queued_at set and
+-- runs nothing; a runner claims it with an UPDATE that skips locked rows, so
+-- two runners cannot take one issue, and does the work in its own container.
+-- Everything else about the row is unchanged, which is the point: it is in
+-- flight from the moment it is queued, so its boundary is held and its key is
+-- taken exactly as before, and every reader of this table - the board, the
+-- reapers, the review sweep - keeps working without knowing where the bee runs.
+--
+-- The brief travels with it because the runner has no issue body to build one
+-- from. It is prompt text, and no secret is stored here: the runner resolves
+-- its credential from key_index against the same environment the Queen reads.
+ALTER TABLE queen_dispatch
+  ADD COLUMN IF NOT EXISTS queued_at timestamptz;
+ALTER TABLE queen_dispatch
+  ADD COLUMN IF NOT EXISTS claimed_by text;
+ALTER TABLE queen_dispatch
+  ADD COLUMN IF NOT EXISTS claimed_at timestamptz;
+ALTER TABLE queen_dispatch
+  ADD COLUMN IF NOT EXISTS brief text;
+
+CREATE INDEX IF NOT EXISTS idx_queen_dispatch_queued
+  ON queen_dispatch (queued_at)
+  WHERE claimed_by IS NULL AND finished_at IS NULL;
+
+-- Work that finished in a container nobody can reach afterwards.
+--
+-- Publishing is done from outside by whoever holds the token, against a bundle
+-- this container hands out; that is the rule queen-export.ts exists to keep. A
+-- runner replica has no volume anyone can fetch from and may be gone minutes
+-- later, so it writes the bundle here, where the export route looks for it. The
+-- bytes are a git bundle of base..queen-N and nothing else - no credential ever
+-- travels this way, in either direction.
+CREATE TABLE IF NOT EXISTS queen_bundle (
+  issue int PRIMARY KEY,
+  branch text NOT NULL,
+  base text NOT NULL,
+  runner text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  bytes bytea NOT NULL
+);
+
 -- The attempts that queen_dispatch overwrote.
 --
 -- queen_dispatch is keyed by issue alone, so dispatching an issue a second
