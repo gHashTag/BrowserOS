@@ -151,6 +151,15 @@ describe('taking an acceptance back', () => {
     expect(write.sql).toContain("review_state = 'accept'")
   })
 
+  it('asks only about issues that are still open', async () => {
+    const { pool, statements } = fakePool([])
+    await takeBackRefusedAcceptances(pool, deps())
+    const select = statements.find((s) => /^\s*SELECT/.test(s.sql))
+    expect(select?.sql).toContain(
+      'queen_issues i WHERE i.number = queen_dispatch.issue',
+    )
+  })
+
   it('escalates the refusal that reaches the send-back ceiling', async () => {
     const { pool } = fakePool([
       { issue: 4385, branch: 'queen-4385', send_backs: 1 },
