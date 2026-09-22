@@ -42,6 +42,7 @@ import { createQueenPool } from '../../lib/db/queen-pool'
 import { logger } from '../../lib/logger'
 import { startModelProbes, workerModelRanking } from '../../lib/model-ranking'
 import { outstandingEscalations } from '../routes/queen-needs-you'
+import { githubCiDeps, takeBackRefusedAcceptances } from './queen-ci-verdict'
 import {
   type CriterionRun,
   criteriaCounts,
@@ -51,6 +52,7 @@ import {
   parseCriterionChecks,
 } from './queen-criteria-run'
 import {
+  baseRef,
   DISPATCH_OUTCOME_LABELS,
   dispatchBee,
   reapDispatchesFromPreviousBoot,
@@ -464,6 +466,10 @@ async function ensureQueenColumns(pool: Pool): Promise<void> {
       ADD COLUMN IF NOT EXISTS judged_head text,
       ADD COLUMN IF NOT EXISTS judged_conversation text,
       ADD COLUMN IF NOT EXISTS judged_note text,
+      -- When the round last asked GitHub whether an accepted issue's pull
+      -- request passed its required checks (queen-ci-verdict.ts), so a few a
+      -- round walk the whole accepted set instead of the same few for ever.
+      ADD COLUMN IF NOT EXISTS ci_checked_at timestamptz,
       -- The issue's own criterion commands, run by the Queen on the commit,
       -- keyed like the reviewer cache (branch head, merge base, criteria). A
       -- wait row is re-read every 60 s, and a measurement is a temporary
@@ -1552,6 +1558,20 @@ export async function runRound(
   if (reviewed.acted.length > 0) {
     logger.info('Queen reviewed her own work', { verdicts: reviewed.acted })
   }
+
+  // An acceptance whose pull request a REQUIRED check refused is not one:
+  // the work cannot land, and the issue would otherwise be skipped as "the
+  // work already landed" for ever (queen-ci-verdict.ts). Housekeeping: a
+  // failure here is logged and the round goes on to start bees.
+  await takeBackRefusedAcceptances(
+    pool,
+    githubCiDeps(repo, baseRef().replace(/^origin\//, ''), githubReadHeaders()),
+  ).catch((error) => {
+    logger.warn('Queen could not ask CI about accepted work', {
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return []
+  })
 
   const reaped = await reapStalledDispatches(pool)
   if (reaped.length > 0) {
