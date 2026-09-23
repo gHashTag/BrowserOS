@@ -9,6 +9,7 @@ import {
   keyWork,
   parseOwners,
   rank,
+  SPEC_XP,
   xpFor,
 } from '../../src/api/services/queen-leaderboard'
 
@@ -22,9 +23,14 @@ const lane = (
   accepted: number,
   finished: number,
   hours: number,
+  // Of the accepted turns, the ones whose boundary named a `.t27` file. The
+  // default is none, so every case written before spec work was scored still
+  // says exactly what it said.
+  specs = 0,
 ): KeyWork => ({
   keyIndex,
   accepted,
+  specs,
   finished,
   hours,
 })
@@ -77,6 +83,38 @@ describe('the score', () => {
       { 0: 'Bob', 1: 'Ann', 2: 'Zoe', 3: 'Ada' },
     )
     expect(ranked.map((r) => r.name)).toEqual(['Zoe', 'Ann', 'Ada', 'Bob'])
+  })
+
+  /**
+   * Law L0 says the stack below the interface becomes `.t27`, and this is where
+   * the score says so. A spec pays ACCEPTED_XP and SPEC_XP on top rather than
+   * instead: the bonus says "and this one moved the goal", it does not pretend
+   * the rest was not work.
+   */
+  describe('spec work, which is the goal of the game', () => {
+    it('pays the bonus on top of the accepted work, not instead of it', () => {
+      const plain = rank([lane(0, 2, 2, 0, 0)], { 0: 'A' })[0]
+      const spec = rank([lane(0, 2, 2, 0, 2)], { 0: 'A' })[0]
+      expect(plain.xp).toBe(2 * ACCEPTED_XP)
+      expect(spec.xp).toBe(2 * ACCEPTED_XP + 2 * SPEC_XP)
+      expect(spec.specs).toBe(2)
+    })
+
+    it('outranks the same amount of work that moved no spec', () => {
+      const ranked = rank([lane(0, 3, 3, 0, 0), lane(1, 3, 3, 0, 3)], {
+        0: 'ported nothing',
+        1: 'ported specs',
+      })
+      expect(ranked[0].name).toBe('ported specs')
+    })
+
+    it('cannot count more specs than accepted turns, whatever a row claims', () => {
+      // A number that outran its own denominator would be a score nobody can
+      // check against the issues it came from.
+      expect(xpFor({ accepted: 1, hours: 0, specs: 9 })).toBe(
+        ACCEPTED_XP + SPEC_XP,
+      )
+    })
   })
 
   it('reads a GitHub login out of an @name, and carries it to the row', () => {

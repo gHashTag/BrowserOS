@@ -44,15 +44,32 @@ import type { Pool } from 'pg'
 export const ACCEPTED_XP = 100
 /** An hour of a bee's turn, on this key. */
 export const HOUR_XP = 10
+/**
+ * AN ACCEPTED ISSUE WHOSE BOUNDARY NAMED A `.t27` FILE, ON TOP OF ACCEPTED_XP.
+ *
+ * Owner's word, 2026-09-23: the specs themselves are the main thing this score
+ * should measure. That is not a preference, it is law L0 - everything below the
+ * interface becomes `.t27` - and a score that paid the same for a shell script
+ * and for the spec replacing it would reward every direction equally while the
+ * constitution names one.
+ *
+ * So spec work pays three times what other accepted work pays, and the board
+ * says which of the two it counted rather than hiding the weight in a total.
+ */
+export const SPEC_XP = 200
 
 export interface KeyWork {
   keyIndex: number
   accepted: number
+  /** Of those accepted, the ones whose boundary named a `.t27` file. */
+  specs: number
   finished: number
   hours: number
 }
 
 export interface Contributor {
+  /** Accepted issues whose boundary named a `.t27` file: the game's own goal. */
+  specs?: number
   /** The operator's name for the lender, or `key #N` when nobody claimed it. */
   name: string
   /** Whether a person claimed this lane in TRIOS_KEY_OWNERS. */
@@ -83,8 +100,16 @@ export function parseOwners(raw: string | undefined): Record<number, string> {
   return owners
 }
 
-export function xpFor(work: Pick<KeyWork, 'accepted' | 'hours'>): number {
-  return Math.round(work.accepted * ACCEPTED_XP + work.hours * HOUR_XP)
+export function xpFor(
+  work: Pick<KeyWork, 'accepted' | 'hours'> & { specs?: number },
+): number {
+  // Spec work is accepted work too, so it earns ACCEPTED_XP and SPEC_XP on top
+  // rather than instead: the bonus says "and this one moved the goal", it does
+  // not pretend the rest was not work.
+  const specs = Math.min(work.specs ?? 0, work.accepted)
+  return Math.round(
+    work.accepted * ACCEPTED_XP + specs * SPEC_XP + work.hours * HOUR_XP,
+  )
 }
 
 /**
@@ -122,12 +147,14 @@ export function rank(
       ...(claimed ? { github: githubLoginOf(name) } : {}),
       keys: [],
       accepted: 0,
+      specs: 0,
       finished: 0,
       hours: 0,
       xp: 0,
     }
     into.keys.push(lane.keyIndex)
     into.accepted += lane.accepted
+    into.specs = (into.specs ?? 0) + (lane.specs ?? 0)
     into.finished += lane.finished
     into.hours = Math.round((into.hours + lane.hours) * 10) / 10
     byName.set(name, into)
@@ -166,20 +193,33 @@ export async function keyWork(
   const windowed = days !== null
   const { rows } = await pool.query(
     `WITH turns AS (
-       SELECT key_index, review_state, dispatched_at, finished_at
+       SELECT key_index, review_state, dispatched_at, finished_at, owned_paths
          FROM queen_dispatch
         ${windowed ? "WHERE dispatched_at > now() - ($1::integer * interval '1 day')" : ''}
        UNION ALL
        SELECT (snapshot->>'key_index')::integer,
               snapshot->>'review_state',
               (snapshot->>'dispatched_at')::timestamptz,
-              (snapshot->>'finished_at')::timestamptz
+              (snapshot->>'finished_at')::timestamptz,
+              coalesce(snapshot->'owned_paths', '[]'::jsonb)
          FROM queen_dispatch_history
         WHERE snapshot->>'key_index' ~ '^[0-9]+$'
           ${windowed ? "AND archived_at > now() - ($1::integer * interval '1 day')" : ''}
      )
      SELECT key_index,
             count(*) FILTER (WHERE review_state = 'accept') AS accepted,
+            -- The game's own goal, counted from what the issue said it would
+            -- touch: a boundary naming a .t27 file is spec work. The board
+            -- shows this beside the total rather than folding it in silently.
+            -- (No backticks in here: this is inside a template literal, and one
+            -- of them ends the string and turns the rest into a tagged call.)
+            count(*) FILTER (
+              WHERE review_state = 'accept'
+                AND EXISTS (
+                  SELECT 1 FROM jsonb_array_elements_text(owned_paths) AS p(path)
+                   WHERE path LIKE '%.t27'
+                )
+            ) AS specs,
             count(*) FILTER (WHERE finished_at IS NOT NULL) AS finished,
             coalesce(
               sum(extract(epoch FROM (finished_at - dispatched_at)))
@@ -195,6 +235,7 @@ export async function keyWork(
   return rows.map((row) => ({
     keyIndex: Number(row.key_index),
     accepted: Number(row.accepted ?? 0),
+    specs: Number(row.specs ?? 0),
     finished: Number(row.finished ?? 0),
     hours: Math.round(Number(row.hours ?? 0) * 10) / 10,
   }))
@@ -205,7 +246,7 @@ export interface Leaderboard {
   days: number | null
   measuredAt: string
   /** What one accepted issue and one bee-hour are worth, so the page can say so. */
-  scoring: { acceptedXp: number; hourXp: number }
+  scoring: { acceptedXp: number; specXp: number; hourXp: number }
   contributors: Contributor[]
 }
 
@@ -217,7 +258,7 @@ export async function leaderboard(
   return {
     days,
     measuredAt: new Date().toISOString(),
-    scoring: { acceptedXp: ACCEPTED_XP, hourXp: HOUR_XP },
+    scoring: { acceptedXp: ACCEPTED_XP, specXp: SPEC_XP, hourXp: HOUR_XP },
     contributors: rank(work, parseOwners(process.env.TRIOS_KEY_OWNERS)),
   }
 }
