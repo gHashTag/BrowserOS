@@ -148,20 +148,35 @@ export function rank(
  * the archive is where the turns before it live; leaving it out counted the
  * last attempt of each issue and called it the swarm's whole history.
  */
-export async function keyWork(pool: Pool, days = 30): Promise<KeyWork[]> {
+export async function keyWork(
+  pool: Pool,
+  days: number | null = null,
+): Promise<KeyWork[]> {
+  // ALL TIME IS THE DEFAULT, and `days` narrows it.
+  //
+  // A thirty-day window was the first shape of this and it was the wrong one:
+  // the board is a record of who carried the swarm, and a record that forgets
+  // last month tells a lender their work stopped counting. It also shrinks on
+  // its own - a lane that worked hard in August and stopped simply vanished,
+  // which reads as "did nothing" rather than "did this, earlier".
+  //
+  // `null` means no time predicate at all rather than a very large number of
+  // days, so the query has nothing to be off-by-one about, and the archive's
+  // own rows decide how far back the answer goes.
+  const windowed = days !== null
   const { rows } = await pool.query(
     `WITH turns AS (
        SELECT key_index, review_state, dispatched_at, finished_at
          FROM queen_dispatch
-        WHERE dispatched_at > now() - ($1::integer * interval '1 day')
+        ${windowed ? "WHERE dispatched_at > now() - ($1::integer * interval '1 day')" : ''}
        UNION ALL
        SELECT (snapshot->>'key_index')::integer,
               snapshot->>'review_state',
               (snapshot->>'dispatched_at')::timestamptz,
               (snapshot->>'finished_at')::timestamptz
          FROM queen_dispatch_history
-        WHERE archived_at > now() - ($1::integer * interval '1 day')
-          AND snapshot->>'key_index' ~ '^[0-9]+$'
+        WHERE snapshot->>'key_index' ~ '^[0-9]+$'
+          ${windowed ? "AND archived_at > now() - ($1::integer * interval '1 day')" : ''}
      )
      SELECT key_index,
             count(*) FILTER (WHERE review_state = 'accept') AS accepted,
@@ -175,7 +190,7 @@ export async function keyWork(pool: Pool, days = 30): Promise<KeyWork[]> {
       WHERE key_index IS NOT NULL
       GROUP BY key_index
       ORDER BY key_index`,
-    [days],
+    windowed ? [days] : [],
   )
   return rows.map((row) => ({
     keyIndex: Number(row.key_index),
@@ -186,14 +201,18 @@ export async function keyWork(pool: Pool, days = 30): Promise<KeyWork[]> {
 }
 
 export interface Leaderboard {
-  days: number
+  /** The window in days, or null for the whole record. */
+  days: number | null
   measuredAt: string
   /** What one accepted issue and one bee-hour are worth, so the page can say so. */
   scoring: { acceptedXp: number; hourXp: number }
   contributors: Contributor[]
 }
 
-export async function leaderboard(pool: Pool, days = 30): Promise<Leaderboard> {
+export async function leaderboard(
+  pool: Pool,
+  days: number | null = null,
+): Promise<Leaderboard> {
   const work = await keyWork(pool, days)
   return {
     days,

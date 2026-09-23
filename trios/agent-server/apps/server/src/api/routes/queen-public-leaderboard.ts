@@ -21,16 +21,27 @@ import { createQueenPool } from '../../lib/db/queen-pool'
 import { logger } from '../../lib/logger'
 import { leaderboard } from '../services/queen-leaderboard'
 
-/** The window, in days. A month covers the swarm's memory of its own turns. */
-const DEFAULT_DAYS = 30
-const MAX_DAYS = 90
+/**
+ * ALL TIME BY DEFAULT. `?days=N` narrows it.
+ *
+ * This answered for thirty days until 2026-09-23, which was the wrong default
+ * for a record of who carried the swarm: a lender whose lanes worked hard last
+ * month and rested this one read as having done nothing, and the board quietly
+ * shrank as time passed rather than growing with the work.
+ */
+const MAX_DAYS = 3650
 
 export function createQueenPublicLeaderboardRoute() {
   return new Hono().get('/', async (c) => {
-    const asked = Number(c.req.query('days'))
-    const days = Number.isFinite(asked)
-      ? Math.min(MAX_DAYS, Math.max(1, Math.trunc(asked)))
-      : DEFAULT_DAYS
+    const raw = c.req.query('days')
+    const asked = Number(raw)
+    // No `days` at all means the whole record; a `days` that is not a number is
+    // a mistake in the request rather than a request for everything, so it is
+    // treated as absent only when it was absent.
+    const days =
+      raw === undefined || !Number.isFinite(asked)
+        ? null
+        : Math.min(MAX_DAYS, Math.max(1, Math.trunc(asked)))
     const url = process.env.DATABASE_URL
     if (!url) return c.json({ error: 'No database configured' }, 503)
     try {
