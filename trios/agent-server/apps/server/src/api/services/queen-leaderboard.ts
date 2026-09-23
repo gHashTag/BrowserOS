@@ -22,6 +22,17 @@
  *
  *   TRIOS_KEY_OWNERS="0=Dmitrii,1=@alex,4=Trinity community"
  *
+ * A NAME THAT STARTS WITH `@` IS A GITHUB LOGIN. This project lives on GitHub -
+ * the issues, the branches, the pull requests a bee opens are all there - so the
+ * person who lent the lane is nearly always someone with a GitHub account, and
+ * saying `1=@alex` gives the board a face and a profile to link instead of a
+ * bare string. The login is validated against GitHub's own rule (alphanumerics
+ * and single hyphens, up to 39 characters); anything else stays a plain name,
+ * so `4=Trinity community` and an `@` in a display name cannot become a link to
+ * a profile that is not theirs. Nothing is fetched from GitHub here: the handle
+ * travels as text and the page builds the avatar URL, so a leaderboard read
+ * never depends on GitHub being up or on a rate limit.
+ *
  * A lane nobody claimed is shown as `key #N` rather than dropped - the work is
  * real and the board must not imply the swarm ran on four keys when it ran on
  * fourteen. Nothing here reads a key, and nothing here can: the value never
@@ -46,6 +57,8 @@ export interface Contributor {
   name: string
   /** Whether a person claimed this lane in TRIOS_KEY_OWNERS. */
   claimed: boolean
+  /** Their GitHub login, when the name was written as `@login`. */
+  github?: string
   keys: number[]
   accepted: number
   finished: number
@@ -75,6 +88,22 @@ export function xpFor(work: Pick<KeyWork, 'accepted' | 'hours'>): number {
 }
 
 /**
+ * GitHub's own rule for a login: alphanumerics and single hyphens, never at
+ * either end, at most 39 characters. Kept strict on purpose - this string
+ * becomes a link to a person's profile and the URL of their avatar, so a name
+ * that merely contains an `@` must not be able to point the board at a
+ * stranger's account.
+ */
+const GITHUB_LOGIN = /^[a-zA-Z\d](?:[a-zA-Z\d]|-(?=[a-zA-Z\d])){0,38}$/
+
+/** `@alex` -> 'alex'. Anything that is not a login is not one. */
+export function githubLoginOf(name: string): string | undefined {
+  if (!name.startsWith('@')) return undefined
+  const login = name.slice(1)
+  return GITHUB_LOGIN.test(login) ? login : undefined
+}
+
+/**
  * The work of each lane, gathered by lender and ranked. Pure: the rows are the
  * database's, the ranking is this function's, and the test drives it directly.
  */
@@ -90,6 +119,7 @@ export function rank(
     const into: Contributor = seen ?? {
       name,
       claimed,
+      ...(claimed ? { github: githubLoginOf(name) } : {}),
       keys: [],
       accepted: 0,
       finished: 0,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import {
   ACCEPTED_XP,
+  githubLoginOf,
   HOUR_XP,
   type KeyWork,
   parseOwners,
@@ -73,5 +74,48 @@ describe('the score', () => {
       { 0: 'Bob', 1: 'Ann', 2: 'Zoe', 3: 'Ada' },
     )
     expect(ranked.map((r) => r.name)).toEqual(['Zoe', 'Ann', 'Ada', 'Bob'])
+  })
+
+  it('reads a GitHub login out of an @name, and carries it to the row', () => {
+    expect(githubLoginOf('@alex')).toBe('alex')
+    expect(githubLoginOf('@torvalds')).toBe('torvalds')
+    expect(githubLoginOf('@gHashTag')).toBe('gHashTag')
+    expect(githubLoginOf('@a-b-c9')).toBe('a-b-c9')
+    const [row] = rank([lane(0, 1, 1, 0)], { 0: '@alex' })
+    expect(row.github).toBe('alex')
+    expect(row.name).toBe('@alex')
+  })
+
+  /**
+   * The handle becomes a link to a person's profile and the URL of their
+   * avatar, so anything that is not a login must not become one. A plain name
+   * is shown as itself; it is never pointed at somebody else's account.
+   */
+  it('refuses a name that is not a GitHub login', () => {
+    for (const name of [
+      'Dmitrii',
+      'Trinity community',
+      '@',
+      '@-alex',
+      '@alex-',
+      '@al--ex',
+      '@alex/../torvalds',
+      '@alex bob',
+      '@alex.png',
+      '@' + 'a'.repeat(40),
+      'mail@example.com',
+    ]) {
+      expect(githubLoginOf(name)).toBeUndefined()
+    }
+    const [row] = rank([lane(0, 1, 1, 0)], { 0: 'Trinity community' })
+    expect(row.github).toBeUndefined()
+    expect(row.claimed).toBe(true)
+  })
+
+  it('gives an unclaimed lane no handle at all', () => {
+    const [row] = rank([lane(7, 1, 1, 0)], {})
+    expect(row.name).toBe('key #7')
+    expect(row.github).toBeUndefined()
+    expect(row.claimed).toBe(false)
   })
 })
