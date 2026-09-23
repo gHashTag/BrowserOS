@@ -77,10 +77,17 @@ describe('route-guard audit over src/api/server.ts', () => {
     // `guardedSubAppCount` from 14 to 15 and left this gate red on the branch.
     // The other is `/queen/hq`, mounted here for the first time - an allowlisted
     // shell, so it moves neither the guarded nor the public-read count.
-    expect(report.totalMounts).toBe(44)
+    // RE-MEASURED 2026-09-23: 44 became 45, and this time the pin went stale in
+    // the first of its two ways. One mount was added on purpose -
+    // `/queen/public-leaderboard`, an explicit `publicReadCorsMiddleware()` on
+    // the lane scoreboard - and the audit puts it in `public-read`, which is
+    // where a route named `public` belongs. Every other number here is
+    // unchanged, which is the part worth stating: no guarded route quietly lost
+    // its guard to make room for it.
+    expect(report.totalMounts).toBe(45)
     expect(report.prefixGuardCount).toBe(18)
     expect(report.guardedSubAppCount).toBe(15)
-    expect(report.publicReadCount).toBe(7)
+    expect(report.publicReadCount).toBe(8)
   })
 
   it('reports zero unguarded mounts once the reasoned allowlist is applied', () => {
@@ -98,7 +105,7 @@ describe('route-guard audit over src/api/server.ts', () => {
     )
   })
 
-  it('splits the twenty-one /queen mounts into 7 public-read, 8 wrapper-guarded and 6 allowlisted shells', () => {
+  it('splits the twenty-two /queen mounts into 8 public-read, 8 wrapper-guarded and 6 allowlisted shells', () => {
     const queenMounts = classifyMounts(source).filter(
       (mount) => mount.path === '/queen' || mount.path.startsWith('/queen/'),
     )
@@ -114,7 +121,13 @@ describe('route-guard audit over src/api/server.ts', () => {
     // RE-MEASURED 2026-09-17: nineteen became twenty-one. The eighth wrapper is
     // /queen/rehearsal, added with the in-container bee and never counted here;
     // the sixth shell is /queen/hq, which until today was mounted nowhere.
-    expect(queenMounts.length).toBe(21)
+    // RE-MEASURED 2026-09-23: twenty-one became twenty-two. The eighth
+    // public-read is /queen/public-leaderboard - which lane a bee ran on and
+    // what it earned, derived from the dispatches on every read. It carries no
+    // issue title, no worker text and no credential: only a key's INDEX ever
+    // reaches the database, so there is nothing here a stranger could read that
+    // the board does not already show.
+    expect(queenMounts.length).toBe(22)
 
     const counts: Record<string, number> = {
       'public-read': 0,
@@ -125,10 +138,10 @@ describe('route-guard audit over src/api/server.ts', () => {
     for (const mount of queenMounts) {
       counts[mount.classification] += 1
     }
-    // The four buckets must account for all sixteen mounts with the exact
-    // expected split; anything unaccounted for breaks one of these numbers.
+    // The four buckets must account for every mount with the exact expected
+    // split; anything unaccounted for breaks one of these numbers.
     expect(counts).toEqual({
-      'public-read': 7,
+      'public-read': 8,
       'prefix-guard': 0,
       wrapper: 8,
       unguarded: 6,
