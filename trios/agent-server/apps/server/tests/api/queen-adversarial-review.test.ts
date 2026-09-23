@@ -586,6 +586,58 @@ describe('the verdict, with an adversary', () => {
     expect(update.params[6]).toBe(0)
   })
 
+  /**
+   * 2026-09-23: the reviewer made 16 calls and lost all 16 to ZAI answering
+   * 1302 and 1305, while fifteen NVIDIA credentials sat idle. Every finished
+   * bee went to `wait` and the swarm accepted nothing for hours - because a
+   * transient failure used to END the loop instead of trying the next lane,
+   * which is the one case where another lane certainly would have answered: a
+   * rate limit belongs to ONE vendor's account.
+   */
+  it('tries another lane when a provider says "not now"', async () => {
+    const { pool, queries } = sweepPool(finishedRow())
+    const { deps, calls } = fakes({
+      llm: async (lane) => {
+        calls.push({ lane, system: '', message: '' })
+        if (lane.poolNumber === 2)
+          return {
+            ok: false,
+            error: '[1305] The service may be temporarily overloaded',
+            transient: true,
+          }
+        return { ok: true, text: allMet }
+      },
+    })
+    await reviewFinishedDispatches(pool, deps)
+    // The busy lane first, because it is the one of another vendor; then the
+    // other, which answers. Two lanes, and never the same one twice - `pick`
+    // is deterministic, so without the tried-set the retry would be three
+    // calls to the endpoint that just refused.
+    expect(calls.map((c) => c.lane.poolNumber)).toEqual([2, 1])
+    // The second lane's answer is what got written, so the review happened
+    // rather than being skipped for the round.
+    const cached = queries.filter((q) =>
+      q.sql.includes('SET reviewer_fingerprint'),
+    )
+    expect(cached).toHaveLength(1)
+    expect(cached[0].params[3]).toBe('glm-5.3')
+  })
+
+  it('does not charge a miss when a busy lane is followed by a broken one', async () => {
+    const { pool, verdictUpdates } = sweepPool(finishedRow())
+    const { deps } = fakes({
+      llm: async (lane) =>
+        lane.poolNumber === 2
+          ? { ok: false, error: '[1302] Rate limit reached', transient: true }
+          : { ok: false, error: 'model not found', transient: false },
+    })
+    const reviewed = await reviewFinishedDispatches(pool, deps)
+    expect(reviewed.acted).toEqual([`#${ISSUE}:wait`])
+    // One lane was merely busy, so the review never had its chance - the bee
+    // had no part in that and must not wear the miss.
+    expect(verdictUpdates()[0].params[6]).toBe(0)
+  })
+
   it.if(present)(
     'sends back and spends the budget when the reviewer refutes with a reason',
     async () => {
