@@ -57,6 +57,7 @@ import { createQueenNeedsYouRoute } from './routes/queen-needs-you'
 import { createQueenPublicActivityRoute } from './routes/queen-public-activity'
 import { createQueenPublicAgentsRoute } from './routes/queen-public-agents'
 import { createQueenPublicHardwareRoute } from './routes/queen-public-hardware'
+import { createQueenPublicLeaderboardRoute } from './routes/queen-public-leaderboard'
 import { createQueenPublicResearchRoute } from './routes/queen-public-research'
 import { createQueenPublicStatusRoute } from './routes/queen-public-status'
 import { createQueenRegistryRoute } from './routes/queen-registry'
@@ -370,6 +371,7 @@ export async function createHttpServer(config: HttpServerConfig) {
     .use('/queen/public-hardware', publicReadCorsMiddleware())
     .use('/queen/public-research', publicReadCorsMiddleware())
     .use('/queen/public-agents', publicReadCorsMiddleware())
+    .use('/queen/public-leaderboard', publicReadCorsMiddleware())
     .use('/queen/scheduler', publicReadCorsMiddleware())
     .use('/*', trustedCorsMiddleware())
     // The Inngest server registers and invokes functions here; each request
@@ -386,6 +388,8 @@ export async function createHttpServer(config: HttpServerConfig) {
     .route('/queen/public-research', createQueenPublicResearchRoute())
     .route('/queen/public-agents', createQueenPublicAgentsRoute())
     .route('/queen/public-board', createQueenPublicBoardRoute())
+    // Who lent a lane and what it did; no titles, no worker text, no key.
+    .route('/queen/public-leaderboard', createQueenPublicLeaderboardRoute())
     .route('/queen/registry', queenRegistryRoutes)
     // The shell only. It holds no state and no token; every byte of data it
     // shows comes from /queen/lease, which stays guarded. See the route header
