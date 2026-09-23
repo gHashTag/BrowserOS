@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'bun:test'
+import type { Pool } from 'pg'
+
 import {
   ACCEPTED_XP,
   githubLoginOf,
   HOUR_XP,
   type KeyWork,
+  keyWork,
   parseOwners,
   rank,
   xpFor,
@@ -110,6 +113,44 @@ describe('the score', () => {
     const [row] = rank([lane(0, 1, 1, 0)], { 0: 'Trinity community' })
     expect(row.github).toBeUndefined()
     expect(row.claimed).toBe(true)
+  })
+
+  /**
+   * The window is the one branch here that SQL decides rather than TypeScript,
+   * so it is pinned by what the query actually says. A fake pool is enough:
+   * the question is whether a time predicate is written and whether a parameter
+   * is passed, and both are visible without a database.
+   */
+  describe('the window', () => {
+    const spy = () => {
+      const seen: { text: string; params: unknown[] } = { text: '', params: [] }
+      const pool = {
+        query: (text: string, params: unknown[]) => {
+          seen.text = text
+          seen.params = params
+          return Promise.resolve({ rows: [] })
+        },
+      } as unknown as Pool
+      return { pool, seen }
+    }
+
+    it('asks for the whole record by default, with no time predicate at all', async () => {
+      const { pool, seen } = spy()
+      await keyWork(pool)
+      expect(seen.text).not.toContain('interval')
+      expect(seen.params).toEqual([])
+      // The archive still keeps its own guard, which is not about time.
+      expect(seen.text).toContain("snapshot->>'key_index' ~ ")
+    })
+
+    it('narrows both halves when days is given, and passes it once', async () => {
+      const { pool, seen } = spy()
+      await keyWork(pool, 30)
+      expect(seen.params).toEqual([30])
+      // Both the live table and the archive, or the answer is half-windowed.
+      expect(seen.text).toContain('dispatched_at > now()')
+      expect(seen.text).toContain('archived_at > now()')
+    })
   })
 
   it('gives an unclaimed lane no handle at all', () => {
