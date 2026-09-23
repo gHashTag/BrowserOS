@@ -95,6 +95,7 @@ import {
   reviewerAnswers,
   reviewerFingerprint,
   reviewerLaneBackedOff,
+  reviewerLaneKey,
   reviewerMessage,
   sameModelAs,
   visiblePatchPaths,
@@ -3188,11 +3189,20 @@ export async function reviewFinishedDispatches(
         // `runRound` counts them before it hands out a key.
         takenKeys ??= await runningKeys(pool)
         const taken = takenKeys
+        // A LANE THAT ALREADY REFUSED THIS REVIEW IS NOT OFFERED AGAIN.
+        //
+        // `chooseReviewerLane` is deterministic, so without this the same lane
+        // is handed back every time round the loop and the retry is three
+        // calls to the one endpoint that just said no. Scoped to this one
+        // review, unlike `markReviewerLaneFailed`, which is a half-hour
+        // backoff and belongs only to a lane that is broken rather than busy.
+        const triedLanes = new Set<string>()
         const pick = () =>
           chooseReviewerLane(
             deps
               .laneCandidates(taken)
-              .filter((lane) => !reviewerLaneBackedOff(lane)),
+              .filter((lane) => !reviewerLaneBackedOff(lane))
+              .filter((lane) => !triedLanes.has(reviewerLaneKey(lane))),
             bee,
           )
         let choice = pick()
@@ -3225,13 +3235,20 @@ export async function reviewFinishedDispatches(
             // deterministic, so a lane that can never answer was chosen again
             // every round; a lane refused for good is backed off and the next
             // one is tried, down to the bee's own model as a last resort.
-            let lastTransient = false
+            // DID ANY LANE SAY "NOT NOW". Sticky, and it used to be "was the
+            // LAST failure transient" - which was the same thing only while a
+            // transient failure ended the loop. Now that a busy lane falls
+            // through to the next one, a busy lane followed by a broken one
+            // would read as "no lane was busy" and charge the bee a miss for
+            // an outage it had no part in.
+            let sawTransient = false
             for (
               let tries = 0;
               choice && tries < REVIEWER_LANE_TRIES;
               tries++
             ) {
               const lane: WorkerProvider = choice.lane
+              triedLanes.add(reviewerLaneKey(lane))
               const answer = await deps.llm(
                 lane,
                 REVIEWER_SYSTEM_PROMPT,
@@ -3241,7 +3258,7 @@ export async function reviewFinishedDispatches(
                 // Nothing spent: a 1302 or a timeout is the provider saying
                 // "not now", and it must not read as a finding about the work.
                 reviewerSkipped = `the reviewer call failed: ${answer.error}`
-                lastTransient = answer.transient
+                sawTransient ||= answer.transient
                 logger.warn('Queen reviewer call failed; nothing was spent', {
                   issue,
                   reviewerModel: lane.model,
@@ -3249,12 +3266,25 @@ export async function reviewFinishedDispatches(
                   transient: answer.transient,
                   error: answer.error,
                 })
-                if (answer.transient) break
-                markReviewerLaneFailed(lane)
+                // A TRANSIENT REFUSAL TRIES THE NEXT LANE TOO. This used to
+                // `break`, which gave up on the whole review the moment one
+                // provider said "not now" - and that is exactly the case where
+                // another lane answers, because a rate limit belongs to ONE
+                // vendor's account and the others are idle. On 2026-09-23 the
+                // reviewer ran 16 calls and lost 16 of them to ZAI's 1302 and
+                // 1305 while fifteen NVIDIA credentials sat unused; every
+                // finished bee went to `wait` and the swarm accepted nothing
+                // for hours.
+                //
+                // Only a lane that is broken is backed off for the half hour.
+                // Busy is not broken: a lane that answered a rate limit will
+                // answer work again in a minute, and burning it for thirty
+                // would turn a provider's bad minute into the Queen's bad
+                // half-hour.
+                if (!answer.transient) markReviewerLaneFailed(lane)
                 choice = pick()
                 continue
               }
-              lastTransient = false
               // THE COMPILER'S LINES ONLY, as `reviewerMessage` is given
               // them. `citesEvidence` harvests every file-shaped token out of
               // a met machine line and makes it citable for EVERY criterion,
@@ -3319,7 +3349,7 @@ export async function reviewFinishedDispatches(
                 })
               break
             }
-            if (!reviewer && !reviewerMissed && !lastTransient) {
+            if (!reviewer && !reviewerMissed && !sawTransient) {
               reviewerMissed = true
             }
           }
