@@ -884,6 +884,89 @@ function configuredEndpointProvider(
 }
 
 /**
+ * The credential a durable `key_index` names, for whoever has to USE it later.
+ *
+ * `resolveWorkerProvider` chooses; this one remembers. A bee that runs outside
+ * the Queen is handed its issue through `queen_dispatch`, and the row carries
+ * the index and never the key: a secret in a table is a secret in every backup,
+ * every logical replica and every `SELECT *` a dashboard ever runs. The runner
+ * reads the same variables the Queen reads and resolves the index against them,
+ * so the credential exists in exactly the two places it already did - the
+ * environment and the request - and nowhere in between.
+ *
+ * Null when the index names nothing: keys were removed, or the runner's
+ * environment is not the Queen's. Refusing is the only safe answer, because the
+ * next index along is a DIFFERENT account with a different rate limit, and
+ * quietly using it would put two bees on one credential while the ledger says
+ * otherwise.
+ */
+export function workerProviderForKeyIndex(
+  keyIndex: number,
+): WorkerProvider | null {
+  const override = process.env.TRIOS_QUEEN_WORKER_MODEL
+  if (configuredWorkerBaseUrl()) {
+    const pools = configuredEndpointPools()
+    if (pools.length === 0) return null
+    if (pools.length > 1) {
+      for (const pool of pools) {
+        const position = keyIndex - (pool.number - 1) * POOL_KEY_STRIDE
+        if (position < 0 || position >= pool.keys.length) continue
+        return {
+          provider: pool.provider,
+          model: pool.model,
+          baseUrl: pool.baseUrl,
+          apiKey: pool.keys[position],
+          keyIndex,
+          keyCount: pool.keys.length,
+          poolNumber: pool.number,
+          poolCount: pools.length,
+          contextWindow: pool.contextWindow,
+        }
+      }
+      return null
+    }
+    const only = pools[0]
+    if (keyIndex < 0 || keyIndex >= only.keys.length) {
+      // Ollama is one inference slot with one token name, and its index is 0.
+      return only.provider === 'ollama' && keyIndex === 0
+        ? {
+            provider: 'ollama',
+            model: only.model,
+            baseUrl: only.baseUrl,
+            apiKey: only.keys[0] || 'local',
+            keyIndex: 0,
+            keyCount: 1,
+            contextWindow: only.contextWindow,
+          }
+        : null
+    }
+    return {
+      provider: only.provider,
+      model: only.model,
+      baseUrl: only.baseUrl,
+      apiKey: only.keys[keyIndex],
+      keyIndex,
+      keyCount: only.keys.length,
+      contextWindow: only.contextWindow,
+    }
+  }
+  for (const candidate of WORKER_PROVIDERS) {
+    const keys = keysFor(candidate.envVar)
+    if (keys.length === 0) continue
+    if (keyIndex < 0 || keyIndex >= keys.length) return null
+    return {
+      provider: candidate.provider,
+      model: override || candidate.model,
+      apiKey: keys[keyIndex],
+      keyIndex,
+      keyCount: keys.length,
+      laneCount: workerLanesFor(candidate.provider),
+    }
+  }
+  return null
+}
+
+/**
  * A bounded number of concurrent lanes per distinct credential.
  *
  * Four bees sharing one credential share one rate limit, so the swarm's real
@@ -4051,11 +4134,18 @@ async function salvageBeforeRelease(
   const salvage = deps.salvage ?? salvageDispatch
   const budgetMs = deps.budgetMs ?? SALVAGE_SWEEP_BUDGET_MS
   const due: number[] = []
+  // Released, never salvaged: a bee that ran - or was to run - in a runner's
+  // container left nothing on THIS disk, and a salvage here would be git on a
+  // worktree that does not exist.
+  const elsewhere = new Set<number>()
   try {
     const rows = await pool.query(sql, params)
     for (const row of rows.rows ?? []) {
       const issue = Number((row as { issue?: unknown }).issue)
-      if (Number.isFinite(issue)) due.push(issue)
+      if (!Number.isFinite(issue)) continue
+      due.push(issue)
+      if ((row as { queued_at?: unknown }).queued_at != null)
+        elsewhere.add(issue)
     }
   } catch (error) {
     logger.warn('Queen could not read the rows a reaper is about to release', {
@@ -4075,6 +4165,7 @@ async function salvageBeforeRelease(
       })
       continue
     }
+    if (elsewhere.has(issue)) continue
     // AND NEVER FOR LONGER THAN THE BUDGET. The release is what the reaper is
     // for; the repair is what it would like to do on the way. A sweep inside
     // the round gate that spends unbounded git time is a swarm that dispatches
@@ -4097,8 +4188,12 @@ export async function reapDispatchesFromPreviousBoot(
 ): Promise<number[]> {
   const due = await salvageBeforeRelease(
     pool,
-    `SELECT issue FROM queen_dispatch
-      WHERE started = true AND finished_at IS NULL`,
+    // ONLY BEES THIS CONTAINER RAN. A row the Queen QUEUED belongs to a runner,
+    // and a runner does not die when the Queen restarts: releasing its row
+    // would free the boundary and the key of a bee that is still writing, and
+    // the next round would dispatch the same issue into a second container.
+    `SELECT issue, queued_at FROM queen_dispatch
+      WHERE started = true AND finished_at IS NULL AND queued_at IS NULL`,
     [],
     deps,
   )
@@ -4119,13 +4214,25 @@ export async function reapDispatchesFromPreviousBoot(
     `UPDATE queen_dispatch
         SET finished_at = now(),
             outcome = '${DISPATCH_OUTCOME_LABELS.reapedAtBoot}: the container running this turn was replaced'
-      WHERE started = true AND finished_at IS NULL
+      WHERE started = true AND finished_at IS NULL AND queued_at IS NULL
         AND issue = ANY($1::int[])
       RETURNING issue`,
     [due],
   )
   return reaped.rows.map((r) => r.issue as number)
 }
+
+/**
+ * How long a runner may go without vouching for its bee before the bee is
+ * presumed dead with it.
+ *
+ * A runner renews `claimed_at` every few seconds while its turn streams. Its
+ * container can vanish without a word - a redeploy, a crash, a scale-down - and
+ * nothing else would ever end the row: the Queen does not see that process and
+ * the two-hour rule would hold the boundary and the key for two hours. Ten
+ * minutes is forty missed renewals, which is not a slow network.
+ */
+export const RUNNER_SILENT_MINUTES = 10
 
 export async function reapStalledDispatches(
   pool: Pool,
@@ -4134,11 +4241,13 @@ export async function reapStalledDispatches(
 ): Promise<number[]> {
   const due = await salvageBeforeRelease(
     pool,
-    `SELECT issue FROM queen_dispatch
+    `SELECT issue, queued_at FROM queen_dispatch
       WHERE started = true
         AND finished_at IS NULL
-        AND dispatched_at < now() - make_interval(mins => $1)`,
-    [stallMinutes],
+        AND (dispatched_at < now() - make_interval(mins => $1)
+             OR (claimed_by IS NOT NULL
+                 AND claimed_at < now() - make_interval(mins => $2)))`,
+    [stallMinutes, RUNNER_SILENT_MINUTES],
     deps,
   )
   if (due.length === 0) return []
@@ -4156,10 +4265,12 @@ export async function reapStalledDispatches(
             outcome = '${DISPATCH_OUTCOME_LABELS.reapedStalled}: no completion within ' || $1 || ' minutes'
       WHERE started = true
         AND finished_at IS NULL
-        AND dispatched_at < now() - make_interval(mins => $1)
+        AND (dispatched_at < now() - make_interval(mins => $1)
+             OR (claimed_by IS NOT NULL
+                 AND claimed_at < now() - make_interval(mins => $3)))
         AND issue = ANY($2::int[])
       RETURNING issue`,
-    [stallMinutes, due],
+    [stallMinutes, due, RUNNER_SILENT_MINUTES],
   )
   return reaped.rows.map((r) => r.issue as number)
 }
@@ -4245,6 +4356,54 @@ export async function dispatchBee(
     return { started: false, issue, branch, detail }
   }
 
+  // THE HANDOVER, when bees run in their own containers.
+  //
+  // The Queen's work ends here: she has chosen the issue, its boundary and its
+  // credential, and the row IS the order. She asks nothing of her own container
+  // because the bee will not run in it, and cuts no worktree because the runner
+  // cuts its own. The row is in flight from this moment - started, unfinished -
+  // so the boundary is held and the key is taken exactly as before, and every
+  // reader of the table keeps working without knowing where the bee runs.
+  if (beesRunElsewhere()) {
+    const conversationId = randomUUID()
+    const detail =
+      `queued for a runner; ${chosen.provider}/${chosen.model}` +
+      (chosen.poolCount && chosen.poolCount > 1
+        ? ` pool ${chosen.poolNumber}`
+        : '') +
+      (chosen.keyCount && chosen.keyCount > 1
+        ? ` key ${((chosen.keyIndex ?? 0) % POOL_KEY_STRIDE) + 1}/${chosen.keyCount}`
+        : '')
+    await recordDispatch(
+      pool,
+      issue,
+      branch,
+      true,
+      detail,
+      ownedPaths,
+      conversationId,
+      chosen.keyIndex,
+      criteria,
+      criteriaSource,
+      chosen.provider,
+      chosen.model,
+      { brief },
+    )
+    logger.info('Queen queued a bee for a runner', {
+      issue,
+      branch,
+      keyIndex: chosen.keyIndex,
+    })
+    return {
+      started: true,
+      issue,
+      branch,
+      detail,
+      conversationId,
+      keyIndex: chosen.keyIndex,
+    }
+  }
+
   // A key is free and a provider answers. The remaining question is the one
   // nothing used to ask: can the CONTAINER carry another bee? Asked here, before
   // a worktree is cut, so a refusal costs a measurement and nothing else. The
@@ -4272,28 +4431,95 @@ export async function dispatchBee(
     }
   }
 
+  const cut = await cutAndStart(
+    pool,
+    { issue, branch, brief, ownedPaths, conversationId: randomUUID(), chosen },
+    deps,
+  )
+  if (!cut.ok) {
+    await recordDispatch(pool, issue, branch, false, cut.detail, ownedPaths)
+    return { started: false, issue, branch, detail: cut.detail }
+  }
+
+  await recordDispatch(
+    pool,
+    issue,
+    branch,
+    cut.started,
+    cut.detail,
+    ownedPaths,
+    cut.conversationId,
+    chosen.keyIndex,
+    criteria,
+    criteriaSource,
+    chosen.provider,
+    chosen.model,
+  )
+  cut.begin()
+  logger.info('Queen dispatch', {
+    issue,
+    branch,
+    started: cut.started,
+    detail: cut.detail,
+  })
+  return {
+    started: cut.started,
+    issue,
+    branch,
+    detail: cut.detail,
+    conversationId: cut.conversationId,
+    keyIndex: chosen.keyIndex,
+  }
+}
+
+interface BeePlan {
+  issue: number
+  branch: string
+  brief: string
+  ownedPaths: string[]
+  conversationId: string
+  chosen: WorkerProvider
+}
+
+/**
+ * Cut the worktree and hand the turn to the agent, wherever this is running.
+ *
+ * The half of a dispatch that is the same whether the Queen is starting the bee
+ * herself or a runner is starting one she ordered. What differs is the ledger
+ * around it - an insert here, an update there - and that stays with the caller,
+ * because a row written by the wrong rule is a bee nobody can account for.
+ *
+ * `begin` is handed back rather than called: the stream must not be read until
+ * the caller's row exists, or the reader that closes the row can outrun its
+ * creation. That race was measured, and the phantom it leaves is a bee that has
+ * stopped and looks like it is running until the reaper comes.
+ */
+async function cutAndStart(
+  pool: Pool,
+  plan: BeePlan,
+  deps: BeeRoomDeps,
+): Promise<
+  | { ok: false; detail: string }
+  | {
+      ok: true
+      started: boolean
+      detail: string
+      conversationId: string
+      begin: () => void
+    }
+> {
+  const { issue, brief, ownedPaths, conversationId, chosen } = plan
   const worktree = await prepareWorktree(issue, {
     running: () => runningBeeBranches(pool),
     volumeUsed: deps.volumeUsed,
   })
-  if (!worktree.ok) {
-    await recordDispatch(
-      pool,
-      issue,
-      branch,
-      false,
-      worktree.detail,
-      ownedPaths,
-    )
-    return { started: false, issue, branch, detail: worktree.detail }
-  }
+  if (!worktree.ok) return { ok: false, detail: worktree.detail }
 
   // The PROJECT inside the checkout, not the checkout root. A worktree is a
   // clone of the repository and this project is a directory inside it, so
   // standing at the root makes every project-relative boundary resolve one
   // level too high - the bee writes `<worktree>/docs/x.md` where the committer
   // looks for `trios/docs/x.md`, and its work reads as no work at all.
-  // The PROJECT inside the checkout — which is not always a subdirectory.
   //
   // This was hardcoded to `/trios`, which is right for BrowserOS and wrong for
   // every other repository: aimed at a repo whose code sits at its root, the
@@ -4306,7 +4532,6 @@ export async function dispatchBee(
   const subdir = repoSubdir()
   const workingDirectory = subdir ? `${worktree.path}/${subdir}` : worktree.path
 
-  const conversationId = randomUUID()
   const turn = await startTurn(
     pool,
     issue,
@@ -4329,41 +4554,103 @@ export async function dispatchBee(
         : '') +
       (chosen.rehearsal ? ' (REHEARSAL - a recorded stream, not a model)' : '')
     : turn.detail
-
-  await recordDispatch(
-    pool,
-    issue,
-    branch,
-    turn.ok,
-    detail,
-    ownedPaths,
-    conversationId,
-    chosen.keyIndex,
-    criteria,
-    criteriaSource,
-    chosen.provider,
-    chosen.model,
-  )
-  // A bee that just started has not allocated what it will hold. The next
-  // dispatch of this round must not read the container as empty because of it.
-  if (turn.ok) noteBeeStarted(conversationId, (deps.now ?? Date.now)())
-  // THIS PROCESS NOW KNOWS THIS BEE IS ALIVE, which is a question the database
-  // cannot answer: a row that has not been closed for two hours is a row, not
-  // a corpse. The stall sweep reads this before it salvages, so a long turn's
-  // worktree is never committed from under it. `closeDispatch` clears it.
-  if (turn.ok) markBeeRunningHere(issue, conversationId)
-  // ONLY NOW may the stream be read. Everything that reads the bee's output
-  // eventually writes to the row above, and a writer that can outrun the row's
-  // creation is a writer that silently updates nothing.
-  turn.beginDrain?.()
-  logger.info('Queen dispatch', { issue, branch, started: turn.ok, detail })
   return {
+    ok: true,
     started: turn.ok,
-    issue,
-    branch,
     detail,
     conversationId,
-    keyIndex: chosen.keyIndex,
+    begin: () => {
+      // A bee that just started has not allocated what it will hold. The next
+      // dispatch of this round must not read the container as empty because of
+      // it.
+      if (turn.ok) noteBeeStarted(conversationId, (deps.now ?? Date.now)())
+      // THIS PROCESS NOW KNOWS THIS BEE IS ALIVE, which is a question the
+      // database cannot answer: a row that has not been closed for two hours is
+      // a row, not a corpse. The stall sweep reads this before it salvages, so
+      // a long turn's worktree is never committed from under it.
+      // `closeDispatch` clears it.
+      if (turn.ok) markBeeRunningHere(issue, conversationId)
+      // ONLY NOW may the stream be read. Everything that reads the bee's output
+      // eventually writes to the caller's row, and a writer that can outrun the
+      // row's creation is a writer that silently updates nothing.
+      turn.beginDrain?.()
+    },
+  }
+}
+
+/**
+ * Run a bee the Queen ordered and a runner claimed.
+ *
+ * Same turn, same worktree, same transcript; what is different is only where it
+ * happens and what the ledger already holds. The row exists and is in flight,
+ * so a success UPDATES its detail rather than writing it again - a second
+ * insert would archive a history row and clear the criteria the bee is to be
+ * judged against. A failure is recorded as a refusal, which ends the row and
+ * hands the issue and its boundary back to the next round; nothing else here
+ * could release them, and an order nobody can retry is worse than one nobody
+ * took.
+ */
+export async function runClaimedBee(
+  pool: Pool,
+  order: {
+    issue: number
+    branch: string
+    brief: string
+    ownedPaths: string[]
+    conversationId: string
+    keyIndex: number
+  },
+  deps: BeeRoomDeps = {},
+): Promise<DispatchOutcome> {
+  const { issue, branch, ownedPaths } = order
+  const refuse = async (detail: string): Promise<DispatchOutcome> => {
+    await recordDispatch(pool, issue, branch, false, detail, ownedPaths)
+    return { started: false, issue, branch, detail }
+  }
+
+  const chosen = workerProviderForKeyIndex(order.keyIndex)
+  if (!chosen?.apiKey) {
+    // The runner's environment is not the Queen's, or the key list changed
+    // under the order. Taking the next credential along would put two bees on
+    // one account while the ledger says otherwise.
+    return refuse(
+      `this runner cannot resolve key_index ${order.keyIndex}: its worker ` +
+        'variables differ from the ones the order was written against',
+    )
+  }
+  const noRoom = await beeRoomRefusal(pool, branch, deps)
+  if (noRoom) {
+    logger.warn('Runner claimed a bee but its container has no room', {
+      issue,
+      resource: noRoom.resource,
+      detail: noRoom.detail,
+    })
+    return refuse(noRoom.detail)
+  }
+
+  const cut = await cutAndStart(pool, { ...order, chosen }, deps)
+  if (!cut.ok || !cut.started) {
+    return refuse(cut.ok ? cut.detail : cut.detail)
+  }
+  // `dispatched_at` too: the two-hour rule measures a TURN, and until this
+  // moment the row was only an order waiting in a queue. Left at the queue time
+  // a bee that waited an hour for a runner would be reaped an hour into its
+  // work.
+  await pool.query(
+    `UPDATE queen_dispatch
+        SET detail = $2, claimed_at = now(), dispatched_at = now()
+      WHERE issue = $1`,
+    [issue, cut.detail],
+  )
+  cut.begin()
+  logger.info('Runner started a bee', { issue, branch, detail: cut.detail })
+  return {
+    started: true,
+    issue,
+    branch,
+    detail: cut.detail,
+    conversationId: cut.conversationId,
+    keyIndex: order.keyIndex,
   }
 }
 
@@ -4589,6 +4876,12 @@ export async function recordDispatch(
    */
   provider?: string,
   model?: string,
+  /**
+   * Set only when this row is an ORDER for a runner rather than a bee already
+   * running here. The brief travels with it because a runner has no issue body
+   * to build one from, and `queued_at` is what a runner looks for.
+   */
+  queue?: { brief: string },
 ): Promise<void> {
   // #1360. A dispatch that never started is recorded with its ending, and the
   // ending is ONE WORD. It used to be the refusal detail verbatim, which is
@@ -4644,11 +4937,12 @@ export async function recordDispatch(
     `INSERT INTO queen_dispatch
        (issue, branch, started, detail, owned_paths, conversation_id,
         dispatched_at, finished_at, outcome, key_index,
-        criteria, criteria_source, provider, model)
+        criteria, criteria_source, provider, model,
+        queued_at, brief, claimed_by, claimed_at)
      VALUES ($1, $2, $3, $4, $5::jsonb, $6, now(),
              CASE WHEN $3 THEN NULL ELSE now() END,
              CASE WHEN $3 THEN NULL ELSE $12 END,
-             $7, $8::jsonb, $9, $10, $11)
+             $7, $8::jsonb, $9, $10, $11, $13, $14, NULL, NULL)
      ON CONFLICT (issue) DO UPDATE
        SET branch = EXCLUDED.branch,
            started = EXCLUDED.started,
@@ -4668,6 +4962,13 @@ export async function recordDispatch(
            output_tokens = NULL,
            criteria = EXCLUDED.criteria,
            criteria_source = EXCLUDED.criteria_source,
+           -- A re-dispatch is a NEW order: whoever claimed the last one is not
+           -- working on this one, and a stale claim would keep every runner off
+           -- the row for ever.
+           queued_at = EXCLUDED.queued_at,
+           brief = EXCLUDED.brief,
+           claimed_by = NULL,
+           claimed_at = NULL,
            provider = EXCLUDED.provider,
            model = EXCLUDED.model,
            -- A dispatch that starts again is new work, so last turn's verdict
@@ -4740,6 +5041,21 @@ export async function recordDispatch(
       provider ?? null,
       model ?? null,
       outcome,
+      queue ? new Date() : null,
+      queue?.brief ?? null,
     ],
   )
+}
+
+/**
+ * Whether this deployment runs its bees somewhere else.
+ *
+ * Off by default, and deliberately: the swarm this was written for is one
+ * container that has always run its own bees, and a supervisor that silently
+ * stops doing the work and starts writing orders nobody collects is a swarm
+ * that looks busy and moves nothing. Turning it on is a deployment decision,
+ * made once, alongside the runners that answer it.
+ */
+export function beesRunElsewhere(): boolean {
+  return process.env.TRIOS_QUEEN_BEES_RUN_ELSEWHERE === 'on'
 }
