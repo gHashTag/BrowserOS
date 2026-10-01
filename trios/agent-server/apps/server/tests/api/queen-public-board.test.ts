@@ -160,6 +160,8 @@ describe('GET /queen/public-board', () => {
           finished_at: '2026-09-03T09:00:00.000Z',
           outcome: 'ok',
           review_state: 'accept',
+          // The commit she judged: the t27 publisher merges only this head.
+          judged_head: 'a'.repeat(40),
           review_note: 'landed cleanly',
           owned_paths: ['tools/deploy.sh'],
           dispatched_at: '2026-09-03T08:00:00.000Z',
@@ -244,7 +246,14 @@ describe('GET /queen/public-board', () => {
         { key: 'dropped', title: 'dropped', blurb: 'failed or cancelled' },
       ],
       cards: [
-        { number: 1303, title: 'Cloud work', column: 'done', criteria: 2 },
+        {
+          number: 1303,
+          title: 'Cloud work',
+          column: 'done',
+          criteria: 2,
+          verdict: 'accept',
+          judgedHead: 'a'.repeat(40),
+        },
         {
           number: 1302,
           title: 'Free work',
