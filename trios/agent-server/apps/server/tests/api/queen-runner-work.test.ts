@@ -398,6 +398,12 @@ describe('bringing the branch home', () => {
     )
     expect(moved).toEqual({ ok: true })
     expect(sh(root, 'rev-parse', 'queen-42')).toBe(head)
+    // And a tree on it, as a container bee would leave: a send-back the
+    // container takes reuses it and starts FROM the runner's work.
+    const tree = join(root, '.worktrees/queen-42')
+    expect(sh(tree, 'rev-parse', 'HEAD')).toBe(head)
+    expect(sh(tree, 'symbolic-ref', 'HEAD')).toBe('refs/heads/queen-42')
+    expect(sh(tree, 'status', '--porcelain')).toBe('')
     expect(
       spawnSync(
         'git',

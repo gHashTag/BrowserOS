@@ -739,6 +739,23 @@ export async function bringBranchHome(
         status: 409,
         error: `Could not move queen-${issue}: ${set.out.slice(0, 300)}`,
       }
+    if (!g.exists(tree)) {
+      // A TREE FOR THE BRANCH, as a container bee leaves one. Without it a
+      // send-back the container takes cuts a fresh tree with `-B ... base`
+      // (prepareWorktree) - resetting the branch and starting the retry beside
+      // the runner's work instead of from it. Not fatal: the branch is home and
+      // the review reads the branch, not the tree.
+      const added = await g.git(
+        root,
+        ['worktree', 'add', '--quiet', tree, `queen-${issue}`],
+        180_000,
+      )
+      if (added.code !== 0)
+        logger.warn('Queen could not give a runner branch a worktree', {
+          issue,
+          error: added.out.slice(0, 300),
+        })
+    }
     return { ok: true }
   } finally {
     await g.git(root, ['update-ref', '-d', scratch]).catch(() => undefined)
