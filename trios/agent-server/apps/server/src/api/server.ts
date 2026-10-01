@@ -40,6 +40,7 @@ import { createMonitoringRoutes } from './routes/monitoring'
 import { createOAuthRoutes } from './routes/oauth'
 import { createOpenClawRoutes } from './routes/openclaw'
 import { createProviderRoutes } from './routes/provider'
+import { createQueenCardMoveRoute } from './routes/queen-card-move'
 import { createQueenDashboardRoute } from './routes/queen-dashboard'
 import { createQueenExportRoute } from './routes/queen-export'
 import {
@@ -271,6 +272,12 @@ export async function createHttpServer(config: HttpServerConfig) {
     .use('/*', requireTrustedAppOrigin())
     .route('/', createQueenLeaseRoute())
 
+  // A person's one-card move. It takes an issue away from the swarm, so it is
+  // guarded like the registry write - never on the public-read list.
+  const queenCardMoveRoutes = new Hono<Env>()
+    .use('/*', requireTrustedAppOrigin())
+    .route('/', createQueenCardMoveRoute())
+
   // Guarded like the lease, and for a stronger reason: it hands out the
   // contents of work in progress. It holds no credential and cannot publish -
   // the push happens outside, by whoever has the token.
@@ -412,6 +419,7 @@ export async function createHttpServer(config: HttpServerConfig) {
     // surface are for the operator, not for a public page.
     .route('/queen/needs-you', queenNeedsYouRoutes)
     .route('/queen/board', queenBoardRoutes)
+    .route('/queen/move', queenCardMoveRoutes)
     .route('/queen/roadmap', createQueenRoadmapRoute())
     .route('/queen/roadmap/data', queenRoadmapDataRoutes)
     .route('/queen/feed', createQueenFeedRoute())
