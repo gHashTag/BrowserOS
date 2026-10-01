@@ -330,3 +330,42 @@ export async function earningByWorkId(
     },
   }
 }
+
+/**
+ * Every earning credited to one GitHub login, newest first: what a wallet
+ * shows its owner as claimable. A login no key is lent under has none.
+ */
+export interface EarningsOfLogin {
+  scheme: string
+  status: typeof EARNINGS_STATUS
+  triPerSpec: typeof TRI_PER_SPEC
+  github: string
+  earnings: Earning[]
+}
+
+export async function earningsOfLogin(
+  pool: Pool,
+  github: string,
+  owners: Record<number, string>,
+): Promise<EarningsOfLogin> {
+  const want = github.toLowerCase()
+  const keys = Object.entries(owners)
+    .filter(([, name]) => githubLoginOf(name)?.toLowerCase() === want)
+    .map(([index]) => Number(index))
+  const base = {
+    scheme: EARNING_SCHEME,
+    status: EARNINGS_STATUS,
+    triPerSpec: TRI_PER_SPEC,
+    github,
+  }
+  if (keys.length === 0) return { ...base, earnings: [] }
+  const { rows } = await pool.query(
+    `SELECT work_id, repo, issue, judged_head, key_index, spec_paths,
+            accepted_at, revoked_at, revoked_reason
+       FROM queen_tri_earnings
+      WHERE key_index = ANY($1::int[])
+      ORDER BY accepted_at DESC, work_id`,
+    [keys],
+  )
+  return { ...base, earnings: rows.map(toEarning) }
+}

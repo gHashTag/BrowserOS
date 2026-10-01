@@ -9,6 +9,7 @@ import {
   earnersOf,
   earningByWorkId,
   earningsLedger,
+  earningsOfLogin,
   recordEarnings,
   TRI_PER_SPEC,
 } from '../../src/api/services/queen-tri-earnings'
@@ -181,6 +182,47 @@ describe('what the record asks the database', () => {
   })
 })
 
+describe('the earnings of one GitHub login', () => {
+  const owners = { 0: '@gHashTag', 1: '@dmitrii-f-t27', 6: '@gHashTag' }
+
+  it('asks only for the keys lent under that login, case-blind', async () => {
+    const seen: unknown[][] = []
+    const pool = {
+      query: (_text: string, params: unknown[] = []) => {
+        seen.push(params)
+        return Promise.resolve({
+          rows: [
+            {
+              work_id: 'a'.repeat(64),
+              repo: 'gHashTag/t27',
+              issue: 5429,
+              judged_head: 'h',
+              key_index: 6,
+              spec_paths: ['specs/x.t27'],
+              accepted_at: '2026-10-01T00:00:00.000Z',
+            },
+          ],
+        })
+      },
+    } as unknown as Pool
+    const found = await earningsOfLogin(pool, 'ghashtag', owners)
+    expect(seen).toEqual([[[0, 6]]])
+    expect(found).toMatchObject({ triPerSpec: 27, github: 'ghashtag' })
+    expect(found.earnings.map((e) => e.issue)).toEqual([5429])
+  })
+
+  it('answers none, without a query, for a login no key is lent under', async () => {
+    const pool = {
+      query: () => {
+        throw new Error('should not query')
+      },
+    } as unknown as Pool
+    expect((await earningsOfLogin(pool, 'stranger', owners)).earnings).toEqual(
+      [],
+    )
+  })
+})
+
 describe('the public route', () => {
   let saved: string | undefined
   beforeEach(() => {
@@ -209,6 +251,18 @@ describe('the public route', () => {
     const response = await createQueenPublicEarningsRoute().request(
       `/${'d'.repeat(64)}`,
     )
+    expect(response.status).toBe(503)
+  })
+
+  it('refuses something that is not a GitHub login before any database', async () => {
+    const response =
+      await createQueenPublicEarningsRoute().request('/by/-not-a-login-')
+    expect(response.status).toBe(400)
+  })
+
+  it('answers 503 for a real login when there is no database', async () => {
+    const response =
+      await createQueenPublicEarningsRoute().request('/by/gHashTag')
     expect(response.status).toBe(503)
   })
 })

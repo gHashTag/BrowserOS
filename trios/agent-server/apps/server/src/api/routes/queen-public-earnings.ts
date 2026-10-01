@@ -19,9 +19,15 @@ import { Hono } from 'hono'
 import { createQueenPool } from '../../lib/db/queen-pool'
 import { logger } from '../../lib/logger'
 import { parseOwners } from '../services/queen-leaderboard'
-import { earningByWorkId, earningsLedger } from '../services/queen-tri-earnings'
+import {
+  earningByWorkId,
+  earningsLedger,
+  earningsOfLogin,
+} from '../services/queen-tri-earnings'
 
 const WORK_ID = /^[0-9a-f]{64}$/
+/** GitHub's own login rule: 1-39 alphanumerics or single hyphens. */
+const GITHUB_LOGIN_PARAM = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/
 
 export function createQueenPublicEarningsRoute() {
   return (
@@ -37,6 +43,31 @@ export function createQueenPublicEarningsRoute() {
           return c.json(ledger, 200, { 'Cache-Control': 'public, max-age=60' })
         } catch (error) {
           logger.warn('Queen earnings could not be read', {
+            error: error instanceof Error ? error.message : String(error),
+          })
+          return c.json({ error: 'The earnings ledger is unavailable' }, 503)
+        } finally {
+          await pool.end().catch(() => {})
+        }
+      })
+      // Every earning credited to one GitHub login: what a wallet lists as
+      // claimable. A login that is not a GitHub login is refused unqueried.
+      .get('/by/:github', async (c) => {
+        const github = c.req.param('github')
+        if (!GITHUB_LOGIN_PARAM.test(github))
+          return c.json({ error: 'not a GitHub login' }, 400)
+        const url = process.env.DATABASE_URL
+        if (!url) return c.json({ error: 'No database configured' }, 503)
+        const pool = createQueenPool(url, { max: 1 })
+        try {
+          const found = await earningsOfLogin(
+            pool,
+            github,
+            parseOwners(process.env.TRIOS_KEY_OWNERS),
+          )
+          return c.json(found, 200, { 'Cache-Control': 'public, max-age=60' })
+        } catch (error) {
+          logger.warn('Queen earnings of a login could not be read', {
             error: error instanceof Error ? error.message : String(error),
           })
           return c.json({ error: 'The earnings ledger is unavailable' }, 503)
