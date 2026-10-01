@@ -516,6 +516,10 @@ export function startModelProbes(
   options: {
     intervalMs?: number
     fetchImpl?: typeof fetch
+    /** Re-read consent before each new probe; disabling a key survives this timer. */
+    resolveEndpoint?: () => Promise<
+      { baseUrl: string; keys: string[] } | undefined
+    >
     onRound?: (snapshot: RankedModel[], chosen: string) => void
   } = {},
 ): () => void {
@@ -529,11 +533,15 @@ export function startModelProbes(
       let probed = 0
       for (const model of ranking.candidates) {
         if (!ranking.dueForProbe(model)) continue
+        const current = options.resolveEndpoint
+          ? await options.resolveEndpoint().catch(() => undefined)
+          : endpoint
+        if (!current?.keys.length) continue
         probed++
-        const key = endpoint.keys[keyCursor++ % endpoint.keys.length]
+        const key = current.keys[keyCursor++ % current.keys.length]
         ranking.recordProbe(
           model,
-          await probeModel(endpoint.baseUrl, key, model, {
+          await probeModel(current.baseUrl, key, model, {
             fetchImpl: options.fetchImpl,
           }),
         )
