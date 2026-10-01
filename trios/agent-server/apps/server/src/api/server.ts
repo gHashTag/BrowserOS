@@ -66,6 +66,10 @@ import {
   createQueenRoadmapDataRoute,
   createQueenRoadmapRoute,
 } from './routes/queen-roadmap'
+import {
+  createQueenCabinetRoute,
+  createQueenRunnerRoute,
+} from './routes/queen-runners'
 import { createQueenTreeRoute } from './routes/queen-tree'
 import { createRefinePromptRoutes } from './routes/refine-prompt'
 import { createShutdownRoute } from './routes/shutdown'
@@ -85,7 +89,11 @@ import { convertOpenClawHistoryToAgentHistory } from './services/openclaw/histor
 import { getOpenClawService } from './services/openclaw/openclaw-service'
 import { TaskQueueService } from './services/task-queue-service'
 import type { Env, HttpServerConfig } from './types'
-import { publicReadCorsMiddleware, trustedCorsMiddleware } from './utils/cors'
+import {
+  appCabinetCorsMiddleware,
+  publicReadCorsMiddleware,
+  trustedCorsMiddleware,
+} from './utils/cors'
 import { requireTrustedAppOrigin } from './utils/request-auth'
 
 async function assertPortAvailable(port: number): Promise<void> {
@@ -373,6 +381,8 @@ export async function createHttpServer(config: HttpServerConfig) {
     .use('/queen/public-agents', publicReadCorsMiddleware())
     .use('/queen/public-leaderboard', publicReadCorsMiddleware())
     .use('/queen/scheduler', publicReadCorsMiddleware())
+    // The runner cabinet: exactly https://app.t27.ai, bearer only, no cookies.
+    .use('/queen/me/*', appCabinetCorsMiddleware())
     .use('/*', trustedCorsMiddleware())
     // The Inngest server registers and invokes functions here; each request
     // is signed with INNGEST_SIGNING_KEY and verified by the SDK, so this sits
@@ -390,6 +400,10 @@ export async function createHttpServer(config: HttpServerConfig) {
     .route('/queen/public-board', createQueenPublicBoardRoute())
     // Who lent a lane and what it did; no titles, no worker text, no key.
     .route('/queen/public-leaderboard', createQueenPublicLeaderboardRoute())
+    // A person's runner tokens (their bearer, verified by its issuer), and the
+    // door their runner knocks on (the runner token). Neither takes a key.
+    .route('/queen/me/runners', createQueenCabinetRoute())
+    .route('/queen/runner', createQueenRunnerRoute())
     .route('/queen/registry', queenRegistryRoutes)
     // The shell only. It holds no state and no token; every byte of data it
     // shows comes from /queen/lease, which stays guarded. See the route header

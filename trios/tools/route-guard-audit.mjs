@@ -106,6 +106,16 @@ export const DEFAULT_ALLOWLIST = [
       'shell only — the operator page holds no state and no token; its numbers come from /queen/lease and its one action POSTs there with a bearer the reader supplies, so both stay guarded (comment at the mount)',
   },
   {
+    path: '/queen/me/runners',
+    reason:
+      'own bearer — every request is refused 401 unless its Authorization bearer is a session the app.t27.ai issuer (vibee-render whoami) confirms, and it only lists, mints or revokes runner tokens of the person that session names; the trusted-origin check would refuse the one page that calls it, and its CORS is exactly https://app.t27.ai with no credentials (src/api/routes/queen-runners.ts, tests/api/queen-runners.test.ts)',
+  },
+  {
+    path: '/queen/runner',
+    reason:
+      'own bearer — a runner process on the lender machine, with no browser Origin; every request is refused 401 unless its bearer hashes to a live runner token, and the answer is only that runner own lane (src/api/routes/queen-runners.ts, tests/api/queen-runners.test.ts)',
+  },
+  {
     path: '/api/inngest',
     reason:
       'signed webhook — Inngest calls this path from its own server with an x-inngest-signature over INNGEST_SIGNING_KEY; inngest/hono rejects an unsigned or missigned request with 4xx before any function runs (tests/api/queen-inngest.test.ts), and a browser Origin never appears on it, so the trusted-origin check would only turn the scheduler off (comment at the mount)',

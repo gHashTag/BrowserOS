@@ -36,6 +36,11 @@ const report = auditServer(source, DEFAULT_ALLOWLIST)
 // answered 404 for its whole life; mounting it is what put it on this list. A
 // shell on the same terms as the dashboard - no state and no token in the
 // HTML - which is the only reason a page is allowed to answer a stranger.
+// RE-MEASURED 2026-10-01: /queen/me/runners and /queen/runner joined. Neither
+// is a shell and neither is open: each checks its own bearer on every request
+// (a session the app.t27.ai issuer confirms; a live runner token), which is a
+// guard the trusted-origin check cannot express - it would refuse the one page
+// and the one process that call them. Reasons in tools/route-guard-audit.mjs.
 const EXPECTED_UNGUARDED_WITHOUT_ALLOWLIST = [
   '/api/inngest',
   '/health',
@@ -43,7 +48,9 @@ const EXPECTED_UNGUARDED_WITHOUT_ALLOWLIST = [
   '/queen/feed',
   '/queen/hq',
   '/queen/kanban',
+  '/queen/me/runners',
   '/queen/roadmap',
+  '/queen/runner',
   '/queen/tree',
 ]
 
@@ -84,7 +91,10 @@ describe('route-guard audit over src/api/server.ts', () => {
     // where a route named `public` belongs. Every other number here is
     // unchanged, which is the part worth stating: no guarded route quietly lost
     // its guard to make room for it.
-    expect(report.totalMounts).toBe(45)
+    // RE-MEASURED 2026-10-01: 45 became 47 with the runner cabinet and the
+    // runner door, both allowlisted with their own-bearer reason; no other
+    // count moved, so no guarded route lost its guard to make room for them.
+    expect(report.totalMounts).toBe(47)
     expect(report.prefixGuardCount).toBe(18)
     expect(report.guardedSubAppCount).toBe(15)
     expect(report.publicReadCount).toBe(8)
@@ -97,7 +107,7 @@ describe('route-guard audit over src/api/server.ts', () => {
     expect(report.entriesMissingReason).toEqual([])
   })
 
-  it('reports exactly the seven reasoned exceptions when the allowlist is dropped', () => {
+  it('reports exactly the reasoned exceptions when the allowlist is dropped', () => {
     // The classifier reports mounts in file order; the assertion is on the
     // exact set, so both sides are sorted before comparing.
     expect([...unguardedMounts(source, [])].sort()).toEqual(
@@ -105,7 +115,7 @@ describe('route-guard audit over src/api/server.ts', () => {
     )
   })
 
-  it('splits the twenty-two /queen mounts into 8 public-read, 8 wrapper-guarded and 6 allowlisted shells', () => {
+  it('splits the twenty-four /queen mounts into 8 public-read, 8 wrapper-guarded and 8 allowlisted', () => {
     const queenMounts = classifyMounts(source).filter(
       (mount) => mount.path === '/queen' || mount.path.startsWith('/queen/'),
     )
@@ -127,7 +137,10 @@ describe('route-guard audit over src/api/server.ts', () => {
     // issue title, no worker text and no credential: only a key's INDEX ever
     // reaches the database, so there is nothing here a stranger could read that
     // the board does not already show.
-    expect(queenMounts.length).toBe(22)
+    // RE-MEASURED 2026-10-01: twenty-two became twenty-four. The two new
+    // allowlisted mounts are not shells: /queen/me/runners and /queen/runner
+    // answer only a bearer they verify themselves (see the reasons).
+    expect(queenMounts.length).toBe(24)
 
     const counts: Record<string, number> = {
       'public-read': 0,
@@ -144,7 +157,7 @@ describe('route-guard audit over src/api/server.ts', () => {
       'public-read': 8,
       'prefix-guard': 0,
       wrapper: 8,
-      unguarded: 6,
+      unguarded: 8,
     })
 
     // Every unguarded /queen mount must be one of the allowlisted shells.

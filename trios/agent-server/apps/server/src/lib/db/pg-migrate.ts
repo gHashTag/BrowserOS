@@ -288,6 +288,25 @@ CREATE TABLE IF NOT EXISTS queen_report (
 
 CREATE INDEX IF NOT EXISTS idx_queen_report_at ON queen_report (at DESC);
 
+-- Runners: lanes that run on the lender's own machine with the lender's own
+-- key, so the key never moves (queen-runners.ts). A row is a runner token the
+-- person minted in their cabinet; only its SHA-256 and last four characters
+-- are kept. Its lane is 100000000 + id, a block no operator pool can reach.
+CREATE TABLE IF NOT EXISTS queen_runner (
+  id bigserial PRIMARY KEY,
+  telegram_id text NOT NULL,
+  owner_name text NOT NULL,
+  label text NOT NULL,
+  token_hash text NOT NULL UNIQUE,
+  token_hint text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  last_seen_at timestamptz,
+  revoked_at timestamptz
+);
+
+CREATE INDEX IF NOT EXISTS idx_queen_runner_owner
+  ON queen_runner (telegram_id) WHERE revoked_at IS NULL;
+
 CREATE INDEX IF NOT EXISTS idx_conversation_messages_conversation_order
   ON "conversationMessages" ("conversationId", "orderIndex");
 `
