@@ -157,7 +157,15 @@ describe('navigation tools', () => {
 
   it('wait_for finds text on page', async () => {
     await withBrowser(async ({ execute }) => {
-      const newResult = await execute(new_page, { url: 'https://example.com' })
+      // The text arrives half a second after load, from the page itself, so
+      // this still exercises the waiting - without depending on the live
+      // https://example.com, which CI's browser never showed it on.
+      const page = `<script>setTimeout(function () {
+        document.body.innerHTML = '<h1>Example Domain</h1>'
+      }, 500)</script>`
+      const newResult = await execute(new_page, {
+        url: `data:text/html,${encodeURIComponent(page)}`,
+      })
       const pageId = structuredOf<{ pageId: number }>(newResult).pageId
 
       const waitResult = await execute(wait_for, {
