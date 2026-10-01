@@ -15,7 +15,9 @@ import { CONTRIBUTOR_POLICY } from '../../src/api/services/queen-contributor-pol
 import { keyWork, leaderboard } from '../../src/api/services/queen-leaderboard'
 
 // Deliberate, isolated PostgreSQL. A skip is not a live database pass.
-const url = process.env.QUEEN_CONTRIBUTOR_TEST_DATABASE_URL
+const url =
+  process.env.QUEEN_CONTRIBUTOR_TEST_DATABASE_URL ??
+  process.env.TRIOS_PG_TEST_URL
 const live = url ? describe : describe.skip
 live('contributor ownership and allocation against real PostgreSQL', () => {
   const subject = 'telegram:111222333'

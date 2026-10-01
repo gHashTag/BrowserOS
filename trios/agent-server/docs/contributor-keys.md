@@ -109,6 +109,8 @@ bun test tests/api/queen-contributor-keys.test.ts
 
 From `apps/server`, set `QUEEN_CONTRIBUTOR_TEST_DATABASE_URL` to a disposable
 PostgreSQL database and run `tests/pglive/queen-contributor-keys-live.test.ts`.
+The existing CI's `TRIOS_PG_TEST_URL` is also accepted; production
+`DATABASE_URL` is never used by these tests.
 It creates and drops an isolated schema. These checks cover real SQL owner
 filters, duplicate races, encryption at rest, disable/enable races, malformed
 requests, provider failure classification, negative-ID history and unchanged
