@@ -15,9 +15,11 @@
  */
 
 import { Hono } from 'hono'
+import type { Pool } from 'pg'
 import { createQueenPool } from '../../lib/db/queen-pool'
 import { logger } from '../../lib/logger'
 import {
+  liveWorkerCapacity,
   type WorkerCapacityBreakdown,
   workerCapacityBreakdown,
 } from '../services/queen-dispatch'
@@ -225,10 +227,15 @@ export function createQueenPublicResearchRoute(
     const url = databaseUrl()
     let runtime: { status: 'live' | 'offline' } = { status: 'offline' }
     let busyIndices: number[] = []
+    let breakdown = capacityBreakdown()
+    let capacityAvailable = !!deps.workerCapacityBreakdown
 
     if (url) {
       const pool = createPool(url)
       try {
+        if (!deps.workerCapacityBreakdown)
+          breakdown = await liveWorkerCapacity(pool as Pool)
+        capacityAvailable = true
         const active = await pool.query(
           `SELECT key_index
              FROM queen_dispatch
@@ -239,6 +246,8 @@ export function createQueenPublicResearchRoute(
         busyIndices = active.rows.map((row) => Number(row.key_index))
         runtime = { status: 'live' }
       } catch (error) {
+        if (!capacityAvailable)
+          return c.json({ error: 'Worker capacity is unavailable' }, 503)
         logger.warn('Queen public research telemetry query failed', {
           error: error instanceof Error ? error.message : String(error),
         })
@@ -254,7 +263,6 @@ export function createQueenPublicResearchRoute(
     // One authority, one number: the projection's capacity IS the breakdown's
     // effective capacity, so an operator reading "4" and the factors below it
     // can never see two totals that disagree about the same configuration.
-    const breakdown = capacityBreakdown()
     return c.json({
       ...graph,
       runtime,

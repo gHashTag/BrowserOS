@@ -1,0 +1,108 @@
+# Contributor keys and XP
+
+Tracks gHashTag/999-multibots-telegraf#3251 and gHashTag/t27#5472.
+The contract is `specs/automation/queen-contributor-keys.t27`, mirrored from
+the canonical spec in gHashTag/t27#5473. Regenerate the host policy with
+`t27c gen-ts specs/automation/queen-contributor-keys.t27` and save its output
+as `apps/server/src/api/services/queen-contributor-policy.gen.ts`; never edit
+the generated module. SQL, cryptography and HTTP are explicit host adapters.
+
+The personal account can list, check, add, enable and disable its own Queen
+provider keys. XP comes from the existing dispatch and dispatch-history rows.
+This feature never writes to the application's token wallet.
+
+## Deployment
+
+The management API is off until `QUEEN_CONTRIBUTOR_PROXY_TOKEN` contains at least
+32 bytes. Configure a separate random service capability in the Queen and
+the app render proxy. Never send it to the browser. It is deliberately
+different from `TRIOS_API_TOKEN` and from a user's app session.
+
+The render proxy verifies its normal app session, then sets
+`X-Queen-Contributor-Id: telegram:<verified-id>` on the server-to-server
+request. It must discard any subject/header the browser supplied.
+
+Set `QUEEN_CONTRIBUTOR_IDENTITIES` to an operator-verified JSON map from
+these subjects to GitHub logins. A browser cannot assert a GitHub login.
+An unmapped account receives a stable pseudonym in the public XP table.
+
+For existing environment credentials, `TRIOS_KEY_OWNERS` maps the Queen's
+actual durable indices to `@github-login`. Verify the active pool ordering
+before changing that map; environment suffix numbers and dashboard row
+numbers are not interchangeable. The primary pool starts at zero and pool
+two starts at 10000. The map is the explicit authority for the existing
+history. No automatic ownership migration or foreign key claiming occurs.
+
+Adding new keys also requires `QUEEN_CONTRIBUTOR_ENCRYPTION_KEY`: canonical
+base64 encoding of 32 cryptographically random bytes. Preserve this key
+across releases and database backups. Losing it makes stored managed keys
+unreadable. Existing environment-key listing and checks do not require it.
+
+The Queen database role needs permission to create the optional
+`queen_contributor_keys` table and `queen_contributor_key_index` sequence in
+the configured Queen schema. Setup runs on first use, and before scheduling
+when the feature is enabled. Storage/auth failures return a closed error;
+they do not silently substitute empty data or expose provider errors.
+An unreadable managed credential is excluded individually from allocation and
+logged by index only. Its owner can still disable it without the master key;
+other credentials and existing disable directives remain effective.
+Once the registry exists, persisted consent and owner snapshots remain in
+force even if the management capability is removed. An old deployment with
+no registry keeps its legacy allocation; a registry lookup failure is closed.
+
+## API
+
+All routes require `Authorization: Bearer <proxy capability>` and the
+verified contributor header. Responses use `Cache-Control: no-store`.
+
+- `GET /queen/contributor-keys`: own keys, provider options, per-key and
+  total XP, verified attribution, and the existing public XP formula.
+- `POST /queen/contributor-keys`: `{provider, apiKey, label?}`. Providers
+  are `nvidia` and `zai`; URLs and models are server-controlled.
+- `POST /queen/contributor-keys/:id/probe`: check an owned key.
+- `POST /queen/contributor-keys/:id/enable`: check and enable on success.
+- `POST /queen/contributor-keys/:id/disable`: stop assigning new work.
+
+Successful mutations return `{key}` with the same metadata and actual
+contribution fields as GET. Secrets, ciphertext, provider response bodies,
+upstream error messages and operator configuration are never returned.
+Errors are `{error: <closed code>}`. Foreign/absent keys both return 404.
+
+A probe performs one bounded chat-completion request. An HTTP 200 with no
+model output is not a successful check. Invalid credentials are disabled;
+temporary rate limits or network failures do not revoke prior consent.
+Each key allows one explicit check per minute, and the process caps concurrent
+explicit checks at four. A provider may charge for these small requests.
+
+Disabling stops future worker/review/model-probe assignment; a turn already
+running keeps the credential it was given. A late enable response cannot
+undo a later disable. Model-probe scheduling rereads consent before each
+new model probe.
+
+## Stable identity
+
+Existing environment keys retain their current positive/zero indices.
+Overrides bind index, SHA-256 fingerprint and immutable owner. Filtering
+happens after legacy indexing, so disabling key zero does not rename key one.
+An environment replacement at a bound index is a conflict, not a transfer.
+
+New keys use immutable negative database indices, unique fingerprints and
+AES-256-GCM ciphertext authenticated with owner and fingerprint. There is
+no ownership-update or hard-delete endpoint. Disabled keys keep their XP.
+Public attribution reads the saved owner name for registered keys; changing
+an environment mapping cannot reassign a registered credential.
+
+## Verification
+
+Run the API tests with Bun 1.3.6:
+
+```text
+bun test tests/api/queen-contributor-keys.test.ts
+```
+
+From `apps/server`, set `QUEEN_CONTRIBUTOR_TEST_DATABASE_URL` to a disposable
+PostgreSQL database and run `tests/pglive/queen-contributor-keys-live.test.ts`.
+It creates and drops an isolated schema. These checks cover real SQL owner
+filters, duplicate races, encryption at rest, disable/enable races, malformed
+requests, provider failure classification, negative-ID history and unchanged
+legacy XP. Without the database variable the live tests explicitly skip.
