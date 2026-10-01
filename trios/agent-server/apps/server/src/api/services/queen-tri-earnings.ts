@@ -35,11 +35,15 @@
  * not resurrect it, because an earning that can flip back and forth is not one
  * anybody can sign.
  *
- * WHAT IS NOT HERE: the amount. How much TRI one accepted spec mints is the
- * owner's decision (trinity-fpga docs/docs/depin/decisions.md, O2), so the
- * record counts earnings and says the amount is undecided rather than inventing
- * one. Nor does an accept here mean the commit was merged: today an accept
- * needs no merge (O4), and the answer says that too.
+ * THE AMOUNT is the owner's decision O2 (trinity-fpga
+ * docs/docs/depin/decisions.md), taken 2026-10-01: 27 TRI per accepted spec in
+ * epoch 1. It is published here, beside the record, so a signer can refuse an
+ * attestation whose amount differs from the one anybody can read.
+ *
+ * WHAT IS NOT HERE: whether the commit was merged. Decision O4 says an earning
+ * mints only once its judged commit landed; that is checked on GitHub by each
+ * signer independently, not asserted by this record, so a Queen that lied about
+ * a merge would convince nobody.
  */
 import type { Pool } from 'pg'
 
@@ -47,6 +51,9 @@ import { githubLoginOf, parseOwners } from './queen-leaderboard'
 
 /** The scheme a work id is hashed under; bumped if the inputs ever change. */
 export const EARNING_SCHEME = 't27-accept:v1'
+
+/** O2, 2026-10-01: TRI one accepted spec earns in epoch 1. */
+export const TRI_PER_SPEC = 27
 
 /**
  * Record every accepted spec turn not yet recorded, then revoke the ones a
@@ -203,6 +210,22 @@ export function earnersOf(
   )
 }
 
+function toEarning(row: Record<string, unknown>): Earning {
+  return {
+    workId: String(row.work_id),
+    repo: String(row.repo),
+    issue: Number(row.issue),
+    commit: String(row.judged_head),
+    keyIndex: Number(row.key_index),
+    specPaths: Array.isArray(row.spec_paths) ? row.spec_paths.map(String) : [],
+    acceptedAt: new Date(row.accepted_at as string).toISOString(),
+    revokedAt: row.revoked_at
+      ? new Date(row.revoked_at as string).toISOString()
+      : null,
+    revokedReason: row.revoked_reason ? String(row.revoked_reason) : null,
+  }
+}
+
 export async function readEarnings(pool: Pool): Promise<Earning[]> {
   const { rows } = await pool.query(
     `SELECT work_id, repo, issue, judged_head, key_index, spec_paths,
@@ -210,17 +233,7 @@ export async function readEarnings(pool: Pool): Promise<Earning[]> {
        FROM queen_tri_earnings
       ORDER BY accepted_at DESC, work_id`,
   )
-  return rows.map((row) => ({
-    workId: String(row.work_id),
-    repo: String(row.repo),
-    issue: Number(row.issue),
-    commit: String(row.judged_head),
-    keyIndex: Number(row.key_index),
-    specPaths: Array.isArray(row.spec_paths) ? row.spec_paths.map(String) : [],
-    acceptedAt: new Date(row.accepted_at).toISOString(),
-    revokedAt: row.revoked_at ? new Date(row.revoked_at).toISOString() : null,
-    revokedReason: row.revoked_reason ? String(row.revoked_reason) : null,
-  }))
+  return rows.map(toEarning)
 }
 
 /** How many of the most recent earnings the public answer lists one by one. */
@@ -230,12 +243,12 @@ export interface EarningsLedger {
   measuredAt: string
   scheme: string
   /**
-   * In words, because a number on a page reads as money: these are recorded,
-   * not minted, and no token exists to withdraw them into.
+   * In words, because a number on a page reads as money: a mint exists only on
+   * TON testnet, behind a signer quorum, and is not trustless.
    */
-  status: 'recorded, not withdrawable: no token is deployed'
-  /** TRI per accepted spec. Null until the owner decides it. */
-  triPerSpec: null
+  status: typeof EARNINGS_STATUS
+  /** TRI per accepted spec (O2). */
+  triPerSpec: typeof TRI_PER_SPEC
   rules: {
     counts: string
     revokes: string
@@ -246,14 +259,17 @@ export interface EarningsLedger {
   recent: Earning[]
 }
 
+export const EARNINGS_STATUS =
+  'recorded; mintable on TON testnet only -- V1, signer quorum, NOT trustless'
+
 export async function earningsLedger(pool: Pool): Promise<EarningsLedger> {
   const all = await readEarnings(pool)
   const revoked = all.filter((e) => e.revokedAt).length
   return {
     measuredAt: new Date().toISOString(),
     scheme: EARNING_SCHEME,
-    status: 'recorded, not withdrawable: no token is deployed',
-    triPerSpec: null,
+    status: EARNINGS_STATUS,
+    triPerSpec: TRI_PER_SPEC,
     rules: {
       counts:
         'one earning per (repository, issue, judged commit) the Queen accepted, ' +
@@ -261,13 +277,56 @@ export async function earningsLedger(pool: Pool): Promise<EarningsLedger> {
       revokes:
         'a later send-back or escalation of the same commit, such as a CI take-back',
       notYet: [
-        'an accept does not require a merge yet, so an earning is not mintable on its own',
-        'spec paths are what the turn declared, not yet checked against the diff',
-        'TRI per accepted spec is undecided (owner decision)',
+        'an earning mints only after its judged commit is part of a pull request merged ' +
+          'into the default branch that changes a declared .t27 file; each signer checks ' +
+          'that on GitHub, this record does not assert it',
+        'spec paths are what the turn declared; the merge check above is what ties them to a diff',
+        'no mainnet token exists',
       ],
     },
     totals: { earned: all.length - revoked, revoked },
     earners: earnersOf(all, parseOwners(process.env.TRIOS_KEY_OWNERS)),
     recent: all.slice(0, RECENT_EARNINGS),
+  }
+}
+
+/**
+ * One earning by its work id, and who it is credited to: what a signer reads
+ * before it signs an attestation for that work id. Null when no such earning
+ * was recorded.
+ */
+export interface EarningLookup {
+  scheme: string
+  status: typeof EARNINGS_STATUS
+  triPerSpec: typeof TRI_PER_SPEC
+  earning: Earning
+  earner: Pick<Earner, 'name' | 'claimed' | 'github'>
+}
+
+export async function earningByWorkId(
+  pool: Pool,
+  workId: string,
+  owners: Record<number, string>,
+): Promise<EarningLookup | null> {
+  const { rows } = await pool.query(
+    `SELECT work_id, repo, issue, judged_head, key_index, spec_paths,
+            accepted_at, revoked_at, revoked_reason
+       FROM queen_tri_earnings
+      WHERE work_id = $1`,
+    [workId],
+  )
+  if (rows.length === 0) return null
+  const earning = toEarning(rows[0])
+  const [who] = earnersOf([earning], owners)
+  return {
+    scheme: EARNING_SCHEME,
+    status: EARNINGS_STATUS,
+    triPerSpec: TRI_PER_SPEC,
+    earning,
+    earner: {
+      name: who.name,
+      claimed: who.claimed,
+      ...(who.github ? { github: who.github } : {}),
+    },
   }
 }

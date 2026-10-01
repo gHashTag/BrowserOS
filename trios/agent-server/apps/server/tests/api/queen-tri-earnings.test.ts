@@ -4,10 +4,13 @@ import type { Pool } from 'pg'
 import { createQueenPublicEarningsRoute } from '../../src/api/routes/queen-public-earnings'
 import {
   EARNING_SCHEME,
+  EARNINGS_STATUS,
   type Earning,
   earnersOf,
+  earningByWorkId,
   earningsLedger,
   recordEarnings,
+  TRI_PER_SPEC,
 } from '../../src/api/services/queen-tri-earnings'
 
 /**
@@ -111,16 +114,70 @@ describe('what the record asks the database', () => {
     expect(revoke.text).not.toContain('review_note')
   })
 
-  it('says in words that nothing is withdrawable, and invents no amount', async () => {
+  it('says in words that a mint is testnet-only and not trustless, and publishes the amount', async () => {
     const { pool } = spy()
     const ledger = await earningsLedger(pool)
-    expect(ledger.status).toBe(
-      'recorded, not withdrawable: no token is deployed',
-    )
-    expect(ledger.triPerSpec).toBeNull()
+    expect(ledger.status).toBe(EARNINGS_STATUS)
+    expect(EARNINGS_STATUS).toContain('testnet only')
+    expect(EARNINGS_STATUS).toContain('NOT trustless')
+    // O2, 2026-10-01. A signer refuses any other amount.
+    expect(ledger.triPerSpec).toBe(27)
+    expect(TRI_PER_SPEC).toBe(27)
     expect(ledger.scheme).toBe(EARNING_SCHEME)
     expect(ledger.totals).toEqual({ earned: 0, revoked: 0 })
-    expect(ledger.rules.notYet.join(' ')).toContain('does not require a merge')
+    // O4: the merge is checked by the signers on GitHub, not asserted here.
+    expect(ledger.rules.notYet.join(' ')).toContain('merged')
+    expect(ledger.rules.notYet.join(' ')).toContain('no mainnet token')
+  })
+
+  it('looks one earning up by its id and names who it is credited to', async () => {
+    const seen: unknown[][] = []
+    const row = {
+      work_id: 'a'.repeat(64),
+      repo: 'gHashTag/t27',
+      issue: 5429,
+      judged_head: '7808383a3ca84c8a7ec813ae0869d8f3f7dc6309',
+      key_index: 6,
+      spec_paths: ['specs/x.t27'],
+      accepted_at: '2026-10-01T00:00:00.000Z',
+      revoked_at: null,
+      revoked_reason: null,
+    }
+    const pool = {
+      query: (_text: string, params: unknown[] = []) => {
+        seen.push(params)
+        return Promise.resolve({ rows: params[0] === row.work_id ? [row] : [] })
+      },
+    } as unknown as Pool
+    const found = await earningByWorkId(pool, row.work_id, { 6: '@gHashTag' })
+    expect(found).toMatchObject({
+      triPerSpec: 27,
+      earning: { issue: 5429, commit: row.judged_head, revokedAt: null },
+      earner: { name: '@gHashTag', claimed: true, github: 'gHashTag' },
+    })
+    expect(await earningByWorkId(pool, 'b'.repeat(64), {})).toBeNull()
+    expect(seen).toEqual([[row.work_id], ['b'.repeat(64)]])
+  })
+
+  it('credits an unclaimed lane to nobody on GitHub', async () => {
+    const pool = {
+      query: () =>
+        Promise.resolve({
+          rows: [
+            {
+              work_id: 'c'.repeat(64),
+              repo: 'r',
+              issue: 1,
+              judged_head: 'h',
+              key_index: 21,
+              spec_paths: [],
+              accepted_at: '2026-10-01T00:00:00.000Z',
+            },
+          ],
+        }),
+    } as unknown as Pool
+    const found = await earningByWorkId(pool, 'c'.repeat(64), {})
+    expect(found?.earner).toEqual({ name: 'key #21', claimed: false })
   })
 })
 
@@ -140,5 +197,18 @@ describe('the public route', () => {
     expect(response.status).toBe(503)
     // An empty list would read as "nobody has earned anything".
     expect(await response.json()).toEqual({ error: 'No database configured' })
+  })
+
+  it('refuses a malformed work id before touching any database', async () => {
+    const response =
+      await createQueenPublicEarningsRoute().request('/not-a-work-id')
+    expect(response.status).toBe(400)
+  })
+
+  it('answers 503 for a well-formed id when there is no database', async () => {
+    const response = await createQueenPublicEarningsRoute().request(
+      `/${'d'.repeat(64)}`,
+    )
+    expect(response.status).toBe(503)
   })
 })
