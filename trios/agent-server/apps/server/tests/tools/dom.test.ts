@@ -400,10 +400,9 @@ describe('search_dom', () => {
       const newResult = await execute(new_page, { url: RICH_PAGE })
       const pageId = pageIdOf(newResult)
 
-      const result = await execute(search_dom, {
-        page: pageId,
-        query: '.nav-link',
-      })
+      // Same load race searchUntil exists for: CI found fewer than 3 once
+      // (2026-10-01) on a run where the identical query passed before.
+      const result = await searchUntil(execute, pageId, '.nav-link', 'Found 3')
       assert.ok(!result.isError, textOf(result))
       const text = textOf(result)
       assert.ok(text.includes('Found 3'), 'Should find exactly 3 nav links')
