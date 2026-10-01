@@ -40,10 +40,14 @@
  */
 
 import { Hono } from 'hono'
+import type { Pool } from 'pg'
 import { createQueenPool } from '../../lib/db/queen-pool'
 import { logger } from '../../lib/logger'
 import { workerModelRanking } from '../../lib/model-ranking'
-import { configuredWorkerCapacity } from '../services/queen-dispatch'
+import {
+  configuredWorkerCapacity,
+  liveWorkerCapacity,
+} from '../services/queen-dispatch'
 
 interface QueryResult {
   rowCount: number | null
@@ -635,7 +639,9 @@ export function createQueenPublicStatusRoute(deps: QueenPublicStatusDeps = {}) {
       // slot, and each reading keeps its own meaning.
       const running = asCount(countRow.running)
       const startedUnfinished = asCount(countRow.started_running)
-      const capacity = workerCapacity()
+      const capacity = deps.workerCapacity
+        ? workerCapacity()
+        : (await liveWorkerCapacity(pool as Pool)).effectiveCapacity
       const tickDecidedAtMs = decidedAtMs(tickRow?.decided_at)
       // Read once, quoted twice: `lastTick.refusal` and the swarmState
       // classification must be two readings of the same tick decision, or
