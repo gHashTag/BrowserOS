@@ -102,6 +102,11 @@ function fakePool() {
         if (row) row.last_seen_at = new Date()
         return { rows: row ? [row] : [], rowCount: row ? 1 : 0 }
       }
+      // No task is open on any lane in this table: the lease renewal a
+      // heartbeat sends matches nothing (queen-runner-work.test.ts has the
+      // table that does).
+      if (/^\s*UPDATE queen_dispatch/.test(sql))
+        return { rows: [], rowCount: 0 }
       if (
         /^\s*SELECT id, telegram_id, owner_name FROM queen_runner/.test(sql)
       ) {
@@ -425,9 +430,11 @@ describe('the runner', () => {
     const body = (await beat.json()) as {
       runner: { lane: number }
       work: unknown
+      protocol: number
     }
     expect(body.runner.lane).toBe(laneOf(runner.id))
     expect(body.work).toBeNull()
+    expect(body.protocol).toBe(2)
 
     const list = await server.request(
       '/queen/me/runners',

@@ -21,6 +21,7 @@ import {
   type WorkerCapacityBreakdown,
   workerCapacityBreakdown,
 } from '../services/queen-dispatch'
+import { isRunnerLane } from '../services/queen-runners'
 import { configuredBillingMode } from './queen-public-status'
 import {
   isTreeLoadFailure,
@@ -236,7 +237,10 @@ export function createQueenPublicResearchRoute(
               AND finished_at IS NULL
               AND key_index IS NOT NULL`,
         )
-        busyIndices = active.rows.map((row) => Number(row.key_index))
+        // A runner's lane is not one of this deployment's keys.
+        busyIndices = active.rows
+          .map((row) => Number(row.key_index))
+          .filter((index) => !isRunnerLane(index))
         runtime = { status: 'live' }
       } catch (error) {
         logger.warn('Queen public research telemetry query failed', {

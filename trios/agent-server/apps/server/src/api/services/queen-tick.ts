@@ -100,6 +100,8 @@ import {
   sameModelAs,
   visiblePatchPaths,
 } from './queen-reviewer'
+import { idleRunner, reapSilentRunners } from './queen-runner-work'
+import { isRunnerLane } from './queen-runners'
 
 /**
  * The last non-secret allocator cursor already written durably. It survives a
@@ -382,7 +384,7 @@ export async function openIssues(repo: string): Promise<{
  * hide, and losing the swarm's history to a typo in a schema name is exactly
  * the kind of quiet damage worth failing loudly over.
  */
-async function ensureQueenColumns(pool: Pool): Promise<void> {
+export async function ensureQueenColumns(pool: Pool): Promise<void> {
   await pool.query(`
     ALTER TABLE queen_issues
       ADD COLUMN IF NOT EXISTS criteria jsonb NOT NULL DEFAULT '[]'::jsonb,
@@ -938,7 +940,15 @@ export function boardTask(
     // not widened with it - so the one call site that passes the result did not
     // typecheck. `bun test` does not typecheck, every test passed, and the
     // error shipped. Two gates, and only one of them was run.
-    state?: 'running' | 'accepted' | 'rejected' | 'awaitingReview' | 'failed'
+    //
+    // `queued` is a runner's task: a live claim with no container worker on it.
+    state?:
+      | 'running'
+      | 'queued'
+      | 'accepted'
+      | 'rejected'
+      | 'awaitingReview'
+      | 'failed'
     provider?: string
     model?: string
     inputTokens?: number
@@ -1438,6 +1448,9 @@ export async function runQueenTickOnce(
  * would be a test that waits a minute to lose a lease it can lose here by
  * passing `{ held: false }`.
  */
+/** At most this many runner-only dispatches a round, whatever else is true. */
+export const RUNNER_PASS_LIMIT = 20
+
 export async function runRound(
   pool: Pool,
   holder: string,
@@ -1452,6 +1465,8 @@ export async function runRound(
   deps: {
     review?: Partial<ReviewDeps>
     dispatch?: typeof dispatchBee
+    /** Whether a runner is free for the runner-only pass. */
+    idleRunner?: typeof idleRunner
   } = {},
 ): Promise<{
   ran: boolean
@@ -1578,6 +1593,19 @@ export async function runRound(
   if (reaped.length > 0) {
     logger.info('Queen tick reaped stalled dispatches', { issues: reaped })
   }
+  // Runners are reaped by their lease, not by the stall clock above: an offer
+  // nobody claimed, or a lease nobody renewed, hands the issue back.
+  const silent = await reapSilentRunners(pool).catch((error) => {
+    logger.warn('Queen could not reap silent runners', {
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return [] as number[]
+  })
+  if (silent.length > 0) {
+    logger.info('Queen tick released tasks silent runners held', {
+      issues: silent,
+    })
+  }
 
   // The board the container decides against is the app's mirror PLUS this
   // container's own dispatches.
@@ -1627,6 +1655,14 @@ export async function runRound(
   const [owner, repoName] = repo.split('/')
   const containerTasks = inFlight.rows.map((row) => {
     const finished = row.finished_at != null
+    // A RUNNER'S TASK IS QUEUED, NOT RUNNING. It runs on its owner's machine
+    // with its owner's key, so it holds its issue and its files like any live
+    // claim - and takes none of the container's worker slots. `queend` counts
+    // only `running` against canStartAnother.
+    const onRunner =
+      !finished &&
+      typeof row.key_index === 'number' &&
+      isRunnerLane(row.key_index)
     return boardTask(owner, repoName, {
       conversationId: row.conversation_id,
       issue: row.issue,
@@ -1639,25 +1675,31 @@ export async function runRound(
       at: finished ? row.finished_at : row.dispatched_at,
       title: finished
         ? 'finished by the cloud tick, waiting for a verdict'
-        : 'dispatched by the cloud tick',
-      state: stateOfDispatch(finished, row.review_state, {
-        // THE CLOCK MUST BE ONE NOTHING TOUCHES.
-        //
-        // This read `reviewed_at ?? finished_at` and the wait valve could
-        // therefore never fire. `reviewFinishedDispatches` re-reads every
-        // `wait` row each round and UPDATEs it in place - its own comment says
-        // so - which refreshes `reviewed_at` every five minutes. Measured in
-        // production 2026-09-04: #1327 and #1329 had been frozen for 18.4
-        // hours and reported 0.06 hours of idle, because the sweep had touched
-        // them a moment earlier. A six-hour floor against a clock reset every
-        // five minutes is a floor that cannot be reached.
-        //
-        // `finished_at` is written once, when the bee stops, and never again.
-        // It is the only honest measure of how long a verdict has stood.
-        idleMs: finished ? Date.now() - Date.parse(String(row.finished_at)) : 0,
-        sendBacks: Number(row.send_backs ?? 0),
-        releases: Number(row.ceiling_releases ?? 0),
-      }),
+        : onRunner
+          ? 'offered to a runner by the cloud tick'
+          : 'dispatched by the cloud tick',
+      state: onRunner
+        ? 'queued'
+        : stateOfDispatch(finished, row.review_state, {
+            // THE CLOCK MUST BE ONE NOTHING TOUCHES.
+            //
+            // This read `reviewed_at ?? finished_at` and the wait valve could
+            // therefore never fire. `reviewFinishedDispatches` re-reads every
+            // `wait` row each round and UPDATEs it in place - its own comment says
+            // so - which refreshes `reviewed_at` every five minutes. Measured in
+            // production 2026-09-04: #1327 and #1329 had been frozen for 18.4
+            // hours and reported 0.06 hours of idle, because the sweep had touched
+            // them a moment earlier. A six-hour floor against a clock reset every
+            // five minutes is a floor that cannot be reached.
+            //
+            // `finished_at` is written once, when the bee stops, and never again.
+            // It is the only honest measure of how long a verdict has stood.
+            idleMs: finished
+              ? Date.now() - Date.parse(String(row.finished_at))
+              : 0,
+            sendBacks: Number(row.send_backs ?? 0),
+            releases: Number(row.ceiling_releases ?? 0),
+          }),
       // The price, so the daily cap can see the work it exists to govern.
       // `estimatedCostUSD` returns nil unless BOTH provider and model are
       // present, so a record missing either contributes nothing to the sum and
@@ -1734,20 +1776,28 @@ export async function runRound(
   // requests, so withholding its key from the next bee would shrink the swarm
   // for nothing - the same mistake as counting it as a running worker, one
   // layer down.
-  let takenKeys = inFlight.rows
+  //
+  // A runner's lane is not a provider key of this deployment, so it is neither
+  // taken from the pool nor where the rotation resumes.
+  const providerRows = inFlight.rows.filter(
+    (r) => !(typeof r.key_index === 'number' && isRunnerLane(r.key_index)),
+  )
+  let takenKeys = providerRows
     .filter((r) => r.finished_at == null)
     .map((r) => r.key_index)
     .filter((i): i is number => typeof i === 'number')
-  let keyCursor = latestProviderKeyIndex(inFlight.rows)
+  let keyCursor = latestProviderKeyIndex(providerRows)
 
   // `watch.held` first, and re-read on every pass: the heartbeat can refuse a
   // renewal in the minutes a single dispatch takes, and every write below this
   // point is unfenced. `recordTick` above needs no such guard - its
   // `WHERE queen_tick.fence <= EXCLUDED.fence` already refuses a stale term,
   // and a second copy of that rule here is how the two come to disagree.
-  while (watch.held && current?.allowed && typeof current.chosen === 'number') {
-    const issue = current.chosen
-    const paths = current.chosenPaths ?? []
+  const dispatchChosen = async (
+    issue: number,
+    paths: string[],
+    runnerOnly = false,
+  ) => {
     const spec = specVerdicts[String(issue)]
     const criteria = spec?.criteria ?? []
     const criteriaSource = spec?.criteriaSource ?? 'none'
@@ -1757,7 +1807,7 @@ export async function runRound(
     // nobody - the retried bee got the same brief as the first one and was
     // judged against the same findings it was never shown.
     const previous = await previousReview(pool, issue)
-    const dispatch = await (deps.dispatch ?? dispatchBee)(
+    return (deps.dispatch ?? dispatchBee)(
       pool,
       issue,
       briefFor(
@@ -1774,12 +1824,21 @@ export async function runRound(
       keyCursor,
       criteria,
       criteriaSource,
+      ...(runnerOnly ? [{ runnerOnly: true }] : []),
     )
+  }
+
+  while (watch.held && current?.allowed && typeof current.chosen === 'number') {
+    const issue = current.chosen
+    const paths = current.chosenPaths ?? []
+    const dispatch = await dispatchChosen(issue, paths)
     started.push(dispatch)
     if (!dispatch.started) break
 
     // Fold it into the board so the next answer treats its files as held, and
     // mark its key as taken so the next bee gets a different one.
+    const toRunner =
+      typeof dispatch.keyIndex === 'number' && isRunnerLane(dispatch.keyIndex)
     board = [
       ...board,
       boardTask(owner, repoName, {
@@ -1788,10 +1847,13 @@ export async function runRound(
         ownedPaths: paths,
         branch: dispatch.branch,
         at: new Date().toISOString(),
-        title: 'just dispatched by this round',
+        title: toRunner
+          ? 'just offered to a runner by this round'
+          : 'just dispatched by this round',
+        state: toRunner ? 'queued' : 'running',
       }),
     ]
-    if (typeof dispatch.keyIndex === 'number') {
+    if (typeof dispatch.keyIndex === 'number' && !toRunner) {
       takenKeys = [...takenKeys, dispatch.keyIndex]
       keyCursor = dispatch.keyIndex
     }
@@ -1821,6 +1883,59 @@ export async function runRound(
         why: current?.refusal ?? 'no answer',
       })
     }
+  }
+
+  // THE RUNNER-ONLY PASS. `queend` stops the loop above when the CONTAINER's
+  // workers are all busy, and that is the right answer for the container - but
+  // a runner costs none of them, so a full container is exactly when a lent
+  // machine helps most. Each pass re-asks the same policy with this
+  // container's running bees shown as `queued`: still live claims holding
+  // their files, no longer counted against canStartAnother. Every other rule -
+  // boundaries, the spend cap, what is already claimed - applies unchanged, and
+  // only a runner may take the answer (`runnerOnly`).
+  for (
+    let pass = 0;
+    pass < RUNNER_PASS_LIMIT &&
+    watch.held &&
+    current !== null &&
+    !current.allowed &&
+    /already running/.test(current.refusal ?? '') &&
+    (await (deps.idleRunner ?? idleRunner)(pool).catch(() => null)) !== null;
+    pass += 1
+  ) {
+    const relabelled = board.map((task) =>
+      (task as { state?: unknown })?.state === 'running'
+        ? { ...(task as object), state: 'queued' }
+        : task,
+    )
+    const pick = await askQueend({
+      kind: 'choose',
+      candidates,
+      candidateBodies,
+      tasks: relabelled,
+    })
+    if (!pick?.allowed || typeof pick.chosen !== 'number') break
+    const dispatch = await dispatchChosen(
+      pick.chosen,
+      pick.chosenPaths ?? [],
+      true,
+    )
+    // A task no runner could take is not a refusal of the round - the
+    // container was already full - so it stays out of the report.
+    if (!dispatch.started) break
+    started.push(dispatch)
+    board = [
+      ...board,
+      boardTask(owner, repoName, {
+        conversationId: dispatch.conversationId ?? null,
+        issue: pick.chosen,
+        ownedPaths: pick.chosenPaths ?? [],
+        branch: dispatch.branch,
+        at: new Date().toISOString(),
+        title: 'just offered to a runner by this round',
+        state: 'queued',
+      }),
+    ]
   }
 
   if (!watch.held) {
@@ -3926,7 +4041,7 @@ async function runningKeys(pool: Pool): Promise<number[]> {
     .catch(() => null)
   return (running?.rows ?? [])
     .map((r) => r.key_index)
-    .filter((i): i is number => typeof i === 'number')
+    .filter((i): i is number => typeof i === 'number' && !isRunnerLane(i))
 }
 
 /** One VERDICT line with its three-state answer kept. */

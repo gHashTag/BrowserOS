@@ -307,6 +307,24 @@ CREATE TABLE IF NOT EXISTS queen_runner (
 CREATE INDEX IF NOT EXISTS idx_queen_runner_owner
   ON queen_runner (telegram_id) WHERE revoked_at IS NULL;
 
+-- A dispatch OFFERED to a runner instead of started here (queen-runner-work.ts).
+-- The brief and the identity are stored with the row because the runner asks
+-- for them later, over HTTP, and must be handed exactly what the round wrote.
+-- runner_start_* names the commit the runner must start from: the base, or the
+-- runner's own previous attempt when the review sent it back. runner_remote and
+-- runner_head are what came back, and runner_lease_at is renewed by every
+-- heartbeat - a lease that goes stale releases the issue (reapSilentRunners).
+ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS runner_brief text;
+ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS runner_system_prompt text;
+ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS runner_start_sha text;
+ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS runner_start_remote text;
+ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS runner_start_branch text;
+ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS runner_claimed_at timestamptz;
+ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS runner_lease_at timestamptz;
+ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS runner_remote text;
+ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS runner_branch text;
+ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS runner_head text;
+
 CREATE INDEX IF NOT EXISTS idx_conversation_messages_conversation_order
   ON "conversationMessages" ("conversationId", "orderIndex");
 `
