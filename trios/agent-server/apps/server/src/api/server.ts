@@ -56,6 +56,7 @@ import { createQueenLeaseRoute } from './routes/queen-lease'
 import { createQueenNeedsYouRoute } from './routes/queen-needs-you'
 import { createQueenPublicActivityRoute } from './routes/queen-public-activity'
 import { createQueenPublicAgentsRoute } from './routes/queen-public-agents'
+import { createQueenPublicEarningsRoute } from './routes/queen-public-earnings'
 import { createQueenPublicHardwareRoute } from './routes/queen-public-hardware'
 import { createQueenPublicLeaderboardRoute } from './routes/queen-public-leaderboard'
 import { createQueenPublicResearchRoute } from './routes/queen-public-research'
@@ -372,6 +373,7 @@ export async function createHttpServer(config: HttpServerConfig) {
     .use('/queen/public-research', publicReadCorsMiddleware())
     .use('/queen/public-agents', publicReadCorsMiddleware())
     .use('/queen/public-leaderboard', publicReadCorsMiddleware())
+    .use('/queen/public-earnings', publicReadCorsMiddleware())
     .use('/queen/scheduler', publicReadCorsMiddleware())
     .use('/*', trustedCorsMiddleware())
     // The Inngest server registers and invokes functions here; each request
@@ -390,6 +392,9 @@ export async function createHttpServer(config: HttpServerConfig) {
     .route('/queen/public-board', createQueenPublicBoardRoute())
     // Who lent a lane and what it did; no titles, no worker text, no key.
     .route('/queen/public-leaderboard', createQueenPublicLeaderboardRoute())
+    // What accepted spec work earned; recorded, not withdrawable. Repository,
+    // issue, commit and declared .t27 paths only - no titles, notes or keys.
+    .route('/queen/public-earnings', createQueenPublicEarningsRoute())
     .route('/queen/registry', queenRegistryRoutes)
     // The shell only. It holds no state and no token; every byte of data it
     // shows comes from /queen/lease, which stays guarded. See the route header

@@ -84,10 +84,14 @@ describe('route-guard audit over src/api/server.ts', () => {
     // where a route named `public` belongs. Every other number here is
     // unchanged, which is the part worth stating: no guarded route quietly lost
     // its guard to make room for it.
-    expect(report.totalMounts).toBe(45)
+    // RE-MEASURED 2026-10-01: 45 became 46, the same way. One mount added on
+    // purpose - `/queen/public-earnings`, an explicit
+    // `publicReadCorsMiddleware()` on the record of accepted spec work - and
+    // the audit puts it in `public-read`. Prefix and wrapper counts unchanged.
+    expect(report.totalMounts).toBe(46)
     expect(report.prefixGuardCount).toBe(18)
     expect(report.guardedSubAppCount).toBe(15)
-    expect(report.publicReadCount).toBe(8)
+    expect(report.publicReadCount).toBe(9)
   })
 
   it('reports zero unguarded mounts once the reasoned allowlist is applied', () => {
@@ -105,7 +109,7 @@ describe('route-guard audit over src/api/server.ts', () => {
     )
   })
 
-  it('splits the twenty-two /queen mounts into 8 public-read, 8 wrapper-guarded and 6 allowlisted shells', () => {
+  it('splits the twenty-three /queen mounts into 9 public-read, 8 wrapper-guarded and 6 allowlisted shells', () => {
     const queenMounts = classifyMounts(source).filter(
       (mount) => mount.path === '/queen' || mount.path.startsWith('/queen/'),
     )
@@ -127,7 +131,13 @@ describe('route-guard audit over src/api/server.ts', () => {
     // issue title, no worker text and no credential: only a key's INDEX ever
     // reaches the database, so there is nothing here a stranger could read that
     // the board does not already show.
-    expect(queenMounts.length).toBe(22)
+    // RE-MEASURED 2026-10-01: twenty-two became twenty-three. The ninth
+    // public-read is /queen/public-earnings - which accepted spec commits were
+    // recorded as earnings and which a later verdict took back. Like the
+    // leaderboard it carries no issue title, no worker text, no review note and
+    // no credential; the repository, issue, commit and declared .t27 paths are
+    // already public on GitHub.
+    expect(queenMounts.length).toBe(23)
 
     const counts: Record<string, number> = {
       'public-read': 0,
@@ -141,7 +151,7 @@ describe('route-guard audit over src/api/server.ts', () => {
     // The four buckets must account for every mount with the exact expected
     // split; anything unaccounted for breaks one of these numbers.
     expect(counts).toEqual({
-      'public-read': 8,
+      'public-read': 9,
       'prefix-guard': 0,
       wrapper: 8,
       unguarded: 6,
