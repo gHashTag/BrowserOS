@@ -12,3 +12,5 @@
 {"ts":"2026-10-01T21:48:30.035Z","event":"task.intent","agent":"codex-contributor-keys","task_id":"contributor-keys","spec_path":"agent-server/specs/automation/queen-contributor-keys.t27","graph_node":"queen_contributor_keys"}
 {"ts":"2026-10-01T22:06:32.008Z","event":"claim.heartbeat","agent":"codex-contributor-keys","claim_id":"2d5b4461-adaa-4135-9b39-24296a6456a5"}
 {"ts":"2026-10-01T22:09:25.786Z","event":"claim.release","agent":"codex-contributor-keys","claim_id":"2d5b4461-adaa-4135-9b39-24296a6456a5","result":"clean","validation":"268 Bun tests and 9 native spec tests passed; deployment pending"}
+{"ts":"2026-10-01T22:10:35.338Z","event":"task.intent","agent":"codex-contributor-keys","task_id":"contributor-keys-generation","spec_path":"agent-server/specs/automation/queen-contributor-keys.t27","detail":"Preserve byte-identical t27c output through the existing formatting hook"}
+{"ts":"2026-10-01T22:11:04.287Z","event":"claim.release","agent":"codex-contributor-keys","claim_id":"b00e2190-4289-4c02-bb2b-04fa398f29e4","result":"clean","validation":"Generated output remains byte-identical after formatter; 12 host tests pass"}

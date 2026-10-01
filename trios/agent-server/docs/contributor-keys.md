@@ -6,12 +6,19 @@ the canonical spec in gHashTag/t27#5473. Regenerate the host policy with
 `t27c gen-ts specs/automation/queen-contributor-keys.t27` and save its output
 as `apps/server/src/api/services/queen-contributor-policy.gen.ts`; never edit
 the generated module. SQL, cryptography and HTTP are explicit host adapters.
+The formatter excludes this one generated file so commit hooks preserve the
+compiler's bytes. TypeScript and the compiler-AST parity test still check it.
 
 The personal account can list, check, add, enable and disable its own Queen
 provider keys. XP comes from the existing dispatch and dispatch-history rows.
 This feature never writes to the application's token wallet.
 
 ## Deployment
+
+Deploy the reviewed commit explicitly to the actual Queen service. The PR
+base is `feat/queen-supervisor`; at the 2026-10-01 rollout preparation, Railway
+was configured to build `fix/queen-worker-provider-and-prompt-size`. Merging
+the PR base alone does not establish that the live service runs this change.
 
 The management API is off until `QUEEN_CONTRIBUTOR_PROXY_TOKEN` contains at least
 32 bytes. Configure a separate random service capability in the Queen and

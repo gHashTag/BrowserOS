@@ -3,26 +3,26 @@
 // Every name, value and type here comes from that spec. Change the spec and
 // regenerate; an edit made here is lost the next time anyone builds.
 
-export const KIND = 'automation' satisfies string
-export const ID = 'queen-contributor-keys' satisfies string
-export const REPO = 'BrowserOS' satisfies string
-export const VERSION = 1 satisfies number
-export const PROBE_TIMEOUT_MS = 15000 satisfies number
-export const PROBE_MAX_TOKENS = 16 satisfies number
-export const MAX_PROBES_IN_FLIGHT = 4 satisfies number
-export const PROBE_COOLDOWN_SECONDS = 60 satisfies number
-export const MAX_KEYS_PER_OWNER = 100 satisfies number
-export const MAX_KEY_BYTES = 4096 satisfies number
-export const MAX_BODY_BYTES = 8192 satisfies number
-export const LABEL_LIMIT = 80 satisfies number
-export const PROXY_TOKEN_MIN_BYTES = 32 satisfies number
-export const OWNER_REASSIGNMENT = false satisfies boolean
-export const CREDIT_WALLET = false satisfies boolean
-export const ENVIRONMENT_INDICES_COMPACTED = false satisfies boolean
-export const NVIDIA_URL = 'https://integrate.api.nvidia.com/v1' satisfies string
-export const NVIDIA_MODEL = 'nvidia/nemotron-3-ultra-550b-a55b' satisfies string
-export const ZAI_URL = 'https://api.z.ai/api/paas/v4' satisfies string
-export const ZAI_MODEL = 'glm-4.5-flash' satisfies string
+export const KIND = "automation" satisfies string;
+export const ID = "queen-contributor-keys" satisfies string;
+export const REPO = "BrowserOS" satisfies string;
+export const VERSION = 1 satisfies number;
+export const PROBE_TIMEOUT_MS = 15000 satisfies number;
+export const PROBE_MAX_TOKENS = 16 satisfies number;
+export const MAX_PROBES_IN_FLIGHT = 4 satisfies number;
+export const PROBE_COOLDOWN_SECONDS = 60 satisfies number;
+export const MAX_KEYS_PER_OWNER = 100 satisfies number;
+export const MAX_KEY_BYTES = 4096 satisfies number;
+export const MAX_BODY_BYTES = 8192 satisfies number;
+export const LABEL_LIMIT = 80 satisfies number;
+export const PROXY_TOKEN_MIN_BYTES = 32 satisfies number;
+export const OWNER_REASSIGNMENT = false satisfies boolean;
+export const CREDIT_WALLET = false satisfies boolean;
+export const ENVIRONMENT_INDICES_COMPACTED = false satisfies boolean;
+export const NVIDIA_URL = "https://integrate.api.nvidia.com/v1" satisfies string;
+export const NVIDIA_MODEL = "nvidia/nemotron-3-ultra-550b-a55b" satisfies string;
+export const ZAI_URL = "https://api.z.ai/api/paas/v4" satisfies string;
+export const ZAI_MODEL = "glm-4.5-flash" satisfies string;
 // t27c gen-ts: fn trusted_proxy was not emitted -- this backend lowers declarations, not bodies.
 // t27c gen-ts: fn source_matches_index was not emitted -- this backend lowers declarations, not bodies.
 // t27c gen-ts: fn may_add_key was not emitted -- this backend lowers declarations, not bodies.
@@ -43,29 +43,8 @@ export const ZAI_MODEL = 'glm-4.5-flash' satisfies string
 // t27c gen-ts: a TestBlock was not emitted -- it is checked by the compiler, not by the artifact.
 
 // Declaration order, which the spec's own laws depend on.
-export const __STRUCT_ORDER__ = [] as const
-export const __DECL_ORDER__ = [
-  'KIND',
-  'ID',
-  'REPO',
-  'VERSION',
-  'PROBE_TIMEOUT_MS',
-  'PROBE_MAX_TOKENS',
-  'MAX_PROBES_IN_FLIGHT',
-  'PROBE_COOLDOWN_SECONDS',
-  'MAX_KEYS_PER_OWNER',
-  'MAX_KEY_BYTES',
-  'MAX_BODY_BYTES',
-  'LABEL_LIMIT',
-  'PROXY_TOKEN_MIN_BYTES',
-  'OWNER_REASSIGNMENT',
-  'CREDIT_WALLET',
-  'ENVIRONMENT_INDICES_COMPACTED',
-  'NVIDIA_URL',
-  'NVIDIA_MODEL',
-  'ZAI_URL',
-  'ZAI_MODEL',
-] as const
+export const __STRUCT_ORDER__ = [] as const;
+export const __DECL_ORDER__ = ["KIND", "ID", "REPO", "VERSION", "PROBE_TIMEOUT_MS", "PROBE_MAX_TOKENS", "MAX_PROBES_IN_FLIGHT", "PROBE_COOLDOWN_SECONDS", "MAX_KEYS_PER_OWNER", "MAX_KEY_BYTES", "MAX_BODY_BYTES", "LABEL_LIMIT", "PROXY_TOKEN_MIN_BYTES", "OWNER_REASSIGNMENT", "CREDIT_WALLET", "ENVIRONMENT_INDICES_COMPACTED", "NVIDIA_URL", "NVIDIA_MODEL", "ZAI_URL", "ZAI_MODEL"] as const;
 
 // What this spec holds and this backend did not print. Empty is the whole
 // story most of the time; an entry here is a promise the artifact does not
@@ -77,4 +56,4 @@ export const __DECL_ORDER__ = [
 // literal three of the four omissions vanished into the fourth -- a record of
 // what went missing that itself went missing. A spec is free to reuse a
 // name; this file is not free to lose the second one.
-export const __NOT_EMITTED__ = Object.freeze([] as const)
+export const __NOT_EMITTED__ = Object.freeze([] as const);
