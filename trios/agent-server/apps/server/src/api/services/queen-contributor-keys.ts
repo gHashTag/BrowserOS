@@ -86,6 +86,45 @@ export function validModel(value: unknown): value is string {
     MODEL_ID.test(value)
   )
 }
+/**
+ * Keys are named `<provider> #<n>`. An environment key's number is its place
+ * in its pool, so pool 2's first Z.ai key is `zai #1`, not `zai #10001`; the
+ * stride is POOL_KEY_STRIDE in queen-dispatch.ts (a test holds them equal).
+ * A key added without a name, or named only after its provider, takes the
+ * next free number of that provider.
+ */
+export const LABEL_POOL_STRIDE = 10_000
+export function environmentLabel(
+  provider: ContributorProvider,
+  id: number,
+): string {
+  return `${provider} #${(id % LABEL_POOL_STRIDE) + 1}`
+}
+function labelNumber(provider: ContributorProvider, label: string): number {
+  const match = /^([a-z]+) #([1-9][0-9]{0,8})$/.exec(label.trim())
+  return match && match[1] === provider ? Number(match[2]) : 0
+}
+export function bareLabel(
+  provider: ContributorProvider,
+  label: string,
+): boolean {
+  const name = label.trim().toLowerCase()
+  const known = CONTRIBUTOR_PROVIDERS.find((p) => p.id === provider)
+  return name === '' || name === provider || name === known?.label.toLowerCase()
+}
+/** The next free `<provider> #<n>` after every numbered key and pool place. */
+export function nextLabel(
+  provider: ContributorProvider,
+  labels: string[],
+  environment: EnvironmentKey[],
+): string {
+  let top = 0
+  for (const key of environment)
+    if (key.provider === provider)
+      top = Math.max(top, (key.id % LABEL_POOL_STRIDE) + 1)
+  for (const label of labels) top = Math.max(top, labelNumber(provider, label))
+  return `${provider} #${top + 1}`
+}
 const ready = new WeakMap<Pool, Promise<void>>()
 export function contributorsEnabled(): boolean {
   return (
@@ -293,6 +332,7 @@ export async function listContributorKeys(
       stored
         ? {
             ...publicKey(stored),
+            label: environmentLabel(key.provider, key.id),
             // A binding row records the model it was bound under; only an
             // owner's explicit choice outlives a change of the pool's model.
             model: stored.model_chosen ? stored.model : key.model,
@@ -302,7 +342,7 @@ export async function listContributorKeys(
             source: 'environment',
             provider: key.provider,
             model: key.model,
-            label: `${key.provider} #${key.id + 1}`,
+            label: environmentLabel(key.provider, key.id),
             fingerprint: digest.slice(0, 12),
             enabled: true,
             createdAt: null,
@@ -314,7 +354,38 @@ export async function listContributorKeys(
           },
     )
   }
+  await numberBareLabels(pool, subject, out, environment)
   return out
+}
+
+/**
+ * A managed key saved before keys were numbered (or named only "nvidia")
+ * takes the next number of its provider, oldest first, once. The update is
+ * compare-and-set on the old label, so two readers cannot number it twice.
+ */
+async function numberBareLabels(
+  pool: Pool,
+  subject: string,
+  keys: ContributorKey[],
+  environment: EnvironmentKey[],
+): Promise<void> {
+  const bare = keys
+    .filter(
+      (key) => key.source === 'managed' && bareLabel(key.provider, key.label),
+    )
+    .sort((a, b) => b.id - a.id)
+  for (const key of bare) {
+    const label = nextLabel(
+      key.provider,
+      keys.filter((other) => other !== key).map((other) => other.label),
+      environment,
+    )
+    const { rowCount } = await pool.query(
+      'UPDATE queen_contributor_keys SET label=$3 WHERE key_index=$1 AND owner_subject=$2 AND label=$4',
+      [key.id, subject, label, key.label],
+    )
+    if (rowCount) key.label = label
+  }
 }
 
 /** No response bodies, redirects, arbitrary URLs, retries or provider messages escape. */
@@ -536,11 +607,10 @@ export async function addContributorKey(
     throw new ContributorError('invalid_key')
   if (value.label !== undefined && typeof value.label !== 'string')
     throw new ContributorError('invalid_label')
-  const label =
-    typeof value.label === 'string' ? value.label.trim() : provider.label
+  const named = typeof value.label === 'string' ? value.label.trim() : ''
   if (
-    label.length > P.LABEL_LIMIT ||
-    [...label].some(
+    named.length > P.LABEL_LIMIT ||
+    [...named].some(
       (char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127,
     )
   )
@@ -583,6 +653,19 @@ export async function addContributorKey(
     )
     if (Number(count.rows[0]?.n) >= P.MAX_KEYS_PER_OWNER)
       throw new ContributorError('key_limit', 409)
+    // Numbered under the same lock as the count, so two adds cannot share one.
+    let label = named
+    if (bareLabel(provider.id, named)) {
+      const taken = await client.query<{ label: string }>(
+        "SELECT label FROM queen_contributor_keys WHERE owner_subject=$1 AND provider=$2 AND source='managed'",
+        [subject, provider.id],
+      )
+      label = nextLabel(
+        provider.id,
+        taken.rows.map((row) => row.label),
+        environment,
+      )
+    }
     const { rows } = await client.query<KeyRow>(
       `INSERT INTO queen_contributor_keys
       (source,fingerprint,owner_subject,owner_name,provider,model,label,sealed,enabled,probe_status,probe_at,probe_ms,model_chosen)
@@ -652,7 +735,7 @@ async function ownedRow(
         contributorName(subject),
         current.provider,
         current.model,
-        `${current.provider} #${id + 1}`,
+        environmentLabel(current.provider, id),
       ],
     )
     const { rows } = await pool.query<KeyRow>(
@@ -698,6 +781,9 @@ export async function changeContributorKey(
   const pooled = environment.find((key) => key.id === id)
   const effective = (stored: KeyRow): ContributorKey => ({
     ...publicKey(stored),
+    ...(stored.source === 'environment' && pooled
+      ? { label: environmentLabel(pooled.provider, id) }
+      : {}),
     model:
       stored.source === 'environment' && pooled && !stored.model_chosen
         ? pooled.model

@@ -5,9 +5,13 @@ import type { Pool } from 'pg'
 import { createQueenContributorKeysRoute } from '../../src/api/routes/queen-contributor-keys'
 import {
   addContributorKey,
+  bareLabel,
   checkModel,
   contributorGithub,
+  environmentLabel,
   fingerprint,
+  LABEL_POOL_STRIDE,
+  nextLabel,
   openCredential,
   ownerModel,
   probeCredential,
@@ -20,6 +24,7 @@ import {
 import { CONTRIBUTOR_POLICY } from '../../src/api/services/queen-contributor-policy'
 import {
   environmentContributorKeys,
+  POOL_KEY_STRIDE,
   resolveWorkerProvider,
   reviewLaneCandidates,
   workerCapacityBreakdown,
@@ -507,5 +512,34 @@ describe('one model for all keys of a provider', () => {
         models: {},
       }),
     ).toMatchObject({ keyIndex: 0, model: 'pool-model' })
+  })
+})
+
+describe('key names', () => {
+  it('environment keys are named by their place in their pool', () => {
+    expect(LABEL_POOL_STRIDE).toBe(POOL_KEY_STRIDE)
+    expect(environmentLabel('nvidia', 0)).toBe('nvidia #1')
+    expect(environmentLabel('nvidia', 23)).toBe('nvidia #24')
+    expect(environmentLabel('zai', 10000)).toBe('zai #1')
+    expect(environmentLabel('zai', 10009)).toBe('zai #10')
+  })
+  it('an unnamed key takes the next number after pool places and numbered keys', () => {
+    const pool24 = Array.from({ length: 24 }, (_, id) => ({
+      id,
+      provider: 'nvidia' as const,
+      model: 'm',
+      apiKey: `k${id}`,
+      baseUrl: CONTRIBUTOR_POLICY.NVIDIA_URL,
+    }))
+    expect(nextLabel('nvidia', [], pool24)).toBe('nvidia #25')
+    expect(nextLabel('nvidia', ['nvidia #25', 'My key'], pool24)).toBe(
+      'nvidia #26',
+    )
+    expect(nextLabel('nvidia', ['zai #40'], pool24)).toBe('nvidia #25')
+    expect(nextLabel('zai', [], pool24)).toBe('zai #1')
+    for (const label of ['', ' ', 'nvidia', 'NVIDIA', 'NVIDIA NIM'])
+      expect(bareLabel('nvidia', label)).toBe(true)
+    for (const label of ['nvidia #25', 'Laptop', 'zai'])
+      expect(bareLabel('nvidia', label)).toBe(false)
   })
 })

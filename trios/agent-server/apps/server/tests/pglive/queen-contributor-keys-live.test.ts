@@ -488,6 +488,81 @@ live('contributor ownership and allocation against real PostgreSQL', () => {
       hours: 1,
     })
   })
+  it('numbers keys by provider: pool places first, then each unnamed key in turn', async () => {
+    const env = [
+      ...environment,
+      {
+        id: 3,
+        provider: 'zai' as const,
+        model: 'z-model',
+        apiKey: 'zai-pool-one-key',
+        baseUrl: CONTRIBUTOR_POLICY.ZAI_URL,
+      },
+    ]
+    const withZai = { ...owners, 3: '@dmitrii-f-t27' }
+    const unnamed = await addContributorKey(
+      pool,
+      subject,
+      { provider: 'nvidia', apiKey: 'unnamed-one', label: '' },
+      env,
+      fetchOk,
+    )
+    const bare = await addContributorKey(
+      pool,
+      subject,
+      {
+        provider: 'nvidia',
+        apiKey: 'named-after-provider',
+        label: 'NVIDIA NIM',
+      },
+      env,
+      fetchOk,
+    )
+    const named = await addContributorKey(
+      pool,
+      subject,
+      { provider: 'nvidia', apiKey: 'named-key', label: 'Laptop key' },
+      env,
+      fetchOk,
+    )
+    const zai = await addContributorKey(
+      pool,
+      subject,
+      { provider: 'zai', apiKey: 'unnamed-zai' },
+      env,
+      fetchOk,
+    )
+    expect([unnamed.label, bare.label, named.label, zai.label]).toEqual([
+      'nvidia #2',
+      'nvidia #3',
+      'Laptop key',
+      'zai #5',
+    ])
+    // A key saved before numbering, with no name: numbered once, oldest first.
+    await pool.query(
+      "UPDATE queen_contributor_keys SET label='' WHERE key_index=$1",
+      [unnamed.id],
+    )
+    const listed = await listContributorKeys(pool, subject, env, withZai)
+    expect(
+      Object.fromEntries(listed.map((key) => [key.id, key.label])),
+    ).toEqual({
+      [unnamed.id]: 'nvidia #4',
+      [bare.id]: 'nvidia #3',
+      [named.id]: 'Laptop key',
+      [zai.id]: 'zai #5',
+      10000: 'nvidia #1',
+      3: 'zai #4',
+    })
+    const again = await listContributorKeys(pool, subject, env, withZai)
+    expect(again.find((key) => key.id === unnamed.id)?.label).toBe('nvidia #4')
+    const { rows } = await pool.query(
+      'SELECT label FROM queen_contributor_keys WHERE key_index=$1',
+      [unnamed.id],
+    )
+    expect(rows[0].label).toBe('nvidia #4')
+  })
+
   describe("one model for all of an owner's keys of a provider", () => {
     const toolCall = (calls: string[]) =>
       (async (_url, init) => {
