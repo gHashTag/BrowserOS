@@ -116,6 +116,11 @@ export const DEFAULT_ALLOWLIST = [
       'own bearer — a runner process on the lender machine, with no browser Origin; every request is refused 401 unless its bearer hashes to a live runner token, and the answer is only that runner own lane (src/api/routes/queen-runners.ts, tests/api/queen-runners.test.ts)',
   },
   {
+    path: '/queen/contributor-keys',
+    reason:
+      'own capability - a server-to-server route for the app render proxy, with no browser Origin; every request is refused unless its bearer equals QUEEN_CONTRIBUTOR_PROXY_TOKEN (at least 32 bytes, compared with timingSafeEqual) and it carries a verified x-queen-contributor-id, and the route is off while that token is unset (src/api/routes/queen-contributor-keys.ts, tests/api/queen-contributor-keys.test.ts)',
+  },
+  {
     path: '/api/inngest',
     reason:
       'signed webhook — Inngest calls this path from its own server with an x-inngest-signature over INNGEST_SIGNING_KEY; inngest/hono rejects an unsigned or missigned request with 4xx before any function runs (tests/api/queen-inngest.test.ts), and a browser Origin never appears on it, so the trusted-origin check would only turn the scheduler off (comment at the mount)',
