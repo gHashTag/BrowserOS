@@ -53,7 +53,9 @@ bower_components
 build/Release
 
 # Dependency directories
-node_modules/
+# No trailing slash: a symlinked node_modules is a file, and `node_modules/`
+# let one pointing at a local Mac path be committed and hang CI's install.
+node_modules
 jspm_packages/
 
 # Snowpack dependency directory (https://snowpack.dev/)
