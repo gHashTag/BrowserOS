@@ -84,9 +84,13 @@ describe('route-guard audit over src/api/server.ts', () => {
     // where a route named `public` belongs. Every other number here is
     // unchanged, which is the part worth stating: no guarded route quietly lost
     // its guard to make room for it.
-    expect(report.totalMounts).toBe(45)
+    // RE-MEASURED 2026-10-01: 45 became 46, and 15 guarded sub-apps became
+    // 16 - `/queen/move`, a person's one-card move, wrapped in the trusted-
+    // origin guard like the registry write. Public-read is unchanged: a door
+    // that takes an issue away from the swarm never answers a stranger.
+    expect(report.totalMounts).toBe(46)
     expect(report.prefixGuardCount).toBe(18)
-    expect(report.guardedSubAppCount).toBe(15)
+    expect(report.guardedSubAppCount).toBe(16)
     expect(report.publicReadCount).toBe(8)
   })
 
@@ -105,7 +109,7 @@ describe('route-guard audit over src/api/server.ts', () => {
     )
   })
 
-  it('splits the twenty-two /queen mounts into 8 public-read, 8 wrapper-guarded and 6 allowlisted shells', () => {
+  it('splits the twenty-three /queen mounts into 8 public-read, 9 wrapper-guarded and 6 allowlisted shells', () => {
     const queenMounts = classifyMounts(source).filter(
       (mount) => mount.path === '/queen' || mount.path.startsWith('/queen/'),
     )
@@ -127,7 +131,9 @@ describe('route-guard audit over src/api/server.ts', () => {
     // issue title, no worker text and no credential: only a key's INDEX ever
     // reaches the database, so there is nothing here a stranger could read that
     // the board does not already show.
-    expect(queenMounts.length).toBe(22)
+    // RE-MEASURED 2026-10-01: twenty-two became twenty-three. The ninth
+    // wrapper is /queen/move, the one-card move door.
+    expect(queenMounts.length).toBe(23)
 
     const counts: Record<string, number> = {
       'public-read': 0,
@@ -143,7 +149,7 @@ describe('route-guard audit over src/api/server.ts', () => {
     expect(counts).toEqual({
       'public-read': 8,
       'prefix-guard': 0,
-      wrapper: 8,
+      wrapper: 9,
       unguarded: 6,
     })
 
@@ -161,6 +167,16 @@ describe('route-guard audit over src/api/server.ts', () => {
     )
     expect(registry?.classification).toBe('wrapper')
     expect(registry?.via).toBe('queenRegistryRoutes')
+  })
+
+  it('classifies /queen/move as wrapper-guarded', () => {
+    // A person's one-card move takes an issue away from the swarm: it must
+    // never answer a stranger, the way the registry write never does.
+    const move = classifyMounts(source).find(
+      (mount) => mount.path === '/queen/move',
+    )
+    expect(move?.classification).toBe('wrapper')
+    expect(move?.via).toBe('queenCardMoveRoutes')
   })
 
   it('classifies /terminal as wrapper-guarded (the standalone mount after the builder chain)', () => {

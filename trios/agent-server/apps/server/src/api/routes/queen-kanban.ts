@@ -49,6 +49,7 @@ import { Hono } from 'hono'
 import type { Pool } from 'pg'
 import { createQueenPool } from '../../lib/db/queen-pool'
 import { logger } from '../../lib/logger'
+import { applyCardMoves, readCardMoves } from '../services/queen-card-move'
 import {
   liveWorkerCapacity,
   type WorkerCapacityBreakdown,
@@ -72,7 +73,7 @@ interface PublicBoardPool {
   end(): Promise<void>
 }
 
-interface Card {
+export interface Card {
   number: number
   title: string
   column: string
@@ -477,7 +478,12 @@ export interface BoardInput {
   now?: number
 }
 
-async function build(
+/** The repository this board draws - the one the round supervises. */
+export function boardRepo(): string {
+  return process.env.TRIOS_GITHUB_REPO || 'gHashTag/trios'
+}
+
+export async function build(
   pool: PublicBoardPool,
 ): Promise<{ cards: Card[]; pulse: Pulse }> {
   const variant = process.env.TRIOS_VARIANT || 'prod'
@@ -537,16 +543,29 @@ async function build(
     ),
   ])
 
+  // A person's drops, read after the rest and apart from it: a board without
+  // the table yet (the migration not run) is the board without drops, not no
+  // board. The round falls back the same way, so the two still agree.
+  const moves = await readCardMoves(pool, boardRepo()).catch((error) => {
+    logger.warn('Queen board could not read card moves', {
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return []
+  })
+
   const counts = day.rows[0] ?? {}
   return {
-    cards: composeCards({
-      tasks: registry.rowCount
-        ? (registry.rows[0].tasks as RegistryTask[])
-        : [],
-      dispatches: dispatches.rows,
-      issues: issues.rows,
-      decision: lastTick.rows[0]?.decision,
-    }),
+    cards: applyCardMoves(
+      composeCards({
+        tasks: registry.rowCount
+          ? (registry.rows[0].tasks as RegistryTask[])
+          : [],
+        dispatches: dispatches.rows,
+        issues: issues.rows,
+        decision: lastTick.rows[0]?.decision,
+      }),
+      moves,
+    ),
     pulse: {
       rounds: Number(counts.rounds ?? 0),
       bees: Number(counts.bees ?? 0),
@@ -1130,7 +1149,7 @@ export function createQueenBoardRoute() {
   return new Hono().get('/', async (c) => {
     const url = queenLeaseDatabaseUrl()
     if (!url) return c.json({ error: 'No database configured' }, 503)
-    const repo = process.env.TRIOS_GITHUB_REPO || 'gHashTag/trios'
+    const repo = boardRepo()
     const pool = createQueenPool(url)
     try {
       const built = await build(pool)
@@ -1165,7 +1184,7 @@ export function createQueenPublicBoardRoute(deps: QueenPublicBoardDeps = {}) {
     c.header('Cache-Control', 'no-store')
     const url = databaseUrl()
     if (!url) return c.json({ error: 'No database configured' }, 503)
-    const repo = process.env.TRIOS_GITHUB_REPO || 'gHashTag/trios'
+    const repo = boardRepo()
     const pool = createPool(url)
     try {
       const built = await build(pool)

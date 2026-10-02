@@ -53,6 +53,10 @@ function healthyPool(answers: {
       if (sql.includes('FROM queen_issues')) {
         return { rowCount: answers.issues.length, rows: answers.issues }
       }
+      // A person's drops (POST /queen/move): none on this board.
+      if (sql.includes('FROM queen_card_move')) {
+        return { rowCount: 0, rows: [] }
+      }
       return { rowCount: answers.dispatches.length, rows: answers.dispatches }
     },
     end: async () => {

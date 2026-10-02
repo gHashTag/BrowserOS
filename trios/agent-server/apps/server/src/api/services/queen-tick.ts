@@ -42,6 +42,7 @@ import { createQueenPool } from '../../lib/db/queen-pool'
 import { logger } from '../../lib/logger'
 import { startModelProbes, workerModelRanking } from '../../lib/model-ranking'
 import { outstandingEscalations } from '../routes/queen-needs-you'
+import { droppedByPeople, withoutDropped } from './queen-card-move'
 import { githubCiDeps, takeBackRefusedAcceptances } from './queen-ci-verdict'
 import { contributorRuntime } from './queen-contributor-keys'
 import {
@@ -1535,6 +1536,18 @@ export async function runRound(
         })
       },
     )
+    // A person said "not doing this" on the board (POST /queen/move). The
+    // issue stays in the stored list - the board still draws it, in DROPPED -
+    // but it is not a candidate. Fail open: a missing table (the migration not
+    // yet run) must not stop the round, and the board says the same thing,
+    // because it reads the same rows and also falls back to no drops.
+    const dropped = await droppedByPeople(pool, repo).catch((error) => {
+      logger.warn('Queen could not read the board drops', {
+        error: error instanceof Error ? error.message : String(error),
+      })
+      return new Set<number>()
+    })
+    candidates = withoutDropped(candidates, dropped)
   }
   // Reap before reading the board, not after.
   //

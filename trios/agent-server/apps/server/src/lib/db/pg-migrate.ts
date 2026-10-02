@@ -71,6 +71,23 @@ CREATE TABLE IF NOT EXISTS queen_registry (
   published_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- A person's "not doing this" on ONE card (POST /queen/move). Both the board
+-- and the round read it: the board draws the card in DROPPED, and the round
+-- leaves the issue out of its candidates - a drop only the board knew about
+-- would show a card as dropped while a bee was handed it. One row per issue;
+-- taking the drop back deletes the row. Keyed by repository as well: the
+-- board's repository has changed before (trios, then t27), and a drop keyed
+-- by number alone would land on another repository's issue of that number.
+CREATE TABLE IF NOT EXISTS queen_card_move (
+  repo text NOT NULL,
+  number int NOT NULL,
+  from_column text NOT NULL,
+  reason text NOT NULL DEFAULT '',
+  moved_by text NOT NULL DEFAULT '',
+  moved_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (repo, number)
+);
+
 CREATE TABLE IF NOT EXISTS conversations (
   "rowId" text PRIMARY KEY,
   "profileId" text NOT NULL,
