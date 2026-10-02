@@ -5,12 +5,17 @@ import type { Pool } from 'pg'
 import { createQueenContributorKeysRoute } from '../../src/api/routes/queen-contributor-keys'
 import {
   addContributorKey,
+  checkModel,
   contributorGithub,
   fingerprint,
   openCredential,
+  ownerModel,
   probeCredential,
+  providerModels,
+  resetProviderModels,
   sealCredential,
   trustedContributor,
+  validModel,
 } from '../../src/api/services/queen-contributor-keys'
 import { CONTRIBUTOR_POLICY } from '../../src/api/services/queen-contributor-policy'
 import {
@@ -353,5 +358,154 @@ describe('stable allocation and attribution', () => {
     expect(CONTRIBUTOR_POLICY.__NOT_EMITTED__).toEqual([])
     for (const name of CONTRIBUTOR_POLICY.__DECL_ORDER__)
       expect(result.consts[name]?.value).toEqual(CONTRIBUTOR_POLICY[name])
+  })
+})
+
+describe('one model for all keys of a provider', () => {
+  const key = {
+    provider: 'nvidia' as const,
+    model: 'z-ai/glm-5.3',
+    apiKey: 'never-reflect-this-secret',
+  }
+  it('accepts catalog model ids and refuses anything else', () => {
+    for (const model of [
+      'z-ai/glm-5.3',
+      'glm-4.5-flash',
+      'nvidia/nemotron-3-super-120b-a12b',
+      'a'.repeat(CONTRIBUTOR_POLICY.MODEL_LIMIT),
+    ])
+      expect(validModel(model)).toBe(true)
+    for (const model of [
+      '',
+      ' z-ai/glm-5.3',
+      'glm 5',
+      '../glm',
+      'glm\n',
+      'a'.repeat(CONTRIBUTOR_POLICY.MODEL_LIMIT + 1),
+      42,
+      null,
+    ])
+      expect(validModel(model)).toBe(false)
+  })
+  it('a model passes only by calling the offered tool', async () => {
+    const seen: Record<string, unknown>[] = []
+    const answer = (status: number, body: unknown) =>
+      (async (_url, init) => {
+        seen.push(JSON.parse(String(init?.body)))
+        return Response.json(body, { status })
+      }) as typeof fetch
+    expect(
+      await checkModel(
+        key,
+        answer(200, {
+          choices: [{ message: { tool_calls: [{ id: 'ping' }] } }],
+        }),
+      ),
+    ).toBe('ok')
+    expect(seen[0]).toMatchObject({
+      model: 'z-ai/glm-5.3',
+      max_tokens: CONTRIBUTOR_POLICY.MODEL_PROBE_MAX_TOKENS,
+      tool_choice: 'auto',
+      tools: [{ type: 'function', function: { name: 'ping' } }],
+    })
+    expect(
+      await checkModel(
+        key,
+        answer(200, { choices: [{ message: { content: 'pong' } }] }),
+      ),
+    ).toBe('no_tool_call')
+    for (const status of [400, 404, 410, 422])
+      expect(await checkModel(key, answer(status, {}))).toBe('unknown_model')
+    for (const status of [401, 429, 500, 503])
+      expect(await checkModel(key, answer(status, {}))).toBe('inconclusive')
+    expect(
+      await checkModel(key, (async () => {
+        throw new Error(key.apiKey)
+      }) as typeof fetch),
+    ).toBe('inconclusive')
+  })
+  it('lists catalog ids, drops malformed ones and never caches a failed read', async () => {
+    resetProviderModels()
+    let reads = 0
+    const broken = (async () => {
+      reads++
+      return new Response('down', { status: 503 })
+    }) as typeof fetch
+    expect(await providerModels(key, broken)).toEqual([])
+    expect(await providerModels(key, broken)).toEqual([])
+    expect(reads).toBe(2)
+    const catalog = (async (url, init) => {
+      reads++
+      expect(url).toBe(`${CONTRIBUTOR_POLICY.NVIDIA_URL}/models`)
+      expect(init?.redirect).toBe('error')
+      return Response.json({
+        data: [
+          { id: 'z-ai/glm-5.3' },
+          { id: 'z-ai/glm-5.3' },
+          { id: 'has space' },
+          { id: 7 },
+          { id: 'a-model' },
+        ],
+      })
+    }) as typeof fetch
+    expect(await providerModels(key, catalog)).toEqual([
+      'a-model',
+      'z-ai/glm-5.3',
+    ])
+    expect(await providerModels(key, broken)).toEqual([
+      'a-model',
+      'z-ai/glm-5.3',
+    ])
+    expect(reads).toBe(3)
+    resetProviderModels()
+  })
+  it('the owner model is the one most of their keys of the provider run', () => {
+    expect(
+      ownerModel(
+        [
+          { provider: 'nvidia', model: 'b' },
+          { provider: 'nvidia', model: 'a' },
+          { provider: 'nvidia', model: 'b' },
+          { provider: 'zai', model: 'z' },
+        ],
+        'nvidia',
+      ),
+    ).toBe('b')
+    expect(ownerModel([], 'zai')).toBe(CONTRIBUTOR_POLICY.ZAI_MODEL)
+  })
+  it('bees and reviews run on the owner model while the pool keeps its own', () => {
+    process.env.TRIOS_QUEEN_WORKER_BASE_URL = CONTRIBUTOR_POLICY.NVIDIA_URL
+    process.env.TRIOS_QUEEN_WORKER_PROVIDER = 'openai-compatible'
+    process.env.TRIOS_QUEEN_WORKER_MODEL = 'pool-model'
+    process.env.TRIOS_QUEEN_WORKER_API_KEY = 'key-a'
+    process.env.TRIOS_QUEEN_WORKER_API_KEY_2 = 'key-b'
+    delete process.env.TRIOS_QUEEN_WORKER_API_KEY_3
+    const runtime = { managed: [], disabled: [], models: { 1: 'z-ai/glm-5.3' } }
+    expect(resolveWorkerProvider([0, 0], undefined, runtime)).toMatchObject({
+      keyIndex: 1,
+      model: 'z-ai/glm-5.3',
+    })
+    expect(resolveWorkerProvider([1, 1], undefined, runtime)).toMatchObject({
+      keyIndex: 0,
+      model: 'pool-model',
+    })
+    expect(
+      reviewLaneCandidates([], runtime).map((lane) => [
+        lane.keyIndex,
+        lane.model,
+      ]),
+    ).toEqual([
+      [0, 'pool-model'],
+      [1, 'z-ai/glm-5.3'],
+    ])
+    expect(workerCapacityBreakdown(runtime).connectedCredentials).toBe(2)
+    // Without a choice, allocation stays the environment path.
+    expect(
+      resolveWorkerProvider([], undefined, {
+        managed: [],
+        disabled: [],
+        models: {},
+      }),
+    ).toMatchObject({ keyIndex: 0, model: 'pool-model' })
   })
 })

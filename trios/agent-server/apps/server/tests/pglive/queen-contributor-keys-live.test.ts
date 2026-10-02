@@ -10,6 +10,7 @@ import {
   contributorRuntime,
   ensureContributorKeys,
   listContributorKeys,
+  setContributorModel,
 } from '../../src/api/services/queen-contributor-keys'
 import { CONTRIBUTOR_POLICY } from '../../src/api/services/queen-contributor-policy'
 import { keyWork, leaderboard } from '../../src/api/services/queen-leaderboard'
@@ -205,6 +206,7 @@ live('contributor ownership and allocation against real PostgreSQL', () => {
       expect(await contributorRuntime(pool, environment)).toEqual({
         disabled: [10000],
         managed: [],
+        models: {},
       })
     } finally {
       process.env.QUEEN_CONTRIBUTOR_ENCRYPTION_KEY = master
@@ -250,6 +252,7 @@ live('contributor ownership and allocation against real PostgreSQL', () => {
       expect(await contributorRuntime(pool, environment)).toEqual({
         disabled: [10000],
         managed: [],
+        models: {},
       })
     } finally {
       process.env.QUEEN_CONTRIBUTOR_PROXY_TOKEN = capability
@@ -483,6 +486,281 @@ live('contributor ownership and allocation against real PostgreSQL', () => {
       specs: 1,
       finished: 1,
       hours: 1,
+    })
+  })
+  describe("one model for all of an owner's keys of a provider", () => {
+    const toolCall = (calls: string[]) =>
+      (async (_url, init) => {
+        calls.push(JSON.parse(String(init?.body)).model)
+        return Response.json({
+          choices: [{ message: { tool_calls: [{ id: 'ping' }] } }],
+        })
+      }) as typeof fetch
+    const app = (env = environment, fetcher: typeof fetch = fetchOk) =>
+      new Hono().route(
+        '/queen/contributor-keys',
+        createQueenContributorKeysRoute({
+          pool: () => pool,
+          environment: () => env,
+          owners: () => owners,
+          fetcher,
+        }),
+      )
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      'X-Queen-Contributor-Id': subject,
+      'Content-Type': 'application/json',
+    }
+    it('a stale binding row never overrides a changed pool model', async () => {
+      await changeContributorKey(
+        pool,
+        subject,
+        10000,
+        'probe',
+        environment,
+        owners,
+        fetchOk,
+      )
+      const moved = [{ ...environment[0], model: 'new-pool-model' }]
+      const keys = await listContributorKeys(pool, subject, moved, owners)
+      expect(keys.find((key) => key.id === 10000)?.model).toBe('new-pool-model')
+      expect((await contributorRuntime(pool, moved)).models).toEqual({})
+    })
+    it('changes nothing unless a key of the provider called a tool with the model', async () => {
+      const mine = await addContributorKey(
+        pool,
+        subject,
+        { provider: 'nvidia', apiKey: 'managed-nvidia' },
+        environment,
+        fetchOk,
+      )
+      for (const [fetcher, code] of [
+        [
+          (async () =>
+            new Response('no such model', { status: 404 })) as typeof fetch,
+          'model_unavailable',
+        ],
+        [
+          (async () =>
+            Response.json({
+              choices: [{ message: { content: 'pong' } }],
+            })) as typeof fetch,
+          'model_without_tools',
+        ],
+      ] as const)
+        await expect(
+          setContributorModel(
+            pool,
+            subject,
+            { provider: 'nvidia', model: 'z-ai/glm-5.3' },
+            environment,
+            owners,
+            fetcher,
+          ),
+        ).rejects.toThrow(code)
+      let calls = 0
+      await expect(
+        setContributorModel(
+          pool,
+          subject,
+          { provider: 'nvidia', model: 'z-ai/glm-5.3' },
+          environment,
+          owners,
+          (async () => {
+            calls++
+            return new Response('busy', { status: 429 })
+          }) as typeof fetch,
+        ),
+      ).rejects.toThrow('model_check_failed')
+      expect(calls).toBe(CONTRIBUTOR_POLICY.MODEL_CHECK_ATTEMPTS)
+      const keys = await listContributorKeys(pool, subject, environment, owners)
+      expect(keys.map((key) => key.model)).toEqual([
+        'nvidia/nemotron-3-ultra-550b-a55b',
+        'production-model',
+      ])
+      expect(mine.model).toBe(CONTRIBUTOR_POLICY.NVIDIA_MODEL)
+      expect((await contributorRuntime(pool, environment)).models).toEqual({})
+    })
+    it('switches every owned key of the provider and nothing else', async () => {
+      const mine = await addContributorKey(
+        pool,
+        subject,
+        { provider: 'nvidia', apiKey: 'managed-nvidia' },
+        environment,
+        fetchOk,
+      )
+      const zai = await addContributorKey(
+        pool,
+        subject,
+        { provider: 'zai', apiKey: 'managed-zai' },
+        environment,
+        fetchOk,
+      )
+      const theirs = await addContributorKey(
+        pool,
+        other,
+        { provider: 'nvidia', apiKey: 'their-nvidia' },
+        environment,
+        fetchOk,
+      )
+      const calls: string[] = []
+      const result = await setContributorModel(
+        pool,
+        subject,
+        { provider: 'nvidia', model: 'z-ai/glm-5.3' },
+        environment,
+        owners,
+        toolCall(calls),
+      )
+      expect(calls).toEqual(['z-ai/glm-5.3'])
+      expect(result).toEqual({
+        provider: 'nvidia',
+        model: 'z-ai/glm-5.3',
+        keys: 2,
+      })
+      const keys = await listContributorKeys(pool, subject, environment, owners)
+      expect(
+        Object.fromEntries(keys.map((key) => [key.id, key.model])),
+      ).toEqual({
+        [mine.id]: 'z-ai/glm-5.3',
+        [zai.id]: CONTRIBUTOR_POLICY.ZAI_MODEL,
+        10000: 'z-ai/glm-5.3',
+      })
+      const runtime = await contributorRuntime(pool, environment)
+      expect(runtime.models).toEqual({ 10000: 'z-ai/glm-5.3' })
+      expect(
+        Object.fromEntries(runtime.managed.map((key) => [key.id, key.model])),
+      ).toEqual({
+        [mine.id]: 'z-ai/glm-5.3',
+        [zai.id]: CONTRIBUTOR_POLICY.ZAI_MODEL,
+        [theirs.id]: CONTRIBUTOR_POLICY.NVIDIA_MODEL,
+      })
+      // A probe asks the chosen model, and a new key joins it.
+      const probed: string[] = []
+      await pool.query(
+        "UPDATE queen_contributor_keys SET probe_at=now()-interval '2 minutes'",
+      )
+      await changeContributorKey(
+        pool,
+        subject,
+        10000,
+        'probe',
+        environment,
+        owners,
+        toolCall(probed),
+      )
+      expect(probed).toEqual(['z-ai/glm-5.3'])
+      const later = await addContributorKey(
+        pool,
+        subject,
+        { provider: 'nvidia', apiKey: 'later-nvidia' },
+        environment,
+        toolCall(probed),
+      )
+      expect(later.model).toBe('z-ai/glm-5.3')
+    })
+    it('a managed copy of an environment secret carries the choice to that environment key', async () => {
+      await addContributorKey(
+        pool,
+        subject,
+        { provider: 'nvidia', apiKey: 'copied-later-into-environment' },
+        [],
+        fetchOk,
+      )
+      const both = [
+        ...environment,
+        {
+          id: 10001,
+          provider: 'nvidia' as const,
+          model: 'production-model',
+          apiKey: 'copied-later-into-environment',
+          baseUrl: CONTRIBUTOR_POLICY.NVIDIA_URL,
+        },
+      ]
+      const withCopy = { ...owners, 10001: '@dmitrii-f-t27' }
+      await setContributorModel(
+        pool,
+        subject,
+        { provider: 'nvidia', model: 'z-ai/glm-5.3' },
+        both,
+        withCopy,
+        toolCall([]),
+      )
+      expect((await contributorRuntime(pool, both)).models).toEqual({
+        10000: 'z-ai/glm-5.3',
+        10001: 'z-ai/glm-5.3',
+      })
+    })
+    it('serves the switch and the owner model through the route, refusing other fields first', async () => {
+      let fetched = 0
+      const counting = (async (url, init) => {
+        fetched++
+        return toolCall([])(url, init)
+      }) as typeof fetch
+      for (const body of [
+        { provider: 'nvidia', model: 'z-ai/glm-5.3', owner: 'telegram:1' },
+        { provider: 'nvidia', model: 'bad model' },
+        { provider: 'openai', model: 'gpt' },
+        { provider: 'nvidia', model: 'a'.repeat(129) },
+      ]) {
+        const response = await app(environment, counting).request(
+          '/queen/contributor-keys/model',
+          { method: 'POST', headers, body: JSON.stringify(body) },
+        )
+        expect(response.status).toBe(400)
+      }
+      expect(fetched).toBe(0)
+      const response = await app(environment, counting).request(
+        '/queen/contributor-keys/model',
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ provider: 'nvidia', model: 'z-ai/glm-5.3' }),
+        },
+      )
+      expect(response.status).toBe(200)
+      expect(response.headers.get('cache-control')).toBe('no-store')
+      const account = await response.json()
+      expect(account.providers).toEqual([
+        {
+          id: 'nvidia',
+          label: 'NVIDIA NIM',
+          model: 'z-ai/glm-5.3',
+          defaultModel: CONTRIBUTOR_POLICY.NVIDIA_MODEL,
+        },
+        {
+          id: 'zai',
+          label: 'Z.ai',
+          model: CONTRIBUTOR_POLICY.ZAI_MODEL,
+          defaultModel: CONTRIBUTOR_POLICY.ZAI_MODEL,
+        },
+      ])
+      expect(JSON.stringify(account)).not.toContain(environment[0].apiKey)
+      const foreign = await app(environment, counting).request(
+        '/queen/contributor-keys/model',
+        {
+          method: 'POST',
+          headers: { ...headers, 'X-Queen-Contributor-Id': other },
+          body: JSON.stringify({ provider: 'nvidia', model: 'z-ai/glm-5.3' }),
+        },
+      )
+      expect(foreign.status).toBe(404)
+      const list = await app(environment, (async () =>
+        Response.json({
+          data: [
+            { id: 'z-ai/glm-5.3' },
+            { id: 'bad id' },
+            { id: 'nvidia/nemotron-3-super-120b-a12b' },
+          ],
+        })) as typeof fetch).request('/queen/contributor-keys/models/nvidia', {
+        headers,
+      })
+      expect(list.status).toBe(200)
+      expect(await list.json()).toEqual({
+        provider: 'nvidia',
+        model: 'z-ai/glm-5.3',
+        models: ['nvidia/nemotron-3-super-120b-a12b', 'z-ai/glm-5.3'],
+      })
     })
   })
 })
