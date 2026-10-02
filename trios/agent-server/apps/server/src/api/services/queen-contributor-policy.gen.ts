@@ -6,8 +6,8 @@
 export const KIND = "automation" satisfies string;
 export const ID = "queen-contributor-keys" satisfies string;
 export const REPO = "BrowserOS" satisfies string;
-export const VERSION = 1 satisfies number;
-export const PROBE_TIMEOUT_MS = 15000 satisfies number;
+export const VERSION = 2 satisfies number;
+export const PROBE_TIMEOUT_MS = 90000 satisfies number;
 export const PROBE_MAX_TOKENS = 16 satisfies number;
 export const MAX_PROBES_IN_FLIGHT = 4 satisfies number;
 export const PROBE_COOLDOWN_SECONDS = 60 satisfies number;
@@ -23,6 +23,11 @@ export const NVIDIA_URL = "https://integrate.api.nvidia.com/v1" satisfies string
 export const NVIDIA_MODEL = "nvidia/nemotron-3-ultra-550b-a55b" satisfies string;
 export const ZAI_URL = "https://api.z.ai/api/paas/v4" satisfies string;
 export const ZAI_MODEL = "glm-4.5-flash" satisfies string;
+export const MODEL_LIMIT = 128 satisfies number;
+export const MODEL_PROBE_MAX_TOKENS = 512 satisfies number;
+export const MODEL_CHECK_ATTEMPTS = 2 satisfies number;
+export const MODEL_LIST_LIMIT = 500 satisfies number;
+export const MODEL_LIST_CACHE_SECONDS = 600 satisfies number;
 // t27c gen-ts: fn trusted_proxy was not emitted -- this backend lowers declarations, not bodies.
 // t27c gen-ts: fn source_matches_index was not emitted -- this backend lowers declarations, not bodies.
 // t27c gen-ts: fn may_add_key was not emitted -- this backend lowers declarations, not bodies.
@@ -31,7 +36,14 @@ export const ZAI_MODEL = "glm-4.5-flash" satisfies string;
 // t27c gen-ts: fn credential_fits was not emitted -- this backend lowers declarations, not bodies.
 // t27c gen-ts: fn same_binding was not emitted -- this backend lowers declarations, not bodies.
 // t27c gen-ts: fn enabled_after_probe was not emitted -- this backend lowers declarations, not bodies.
+// t27c gen-ts: fn model_fits was not emitted -- this backend lowers declarations, not bodies.
+// t27c gen-ts: fn may_switch_model was not emitted -- this backend lowers declarations, not bodies.
+// t27c gen-ts: fn may_try_model_check was not emitted -- this backend lowers declarations, not bodies.
 // t27c gen-ts: fn wallet_credit was not emitted -- this backend lowers declarations, not bodies.
+// t27c gen-ts: a TestBlock was not emitted -- it is checked by the compiler, not by the artifact.
+// t27c gen-ts: a TestBlock was not emitted -- it is checked by the compiler, not by the artifact.
+// t27c gen-ts: a TestBlock was not emitted -- it is checked by the compiler, not by the artifact.
+// t27c gen-ts: a TestBlock was not emitted -- it is checked by the compiler, not by the artifact.
 // t27c gen-ts: a TestBlock was not emitted -- it is checked by the compiler, not by the artifact.
 // t27c gen-ts: a TestBlock was not emitted -- it is checked by the compiler, not by the artifact.
 // t27c gen-ts: a TestBlock was not emitted -- it is checked by the compiler, not by the artifact.
@@ -44,7 +56,7 @@ export const ZAI_MODEL = "glm-4.5-flash" satisfies string;
 
 // Declaration order, which the spec's own laws depend on.
 export const __STRUCT_ORDER__ = [] as const;
-export const __DECL_ORDER__ = ["KIND", "ID", "REPO", "VERSION", "PROBE_TIMEOUT_MS", "PROBE_MAX_TOKENS", "MAX_PROBES_IN_FLIGHT", "PROBE_COOLDOWN_SECONDS", "MAX_KEYS_PER_OWNER", "MAX_KEY_BYTES", "MAX_BODY_BYTES", "LABEL_LIMIT", "PROXY_TOKEN_MIN_BYTES", "OWNER_REASSIGNMENT", "CREDIT_WALLET", "ENVIRONMENT_INDICES_COMPACTED", "NVIDIA_URL", "NVIDIA_MODEL", "ZAI_URL", "ZAI_MODEL"] as const;
+export const __DECL_ORDER__ = ["KIND", "ID", "REPO", "VERSION", "PROBE_TIMEOUT_MS", "PROBE_MAX_TOKENS", "MAX_PROBES_IN_FLIGHT", "PROBE_COOLDOWN_SECONDS", "MAX_KEYS_PER_OWNER", "MAX_KEY_BYTES", "MAX_BODY_BYTES", "LABEL_LIMIT", "PROXY_TOKEN_MIN_BYTES", "OWNER_REASSIGNMENT", "CREDIT_WALLET", "ENVIRONMENT_INDICES_COMPACTED", "NVIDIA_URL", "NVIDIA_MODEL", "ZAI_URL", "ZAI_MODEL", "MODEL_LIMIT", "MODEL_PROBE_MAX_TOKENS", "MODEL_CHECK_ATTEMPTS", "MODEL_LIST_LIMIT", "MODEL_LIST_CACHE_SECONDS"] as const;
 
 // What this spec holds and this backend did not print. Empty is the whole
 // story most of the time; an entry here is a promise the artifact does not

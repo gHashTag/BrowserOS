@@ -48,6 +48,8 @@ interface KeyRow {
   owner_name: string
   provider: ContributorProvider
   model: string
+  /** True once the owner chose the model; an environment row then overrides its pool's model. */
+  model_chosen?: boolean
   label: string
   sealed: string | null
   enabled: boolean
@@ -74,6 +76,55 @@ export const CONTRIBUTOR_PROVIDERS = [
   },
   { id: 'zai' as const, label: 'Z.ai', model: P.ZAI_MODEL, baseUrl: P.ZAI_URL },
 ]
+/** Provider model ids as both catalogs print them: `z-ai/glm-5.3`, `glm-4.5-flash`. */
+const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/
+export function validModel(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= P.MODEL_LIMIT &&
+    MODEL_ID.test(value)
+  )
+}
+/**
+ * Keys are named `<provider> #<n>`. An environment key's number is its place
+ * in its pool, so pool 2's first Z.ai key is `zai #1`, not `zai #10001`; the
+ * stride is POOL_KEY_STRIDE in queen-dispatch.ts (a test holds them equal).
+ * A key added without a name, or named only after its provider, takes the
+ * next free number of that provider.
+ */
+export const LABEL_POOL_STRIDE = 10_000
+export function environmentLabel(
+  provider: ContributorProvider,
+  id: number,
+): string {
+  return `${provider} #${(id % LABEL_POOL_STRIDE) + 1}`
+}
+function labelNumber(provider: ContributorProvider, label: string): number {
+  const match = /^([a-z]+) #([1-9][0-9]{0,8})$/.exec(label.trim())
+  return match && match[1] === provider ? Number(match[2]) : 0
+}
+export function bareLabel(
+  provider: ContributorProvider,
+  label: string,
+): boolean {
+  const name = label.trim().toLowerCase()
+  const known = CONTRIBUTOR_PROVIDERS.find((p) => p.id === provider)
+  return name === '' || name === provider || name === known?.label.toLowerCase()
+}
+/** The next free `<provider> #<n>` after every numbered key and pool place. */
+export function nextLabel(
+  provider: ContributorProvider,
+  labels: string[],
+  environment: EnvironmentKey[],
+): string {
+  let top = 0
+  for (const key of environment)
+    if (key.provider === provider)
+      top = Math.max(top, (key.id % LABEL_POOL_STRIDE) + 1)
+  for (const label of labels) top = Math.max(top, labelNumber(provider, label))
+  return `${provider} #${top + 1}`
+}
 const ready = new WeakMap<Pool, Promise<void>>()
 export function contributorsEnabled(): boolean {
   return (
@@ -204,6 +255,8 @@ export async function ensureContributorKeys(pool: Pool): Promise<void> {
         CHECK ((source='managed' AND key_index<0 AND sealed IS NOT NULL)
           OR (source='environment' AND key_index>=0 AND sealed IS NULL))
       );
+      ALTER TABLE queen_contributor_keys
+        ADD COLUMN IF NOT EXISTS model_chosen boolean NOT NULL DEFAULT false;
     `)
       .then(() => undefined)
       .catch((error) => {
@@ -277,13 +330,19 @@ export async function listContributorKeys(
     )
     out.push(
       stored
-        ? publicKey(stored)
+        ? {
+            ...publicKey(stored),
+            label: environmentLabel(key.provider, key.id),
+            // A binding row records the model it was bound under; only an
+            // owner's explicit choice outlives a change of the pool's model.
+            model: stored.model_chosen ? stored.model : key.model,
+          }
         : {
             id: key.id,
             source: 'environment',
             provider: key.provider,
             model: key.model,
-            label: `${key.provider} #${key.id + 1}`,
+            label: environmentLabel(key.provider, key.id),
             fingerprint: digest.slice(0, 12),
             enabled: true,
             createdAt: null,
@@ -295,7 +354,38 @@ export async function listContributorKeys(
           },
     )
   }
+  await numberBareLabels(pool, subject, out, environment)
   return out
+}
+
+/**
+ * A managed key saved before keys were numbered (or named only "nvidia")
+ * takes the next number of its provider, oldest first, once. The update is
+ * compare-and-set on the old label, so two readers cannot number it twice.
+ */
+async function numberBareLabels(
+  pool: Pool,
+  subject: string,
+  keys: ContributorKey[],
+  environment: EnvironmentKey[],
+): Promise<void> {
+  const bare = keys
+    .filter(
+      (key) => key.source === 'managed' && bareLabel(key.provider, key.label),
+    )
+    .sort((a, b) => b.id - a.id)
+  for (const key of bare) {
+    const label = nextLabel(
+      key.provider,
+      keys.filter((other) => other !== key).map((other) => other.label),
+      environment,
+    )
+    const { rowCount } = await pool.query(
+      'UPDATE queen_contributor_keys SET label=$3 WHERE key_index=$1 AND owner_subject=$2 AND label=$4',
+      [key.id, subject, label, key.label],
+    )
+    if (rowCount) key.label = label
+  }
 }
 
 /** No response bodies, redirects, arbitrary URLs, retries or provider messages escape. */
@@ -358,6 +448,136 @@ export async function probeCredential(
   }
 }
 
+/**
+ * Whether a model can carry a bee: one request that hands it a tool.
+ *
+ * A model that answers text and never calls a tool would accept every bee and
+ * finish none of them, so plain "Reply OK." is not enough evidence to switch a
+ * whole pool. 404/400 name a model the endpoint does not serve; a refused or
+ * busy key says nothing about the model and lets the caller try another key.
+ */
+export type ModelCheck =
+  | 'ok'
+  | 'unknown_model'
+  | 'no_tool_call'
+  | 'inconclusive'
+export async function checkModel(
+  key: Pick<EnvironmentKey, 'provider' | 'model' | 'apiKey'>,
+  fetcher: typeof fetch = fetch,
+): Promise<ModelCheck> {
+  const provider = CONTRIBUTOR_PROVIDERS.find((p) => p.id === key.provider)
+  if (!provider) throw new ContributorError('unsupported_provider')
+  if (probesInFlight >= P.MAX_PROBES_IN_FLIGHT)
+    throw new ContributorError('probe_rate_limited', 429)
+  probesInFlight++
+  let result: ModelCheck = 'inconclusive'
+  try {
+    const response = await fetcher(`${provider.baseUrl}/chat/completions`, {
+      method: 'POST',
+      redirect: 'error',
+      signal: AbortSignal.timeout(P.PROBE_TIMEOUT_MS),
+      headers: {
+        Authorization: `Bearer ${key.apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: key.model,
+        messages: [{ role: 'user', content: 'Call the ping tool.' }],
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: 'ping',
+              description: 'Answer a liveness check.',
+              parameters: { type: 'object', properties: {} },
+            },
+          },
+        ],
+        tool_choice: 'auto',
+        max_tokens: P.MODEL_PROBE_MAX_TOKENS,
+        stream: false,
+      }),
+    })
+    if ([400, 404, 410, 422].includes(response.status)) result = 'unknown_model'
+    else if (response.ok) {
+      const body = (await response.json()) as {
+        choices?: Array<{ message?: { tool_calls?: unknown } }>
+      }
+      const calls = body.choices?.[0]?.message?.tool_calls
+      result = Array.isArray(calls) && calls.length > 0 ? 'ok' : 'no_tool_call'
+    }
+    await response.body?.cancel().catch(() => {})
+  } catch {
+    /* Timeouts and network errors say nothing about the model. */
+  } finally {
+    probesInFlight--
+  }
+  return result
+}
+
+/** Model ids a provider lists, per provider, read with an owner's key. */
+const modelLists = new Map<
+  ContributorProvider,
+  { at: number; models: string[] }
+>()
+export async function providerModels(
+  key: Pick<EnvironmentKey, 'provider' | 'apiKey'>,
+  fetcher: typeof fetch = fetch,
+): Promise<string[]> {
+  const provider = CONTRIBUTOR_PROVIDERS.find((p) => p.id === key.provider)
+  if (!provider) throw new ContributorError('unsupported_provider')
+  const cached = modelLists.get(provider.id)
+  if (cached && Date.now() - cached.at < P.MODEL_LIST_CACHE_SECONDS * 1000)
+    return cached.models
+  let models: string[] = []
+  try {
+    const response = await fetcher(`${provider.baseUrl}/models`, {
+      redirect: 'error',
+      signal: AbortSignal.timeout(P.PROBE_TIMEOUT_MS),
+      headers: { Authorization: `Bearer ${key.apiKey}` },
+    })
+    if (response.ok) {
+      const body = (await response.json()) as { data?: Array<{ id?: unknown }> }
+      models = [
+        ...new Set(
+          (Array.isArray(body.data) ? body.data : [])
+            .map((entry) => entry?.id)
+            .filter(validModel),
+        ),
+      ]
+        .sort()
+        .slice(0, P.MODEL_LIST_LIMIT)
+    } else await response.body?.cancel().catch(() => {})
+  } catch {
+    /* An unreadable catalog is an empty suggestion list, never an error body. */
+  }
+  // Only a real list is cached: one failed read must not hide the catalog.
+  if (models.length) modelLists.set(provider.id, { at: Date.now(), models })
+  return models
+}
+
+/** Tests only. */
+export function resetProviderModels(): void {
+  modelLists.clear()
+}
+
+/** The model most of the owner's keys of a provider use, else the default. */
+export function ownerModel(
+  keys: Pick<ContributorKey, 'provider' | 'model'>[],
+  provider: ContributorProvider,
+): string {
+  const counts = new Map<string, number>()
+  for (const key of keys)
+    if (key.provider === provider)
+      counts.set(key.model, (counts.get(key.model) ?? 0) + 1)
+  let best: string | undefined
+  for (const [model, count] of counts)
+    if (!best || count > (counts.get(best) ?? 0)) best = model
+  return (
+    best ?? CONTRIBUTOR_PROVIDERS.find((p) => p.id === provider)?.model ?? ''
+  )
+}
+
 export async function addContributorKey(
   pool: Pool,
   subject: string,
@@ -387,11 +607,10 @@ export async function addContributorKey(
     throw new ContributorError('invalid_key')
   if (value.label !== undefined && typeof value.label !== 'string')
     throw new ContributorError('invalid_label')
-  const label =
-    typeof value.label === 'string' ? value.label.trim() : provider.label
+  const named = typeof value.label === 'string' ? value.label.trim() : ''
   if (
-    label.length > P.LABEL_LIMIT ||
-    [...label].some(
+    named.length > P.LABEL_LIMIT ||
+    [...named].some(
       (char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127,
     )
   )
@@ -410,8 +629,16 @@ export async function addContributorKey(
       throw new ContributorError('key_already_connected', 409)
     return publicKey(duplicate.rows[0])
   }
+  const chosen = await pool.query<{ model: string }>(
+    `SELECT model FROM queen_contributor_keys
+    WHERE owner_subject=$1 AND provider=$2 AND model_chosen
+    GROUP BY model ORDER BY count(*) DESC, model LIMIT 1`,
+    [subject, provider.id],
+  )
+  // A new key joins the model its owner already switched this provider to.
+  const model = chosen.rows[0]?.model ?? provider.model
   const checked = await probeCredential(
-    { provider: provider.id, model: provider.model, apiKey: secret },
+    { provider: provider.id, model, apiKey: secret },
     fetcher,
   )
   const client = await pool.connect()
@@ -426,22 +653,36 @@ export async function addContributorKey(
     )
     if (Number(count.rows[0]?.n) >= P.MAX_KEYS_PER_OWNER)
       throw new ContributorError('key_limit', 409)
+    // Numbered under the same lock as the count, so two adds cannot share one.
+    let label = named
+    if (bareLabel(provider.id, named)) {
+      const taken = await client.query<{ label: string }>(
+        "SELECT label FROM queen_contributor_keys WHERE owner_subject=$1 AND provider=$2 AND source='managed'",
+        [subject, provider.id],
+      )
+      label = nextLabel(
+        provider.id,
+        taken.rows.map((row) => row.label),
+        environment,
+      )
+    }
     const { rows } = await client.query<KeyRow>(
       `INSERT INTO queen_contributor_keys
-      (source,fingerprint,owner_subject,owner_name,provider,model,label,sealed,enabled,probe_status,probe_at,probe_ms)
-      VALUES ('managed',$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      (source,fingerprint,owner_subject,owner_name,provider,model,label,sealed,enabled,probe_status,probe_at,probe_ms,model_chosen)
+      VALUES ('managed',$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
       [
         digest,
         subject,
         contributorName(subject),
         provider.id,
-        provider.model,
+        model,
         label,
         sealed,
         checked.status === 'ok',
         checked.status,
         checked.checkedAt,
         checked.latencyMs,
+        !!chosen.rows[0],
       ],
     )
     await client.query('COMMIT')
@@ -494,7 +735,7 @@ async function ownedRow(
         contributorName(subject),
         current.provider,
         current.model,
-        `${current.provider} #${id + 1}`,
+        environmentLabel(current.provider, id),
       ],
     )
     const { rows } = await pool.query<KeyRow>(
@@ -536,12 +777,24 @@ export async function changeContributorKey(
     owners,
     action !== 'disable',
   )
+  // An environment key runs on its pool's model until its owner chooses one.
+  const pooled = environment.find((key) => key.id === id)
+  const effective = (stored: KeyRow): ContributorKey => ({
+    ...publicKey(stored),
+    ...(stored.source === 'environment' && pooled
+      ? { label: environmentLabel(pooled.provider, id) }
+      : {}),
+    model:
+      stored.source === 'environment' && pooled && !stored.model_chosen
+        ? pooled.model
+        : stored.model,
+  })
   if (action === 'disable') {
     const { rows } = await pool.query<KeyRow>(
       'UPDATE queen_contributor_keys SET enabled=false,revision=revision+1 WHERE key_index=$1 AND owner_subject=$2 RETURNING *',
       [id, subject],
     )
-    return publicKey(rows[0])
+    return effective(rows[0])
   }
   // Database claim, so multiple tabs/processes cannot fan out probes on one key.
   const claimed = await pool.query(
@@ -554,7 +807,7 @@ export async function changeContributorKey(
   if (!claimed.rows.length)
     throw new ContributorError('probe_rate_limited', 429)
   const checked = await probeCredential(
-    { provider: row.provider, model: row.model, apiKey: secret },
+    { provider: row.provider, model: effective(row).model, apiKey: secret },
     fetcher,
   )
   const { rows } = await pool.query<KeyRow>(
@@ -572,12 +825,104 @@ export async function changeContributorKey(
       claimed.rows[0].revision,
     ],
   )
-  return publicKey(rows[0])
+  return effective(rows[0])
+}
+
+/**
+ * One model for every key the owner holds of one provider.
+ *
+ * Switching a pool is all-or-nothing for that owner, so the evidence comes
+ * first: a key of the provider must make the model call a tool. Only then are
+ * the owner's environment keys bound (the same binding a probe creates) and
+ * every owned row of the provider set to the model. Other owners' keys and the
+ * operator's pool variables are untouched; an environment row overrides its
+ * pool's model only while `model_chosen` is set.
+ */
+export async function setContributorModel(
+  pool: Pool,
+  subject: string,
+  input: unknown,
+  environment: EnvironmentKey[],
+  owners: Record<number, string>,
+  fetcher: typeof fetch = fetch,
+): Promise<{ provider: ContributorProvider; model: string; keys: number }> {
+  if (!input || typeof input !== 'object' || Array.isArray(input))
+    throw new ContributorError('invalid_model')
+  const value = input as Record<string, unknown>
+  if (Object.keys(value).some((key) => !['provider', 'model'].includes(key)))
+    throw new ContributorError('invalid_model')
+  const provider = CONTRIBUTOR_PROVIDERS.find((p) => p.id === value.provider)
+  if (!provider) throw new ContributorError('unsupported_provider')
+  if (!validModel(value.model)) throw new ContributorError('invalid_model')
+  const model = value.model
+  const keys = (
+    await listContributorKeys(pool, subject, environment, owners)
+  ).filter((key) => key.provider === provider.id)
+  if (!keys.length) throw new ContributorError('key_not_found', 404)
+  const sealed = await pool.query<
+    Pick<KeyRow, 'key_index' | 'sealed' | 'fingerprint'>
+  >(
+    "SELECT key_index,sealed,fingerprint FROM queen_contributor_keys WHERE owner_subject=$1 AND provider=$2 AND source='managed'",
+    [subject, provider.id],
+  )
+  const secretOf = (key: ContributorKey): string | undefined => {
+    if (key.source === 'environment')
+      return environment.find((entry) => entry.id === key.id)?.apiKey
+    const row = sealed.rows.find((entry) => entry.key_index === key.id)
+    if (!row?.sealed) return undefined
+    try {
+      return openCredential(row.sealed, subject, row.fingerprint)
+    } catch {
+      return undefined
+    }
+  }
+  // Keys that answered last time first: a refused key proves nothing either way.
+  const order = (key: ContributorKey) =>
+    (key.enabled ? 0 : 2) + (key.lastProbe.status === 'ok' ? 0 : 1)
+  let attempts = 0
+  let verdict: ModelCheck = 'inconclusive'
+  for (const key of [...keys].sort((a, b) => order(a) - order(b))) {
+    if (attempts >= P.MODEL_CHECK_ATTEMPTS) break
+    const secret = secretOf(key)
+    if (!secret) continue
+    attempts++
+    verdict = await checkModel(
+      { provider: provider.id, model, apiKey: secret },
+      fetcher,
+    )
+    if (verdict !== 'inconclusive') break
+  }
+  if (verdict === 'unknown_model')
+    throw new ContributorError('model_unavailable', 422)
+  if (verdict === 'no_tool_call')
+    throw new ContributorError('model_without_tools', 422)
+  if (verdict !== 'ok') throw new ContributorError('model_check_failed', 504)
+  for (const key of keys) {
+    if (key.source !== 'environment') continue
+    // A fingerprint already held by the owner's managed copy cannot be bound
+    // twice; that copy carries the choice for the environment key instead.
+    await ownedRow(pool, subject, key.id, environment, owners, false).catch(
+      (error) => {
+        if (
+          !(error instanceof ContributorError) ||
+          error.code !== 'key_binding_conflict'
+        )
+          throw error
+      },
+    )
+  }
+  const updated = await pool.query(
+    'UPDATE queen_contributor_keys SET model=$3,model_chosen=true WHERE owner_subject=$1 AND provider=$2',
+    [subject, provider.id, model],
+  )
+  return { provider: provider.id, model, keys: updated.rowCount ?? 0 }
 }
 
 export interface ContributorRuntime {
   managed: EnvironmentKey[]
   disabled: number[]
+  /** Environment index -> the model its owner chose instead of the pool's. */
+  models?: Record<number, string>
 }
 async function contributorRegistryAvailable(pool: Pool): Promise<boolean> {
   if (contributorsEnabled()) {
@@ -591,12 +936,43 @@ async function contributorRegistryAvailable(pool: Pool): Promise<boolean> {
   )
   return !!result.rows[0]?.registry
 }
+/**
+ * Environment index -> the model its owner chose, for keys whose current
+ * secret matches the row. An owner's managed copy of a secret the environment
+ * also holds carries the choice too: the environment key does the work.
+ */
+function chosenEnvironmentModels(
+  rows: KeyRow[],
+  environment: EnvironmentKey[],
+): Record<number, string> {
+  const pooled = new Map(
+    environment.map((key) => [fingerprint(key.apiKey), key]),
+  )
+  const models: Record<number, string> = {}
+  const choose = (row: KeyRow, current: EnvironmentKey | undefined) => {
+    if (
+      current &&
+      row.model_chosen &&
+      !(current.id in models) &&
+      row.model !== current.model
+    )
+      models[current.id] = row.model
+  }
+  for (const row of rows)
+    if (row.source === 'environment' && row.enabled) {
+      const current = pooled.get(row.fingerprint)
+      choose(row, current?.id === row.key_index ? current : undefined)
+    }
+  for (const row of rows)
+    if (row.source === 'managed') choose(row, pooled.get(row.fingerprint))
+  return models
+}
 export async function contributorRuntime(
   pool: Pool,
   environment: EnvironmentKey[],
 ): Promise<ContributorRuntime> {
   if (!(await contributorRegistryAvailable(pool)))
-    return { managed: [], disabled: [] }
+    return { managed: [], disabled: [], models: {} }
   const { rows } = await pool.query<KeyRow>(
     'SELECT * FROM queen_contributor_keys',
   )
@@ -643,7 +1019,11 @@ export async function contributorRuntime(
       digests.add(row.fingerprint)
     }
   }
-  return { managed, disabled }
+  return {
+    managed,
+    disabled,
+    models: chosenEnvironmentModels(rows, environment),
+  }
 }
 export async function contributorOwnerNames(
   pool: Pool,

@@ -422,7 +422,7 @@ export function reviewExtraLanesPerCredential(
 export function workerCapacityBreakdown(
   runtime?: ContributorRuntime,
 ): WorkerCapacityBreakdown {
-  if (runtime && (runtime.managed.length || runtime.disabled.length)) {
+  if (contributorRuntimeActive(runtime)) {
     const lanes = contributorWorkerCandidates(runtime)
     return {
       connectedCredentials: lanes.length,
@@ -1065,14 +1065,42 @@ export function environmentContributorKeys(): EnvironmentKey[] {
   })
 }
 
+/**
+ * Whether the contributor registry changes anything for dispatch: a managed
+ * key, a disabled environment key, or an owner's model in place of a pool's.
+ * Otherwise allocation stays the environment path, byte for byte.
+ */
+function contributorRuntimeActive(
+  runtime?: ContributorRuntime,
+): runtime is ContributorRuntime {
+  return (
+    !!runtime &&
+    (runtime.managed.length > 0 ||
+      runtime.disabled.length > 0 ||
+      Object.keys(runtime.models ?? {}).length > 0)
+  )
+}
+
+/** The owner's chosen model for an environment lane, else the pool's. */
+function withOwnerModel(
+  runtime: ContributorRuntime,
+  lane: WorkerProvider,
+): WorkerProvider {
+  const model =
+    lane.keyIndex === undefined ? undefined : runtime.models?.[lane.keyIndex]
+  return model ? { ...lane, model } : lane
+}
+
 function contributorWorkerCandidates(
   runtime: ContributorRuntime,
 ): WorkerProvider[] {
   const disabled = new Set(runtime.disabled)
   return [
-    ...environmentWorkerCandidates().filter(
-      (key) => key.keyIndex !== undefined && !disabled.has(key.keyIndex),
-    ),
+    ...environmentWorkerCandidates()
+      .filter(
+        (key) => key.keyIndex !== undefined && !disabled.has(key.keyIndex),
+      )
+      .map((key) => withOwnerModel(runtime, key)),
     ...runtime.managed.map((key) => ({
       provider: key.provider === 'zai' ? 'zai' : 'openai-compatible',
       model: key.model,
@@ -1091,7 +1119,7 @@ export function resolveWorkerProvider(
   afterKeyIndex?: number,
   runtime?: ContributorRuntime,
 ): WorkerProvider | null {
-  if (!runtime || (!runtime.managed.length && !runtime.disabled.length)) {
+  if (!contributorRuntimeActive(runtime)) {
     return resolveEnvironmentWorkerProvider(takenKeyIndices, afterKeyIndex)
   }
   const candidates = contributorWorkerCandidates(runtime)
@@ -1144,14 +1172,16 @@ export function reviewLaneCandidates(
   takenKeyIndices: number[] = [],
   runtime?: ContributorRuntime,
 ): WorkerProvider[] {
-  if (runtime && (runtime.managed.length || runtime.disabled.length)) {
+  if (contributorRuntimeActive(runtime)) {
     const managedSecrets = new Set(runtime.managed.map((key) => key.apiKey))
-    const environment = reviewLaneCandidates(takenKeyIndices).filter(
-      (candidate) =>
-        !managedSecrets.has(candidate.apiKey ?? '') &&
-        (candidate.keyIndex === undefined ||
-          !runtime.disabled.includes(candidate.keyIndex)),
-    )
+    const environment = reviewLaneCandidates(takenKeyIndices)
+      .filter(
+        (candidate) =>
+          !managedSecrets.has(candidate.apiKey ?? '') &&
+          (candidate.keyIndex === undefined ||
+            !runtime.disabled.includes(candidate.keyIndex)),
+      )
+      .map((candidate) => withOwnerModel(runtime, candidate))
     const managed = contributorWorkerCandidates(runtime)
       .filter(
         (candidate) =>
