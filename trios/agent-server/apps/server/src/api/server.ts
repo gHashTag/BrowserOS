@@ -41,6 +41,7 @@ import { createOAuthRoutes } from './routes/oauth'
 import { createOpenClawRoutes } from './routes/openclaw'
 import { createProviderRoutes } from './routes/provider'
 import { createQueenCardMoveRoute } from './routes/queen-card-move'
+import { createQueenContributorKeysRoute } from './routes/queen-contributor-keys'
 import { createQueenDashboardRoute } from './routes/queen-dashboard'
 import { createQueenExportRoute } from './routes/queen-export'
 import {
@@ -397,6 +398,8 @@ export async function createHttpServer(config: HttpServerConfig) {
     .route('/queen/public-board', createQueenPublicBoardRoute())
     // Who lent a lane and what it did; no titles, no worker text, no key.
     .route('/queen/public-leaderboard', createQueenPublicLeaderboardRoute())
+    // Separate server-to-server capability; never a public-read or operator-token route.
+    .route('/queen/contributor-keys', createQueenContributorKeysRoute())
     .route('/queen/registry', queenRegistryRoutes)
     // The shell only. It holds no state and no token; every byte of data it
     // shows comes from /queen/lease, which stays guarded. See the route header

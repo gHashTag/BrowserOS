@@ -44,6 +44,7 @@ import { startModelProbes, workerModelRanking } from '../../lib/model-ranking'
 import { outstandingEscalations } from '../routes/queen-needs-you'
 import { droppedByPeople, withoutDropped } from './queen-card-move'
 import { githubCiDeps, takeBackRefusedAcceptances } from './queen-ci-verdict'
+import { contributorRuntime } from './queen-contributor-keys'
 import {
   type CriterionRun,
   criteriaCounts,
@@ -56,8 +57,10 @@ import {
   baseRef,
   DISPATCH_OUTCOME_LABELS,
   dispatchBee,
+  environmentContributorKeys,
   reapDispatchesFromPreviousBoot,
   reapStalledDispatches,
+  reviewLaneCandidates,
   setDurableCloseListener,
   type Witness,
   type WorkerProvider,
@@ -123,7 +126,7 @@ export function latestProviderKeyIndex(
     if (
       typeof index === 'number' &&
       Number.isInteger(index) &&
-      index >= 0 &&
+      index >= -2147483647 &&
       Number.isFinite(at) &&
       at > latestAt
     ) {
@@ -2635,7 +2638,15 @@ export async function reviewFinishedDispatches(
   pool: Pool,
   overrides: Partial<ReviewDeps> = {},
 ): Promise<ReviewRound> {
-  const deps: ReviewDeps = { ...defaultReviewDeps(), ...overrides }
+  const deps: ReviewDeps = {
+    ...defaultReviewDeps(),
+    laneCandidates: async (taken) =>
+      reviewLaneCandidates(
+        taken,
+        await contributorRuntime(pool, environmentContributorKeys()),
+      ),
+    ...overrides,
+  }
   // TWO THINGS ABOUT THIS QUERY, BOTH MEASURED ON 2026-09-03.
   //
   // The say rows are joined with NOTHING between them, not a newline. The
@@ -3210,15 +3221,14 @@ export async function reviewFinishedDispatches(
         // review, unlike `markReviewerLaneFailed`, which is a half-hour
         // backoff and belongs only to a lane that is broken rather than busy.
         const triedLanes = new Set<string>()
-        const pick = () =>
+        const pick = async () =>
           chooseReviewerLane(
-            deps
-              .laneCandidates(taken)
+            (await deps.laneCandidates(taken))
               .filter((lane) => !reviewerLaneBackedOff(lane))
               .filter((lane) => !triedLanes.has(reviewerLaneKey(lane))),
             bee,
           )
-        let choice = pick()
+        let choice = await pick()
         if (!choice) {
           reviewerSkipped = 'no reviewer lane is free'
         } else {
@@ -3295,7 +3305,7 @@ export async function reviewFinishedDispatches(
                 // would turn a provider's bad minute into the Queen's bad
                 // half-hour.
                 if (!answer.transient) markReviewerLaneFailed(lane)
-                choice = pick()
+                choice = await pick()
                 continue
               }
               // THE COMPILER'S LINES ONLY, as `reviewerMessage` is given
@@ -4407,6 +4417,10 @@ export function startQueenTick(): void {
   const probeEndpoint = workerProbeEndpoint()
   if (ranking && probeEndpoint) {
     startModelProbes(ranking, probeEndpoint, {
+      resolveEndpoint: async () =>
+        workerProbeEndpoint(
+          await contributorRuntime(pool, environmentContributorKeys()),
+        ),
       onRound: (snapshot, chosen) =>
         logger.info('Queen worker models ranked', {
           chosen,

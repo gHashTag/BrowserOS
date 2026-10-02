@@ -39,6 +39,7 @@
  * leaves the environment, and only its index appears in the database.
  */
 import type { Pool } from 'pg'
+import { contributorOwnerNames } from './queen-contributor-keys'
 
 /** An issue the Queen accepted, on this key. */
 export const ACCEPTED_XP = 100
@@ -203,7 +204,7 @@ export async function keyWork(
               (snapshot->>'finished_at')::timestamptz,
               coalesce(snapshot->'owned_paths', '[]'::jsonb)
          FROM queen_dispatch_history
-        WHERE snapshot->>'key_index' ~ '^[0-9]+$'
+        WHERE snapshot->>'key_index' ~ '^-?[0-9]+$'
           ${windowed ? "AND archived_at > now() - ($1::integer * interval '1 day')" : ''}
      )
      SELECT key_index,
@@ -259,6 +260,9 @@ export async function leaderboard(
     days,
     measuredAt: new Date().toISOString(),
     scoring: { acceptedXp: ACCEPTED_XP, specXp: SPEC_XP, hourXp: HOUR_XP },
-    contributors: rank(work, parseOwners(process.env.TRIOS_KEY_OWNERS)),
+    contributors: rank(work, {
+      ...parseOwners(process.env.TRIOS_KEY_OWNERS),
+      ...(await contributorOwnerNames(pool)),
+    }),
   }
 }

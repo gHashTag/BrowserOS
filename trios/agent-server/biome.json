@@ -7,7 +7,11 @@
   },
   "files": {
     "ignoreUnknown": false,
-    "includes": ["**", "!**/apps/eval/src/dashboard/index.html"]
+    "includes": [
+      "**",
+      "!**/apps/eval/src/dashboard/index.html",
+      "!**/apps/server/src/api/services/queen-contributor-policy.gen.ts"
+    ]
   },
   "formatter": {
     "enabled": true,
