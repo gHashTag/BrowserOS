@@ -46,9 +46,11 @@
  */
 
 import { Hono } from 'hono'
+import type { Pool } from 'pg'
 import { createQueenPool } from '../../lib/db/queen-pool'
 import { logger } from '../../lib/logger'
 import {
+  liveWorkerCapacity,
   type WorkerCapacityBreakdown,
   workerCapacityBreakdown,
 } from '../services/queen-dispatch'
@@ -560,7 +562,7 @@ async function build(
         (lastTick.rows[0]?.decision as { refusal?: string } | undefined)
           ?.refusal ?? null,
       roundSeconds: Number(process.env.TRIOS_QUEEN_TICK_SECONDS ?? '0') || null,
-      ...boardWorkerCapacity(),
+      ...boardWorkerCapacity(await liveWorkerCapacity(pool as Pool)),
     },
   }
 }

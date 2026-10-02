@@ -25,7 +25,7 @@ import {
 const source = readServerSource()
 const report = auditServer(source, DEFAULT_ALLOWLIST)
 
-// Regression pin for the --no-allowlist run: exactly these seven mounts carry
+// Regression pin for the --no-allowlist run: exactly these eleven mounts carry
 // no guard today, each for a reason the comments beside the mount give.
 // RE-MEASURED 2026-09-13: /api/inngest joined. It is not a shell - it is the
 // Queen's scheduler endpoint - and it is unguarded on purpose: Inngest signs
@@ -44,6 +44,7 @@ const report = auditServer(source, DEFAULT_ALLOWLIST)
 const EXPECTED_UNGUARDED_WITHOUT_ALLOWLIST = [
   '/api/inngest',
   '/health',
+  '/queen/contributor-keys',
   '/queen/dashboard',
   '/queen/feed',
   '/queen/hq',
@@ -94,7 +95,10 @@ describe('route-guard audit over src/api/server.ts', () => {
     // RE-MEASURED 2026-10-01: 45 became 47 with the runner cabinet and the
     // runner door, both allowlisted with their own-bearer reason; no other
     // count moved, so no guarded route lost its guard to make room for them.
-    expect(report.totalMounts).toBe(47)
+    // RE-MEASURED 2026-10-02: 47 became 48 with /queen/contributor-keys
+    // (#522), a server-to-server route behind its own capability token. It is
+    // allowlisted with that reason; no other number moved.
+    expect(report.totalMounts).toBe(48)
     expect(report.prefixGuardCount).toBe(18)
     expect(report.guardedSubAppCount).toBe(15)
     expect(report.publicReadCount).toBe(8)
@@ -115,7 +119,7 @@ describe('route-guard audit over src/api/server.ts', () => {
     )
   })
 
-  it('splits the twenty-four /queen mounts into 8 public-read, 8 wrapper-guarded and 8 allowlisted', () => {
+  it('splits the twenty-five /queen mounts into 8 public-read, 8 wrapper-guarded and 9 allowlisted', () => {
     const queenMounts = classifyMounts(source).filter(
       (mount) => mount.path === '/queen' || mount.path.startsWith('/queen/'),
     )
@@ -140,7 +144,10 @@ describe('route-guard audit over src/api/server.ts', () => {
     // RE-MEASURED 2026-10-01: twenty-two became twenty-four. The two new
     // allowlisted mounts are not shells: /queen/me/runners and /queen/runner
     // answer only a bearer they verify themselves (see the reasons).
-    expect(queenMounts.length).toBe(24)
+    // RE-MEASURED 2026-10-02: twenty-four became twenty-five. The ninth
+    // allowlisted mount is /queen/contributor-keys (#522), which serves data
+    // only to a caller holding QUEEN_CONTRIBUTOR_PROXY_TOKEN.
+    expect(queenMounts.length).toBe(25)
 
     const counts: Record<string, number> = {
       'public-read': 0,
@@ -157,7 +164,7 @@ describe('route-guard audit over src/api/server.ts', () => {
       'public-read': 8,
       'prefix-guard': 0,
       wrapper: 8,
-      unguarded: 8,
+      unguarded: 9,
     })
 
     // Every unguarded /queen mount must be one of the allowlisted shells.
