@@ -157,8 +157,17 @@ describe('observation tools', () => {
 
   it('get_page_content returns markdown text', async () => {
     await withBrowser(async ({ execute }) => {
-      const newResult = await execute(new_page, { url: 'https://example.com' })
+      // Constructed in place rather than fetched: reading https://example.com
+      // raced its own load (CI read it 57 ms after opening, before any text
+      // arrived), and the test is about extracting text, not about the network.
+      const newResult = await execute(new_page, { url: 'about:blank' })
       const pageId = pageIdOf(newResult)
+      await execute(evaluate_script, {
+        page: pageId,
+        expression: `document.body.innerHTML = ${JSON.stringify(
+          '<h1>Example Domain</h1><p>This domain is for use in documentation examples.</p>',
+        )}`,
+      })
 
       const contentResult = await execute(get_page_content, { page: pageId })
       assert.ok(!contentResult.isError, textOf(contentResult))

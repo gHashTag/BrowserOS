@@ -541,7 +541,9 @@ describe('the salvage commit', () => {
     expect(head).toContain('trios/docs/a/new.md')
     expect(head).not.toContain('trios/docs/z/old.md')
     rmSync(f.scratch, { recursive: true, force: true })
-  })
+    // Real git over 205 files: ~0.2 s here, but once over bun's 5 s default on
+    // a loaded CI runner (2026-10-01) while passing on the runs either side.
+  }, 30_000)
 })
 
 // ---------------------------------------------------------------------------

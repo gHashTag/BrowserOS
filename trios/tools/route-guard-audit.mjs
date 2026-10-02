@@ -106,6 +106,11 @@ export const DEFAULT_ALLOWLIST = [
       'shell only — the operator page holds no state and no token; its numbers come from /queen/lease and its one action POSTs there with a bearer the reader supplies, so both stay guarded (comment at the mount)',
   },
   {
+    path: '/queen/contributor-keys',
+    reason:
+      'own capability - a server-to-server route for the app render proxy, with no browser Origin; every request is refused unless its bearer equals QUEEN_CONTRIBUTOR_PROXY_TOKEN (at least 32 bytes, compared with timingSafeEqual) and it carries a verified x-queen-contributor-id, and the route is off while that token is unset (src/api/routes/queen-contributor-keys.ts, tests/api/queen-contributor-keys.test.ts)',
+  },
+  {
     path: '/api/inngest',
     reason:
       'signed webhook — Inngest calls this path from its own server with an x-inngest-signature over INNGEST_SIGNING_KEY; inngest/hono rejects an unsigned or missigned request with 4xx before any function runs (tests/api/queen-inngest.test.ts), and a browser Origin never appears on it, so the trusted-origin check would only turn the scheduler off (comment at the mount)',

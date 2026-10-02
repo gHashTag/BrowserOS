@@ -25,7 +25,7 @@ import {
 const source = readServerSource()
 const report = auditServer(source, DEFAULT_ALLOWLIST)
 
-// Regression pin for the --no-allowlist run: exactly these seven mounts carry
+// Regression pin for the --no-allowlist run: exactly these nine mounts carry
 // no guard today, each for a reason the comments beside the mount give.
 // RE-MEASURED 2026-09-13: /api/inngest joined. It is not a shell - it is the
 // Queen's scheduler endpoint - and it is unguarded on purpose: Inngest signs
@@ -39,6 +39,7 @@ const report = auditServer(source, DEFAULT_ALLOWLIST)
 const EXPECTED_UNGUARDED_WITHOUT_ALLOWLIST = [
   '/api/inngest',
   '/health',
+  '/queen/contributor-keys',
   '/queen/dashboard',
   '/queen/feed',
   '/queen/hq',
@@ -88,7 +89,10 @@ describe('route-guard audit over src/api/server.ts', () => {
     // purpose - `/queen/public-earnings`, an explicit
     // `publicReadCorsMiddleware()` on the record of accepted spec work - and
     // the audit puts it in `public-read`. Prefix and wrapper counts unchanged.
-    expect(report.totalMounts).toBe(46)
+    // RE-MEASURED 2026-10-02: 46 became 47 with /queen/contributor-keys
+    // (#522), a server-to-server route behind its own capability token. It is
+    // allowlisted with that reason; no other number moved.
+    expect(report.totalMounts).toBe(47)
     expect(report.prefixGuardCount).toBe(18)
     expect(report.guardedSubAppCount).toBe(15)
     expect(report.publicReadCount).toBe(9)
@@ -101,7 +105,7 @@ describe('route-guard audit over src/api/server.ts', () => {
     expect(report.entriesMissingReason).toEqual([])
   })
 
-  it('reports exactly the seven reasoned exceptions when the allowlist is dropped', () => {
+  it('reports exactly the nine reasoned exceptions when the allowlist is dropped', () => {
     // The classifier reports mounts in file order; the assertion is on the
     // exact set, so both sides are sorted before comparing.
     expect([...unguardedMounts(source, [])].sort()).toEqual(
@@ -109,7 +113,7 @@ describe('route-guard audit over src/api/server.ts', () => {
     )
   })
 
-  it('splits the twenty-three /queen mounts into 9 public-read, 8 wrapper-guarded and 6 allowlisted shells', () => {
+  it('splits the twenty-four /queen mounts into 9 public-read, 8 wrapper-guarded and 7 allowlisted', () => {
     const queenMounts = classifyMounts(source).filter(
       (mount) => mount.path === '/queen' || mount.path.startsWith('/queen/'),
     )
@@ -137,7 +141,11 @@ describe('route-guard audit over src/api/server.ts', () => {
     // leaderboard it carries no issue title, no worker text, no review note and
     // no credential; the repository, issue, commit and declared .t27 paths are
     // already public on GitHub.
-    expect(queenMounts.length).toBe(23)
+    // RE-MEASURED 2026-10-02: twenty-three became twenty-four. The seventh
+    // allowlisted mount is /queen/contributor-keys (#522), which serves data
+    // only to a caller holding QUEEN_CONTRIBUTOR_PROXY_TOKEN - its own guard,
+    // not the trusted-origin one, because its caller is a server.
+    expect(queenMounts.length).toBe(24)
 
     const counts: Record<string, number> = {
       'public-read': 0,
@@ -154,7 +162,7 @@ describe('route-guard audit over src/api/server.ts', () => {
       'public-read': 9,
       'prefix-guard': 0,
       wrapper: 8,
-      unguarded: 6,
+      unguarded: 7,
     })
 
     // Every unguarded /queen mount must be one of the allowlisted shells.
