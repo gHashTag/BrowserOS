@@ -7,6 +7,7 @@ import {
   composeCards,
   createQueenKanbanRoute,
   publicBoardProjection,
+  verdictOf,
 } from '../../src/api/routes/queen-kanban'
 import { resolveQueendPath } from '../__helpers__/queend-path'
 
@@ -953,5 +954,97 @@ describe('the page redraws in place, every 30 seconds, for ever', () => {
     await page.drawAgain()
     await page.drawAgain()
     expect(serialize(page.root)).toBe(after1)
+  })
+})
+
+describe('the verdict the merge reads', () => {
+  const HEAD = 'a'.repeat(40)
+  const finished = '2026-10-01T00:00:00.000Z'
+
+  it('carries every recorded verdict and the head it was given at', () => {
+    for (const state of [
+      'accept',
+      'sendBack',
+      'escalate',
+      'wait',
+      'empty',
+      'failed',
+      'stale-contract',
+    ]) {
+      expect(
+        verdictOf({
+          finished_at: finished,
+          review_state: state,
+          judged_head: HEAD,
+        }),
+      ).toEqual({ verdict: state, judgedHead: HEAD })
+    }
+  })
+
+  it('says nothing for an attempt still running, even over an old accept', () => {
+    // upsertDispatch clears review_state when an attempt starts; a row read
+    // between the two writes must not lend the last attempt's accept to this one.
+    expect(
+      verdictOf({
+        finished_at: null,
+        review_state: 'accept',
+        judged_head: HEAD,
+      }),
+    ).toEqual({})
+    expect(verdictOf({ finished_at: finished, review_state: null })).toEqual({})
+    expect(verdictOf({ finished_at: finished, review_state: '' })).toEqual({})
+  })
+
+  it('never offers a head that is not a full commit id', () => {
+    for (const head of [null, '', 'abc123', `${HEAD}\n`, 'g'.repeat(40)]) {
+      expect(
+        verdictOf({
+          finished_at: finished,
+          review_state: 'accept',
+          judged_head: head,
+        }),
+      ).toEqual({ verdict: 'accept' })
+    }
+  })
+
+  it('is on the public card, and absent where there is no verdict', () => {
+    const pulse = {
+      rounds: 1,
+      bees: 0,
+      verdicts: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      lastRoundAt: null,
+      lastRefusal: null,
+      roundSeconds: 1800,
+      workerKeys: 0,
+      workerLimit: 0,
+    }
+    const projected = publicBoardProjection({
+      repo: 'gHashTag/t27',
+      cards: [
+        {
+          number: 1,
+          title: 'a',
+          column: 'done',
+          paths: [],
+          verdict: 'accept',
+          judgedHead: HEAD,
+        },
+        { number: 2, title: 'b', column: 'backlog', paths: [] },
+      ],
+      pulse,
+    })
+    expect(projected.cards[0]).toEqual({
+      number: 1,
+      title: 'a',
+      column: 'done',
+      criteria: undefined,
+      needs: undefined,
+      verdict: 'accept',
+      judgedHead: HEAD,
+    })
+    expect('verdict' in projected.cards[1]).toBe(false)
+    expect('judgedHead' in projected.cards[1]).toBe(false)
   })
 })

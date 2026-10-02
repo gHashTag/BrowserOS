@@ -30,6 +30,11 @@ import type { Pool } from 'pg'
 import { logger } from '../../lib/logger'
 import { shellArgv } from '../../tools/filesystem/bash'
 import {
+  type ContributorRuntime,
+  contributorRuntime,
+  type EnvironmentKey,
+} from './queen-contributor-keys'
+import {
   describeReading,
   diskLineUsedPercent,
   judgeBeeRoom,
@@ -414,7 +419,20 @@ export function reviewExtraLanesPerCredential(
   return Math.min(parsed, 2)
 }
 
-export function workerCapacityBreakdown(): WorkerCapacityBreakdown {
+export function workerCapacityBreakdown(
+  runtime?: ContributorRuntime,
+): WorkerCapacityBreakdown {
+  if (runtime && (runtime.managed.length || runtime.disabled.length)) {
+    const lanes = contributorWorkerCandidates(runtime)
+    return {
+      connectedCredentials: lanes.length,
+      lanesPerCredential: configuredRemoteLanesPerCredential(),
+      effectiveCapacity: Math.min(
+        lanes.reduce((sum, lane) => sum + (lane.laneCount ?? 1), 0),
+        queenWorkerLimit(),
+      ),
+    }
+  }
   const endpoint = configuredWorkerBaseUrl()
   if (endpoint) {
     // An explicitly configured Ollama is one measured inference server even
@@ -476,6 +494,14 @@ export function workerCapacityBreakdown(): WorkerCapacityBreakdown {
  */
 export function configuredWorkerCapacity(): number {
   return workerCapacityBreakdown().effectiveCapacity
+}
+
+export async function liveWorkerCapacity(
+  pool: Pool,
+): Promise<WorkerCapacityBreakdown> {
+  return workerCapacityBreakdown(
+    await contributorRuntime(pool, environmentContributorKeys()),
+  )
 }
 
 /**
@@ -808,13 +834,21 @@ function endpointPoolProvider(
  * The first pool's URL and keys, for the model probes (lib/model-ranking.ts).
  * Undefined for a local Ollama: it serves one model and has nothing to rank.
  */
-export function workerProbeEndpoint():
-  | { baseUrl: string; keys: string[] }
-  | undefined {
+export function workerProbeEndpoint(
+  runtime?: ContributorRuntime,
+): { baseUrl: string; keys: string[] } | undefined {
   const pool = configuredEndpointPools()[0]
   if (!pool || pool.provider === 'ollama' || pool.keys.length === 0)
     return undefined
-  return { baseUrl: pool.baseUrl, keys: pool.keys }
+  const keys = pool.keys.filter(
+    (_, index) => !runtime?.disabled.includes(index),
+  )
+  keys.push(
+    ...(runtime?.managed
+      .filter((key) => key.baseUrl === pool.baseUrl)
+      .map((key) => key.apiKey) ?? []),
+  )
+  return keys.length ? { baseUrl: pool.baseUrl, keys } : undefined
 }
 
 function configuredEndpointProvider(
@@ -901,7 +935,7 @@ function configuredEndpointProvider(
  * least-loaded credential. The credential index is stored with the dispatch,
  * so repeated 429s remain attributable without publishing a secret.
  */
-export function resolveWorkerProvider(
+function resolveEnvironmentWorkerProvider(
   takenKeyIndices: number[] = [],
   afterKeyIndex?: number,
 ): WorkerProvider | null {
@@ -971,6 +1005,122 @@ export function resolveWorkerProvider(
   return null
 }
 
+/** The environment's existing durable positions are assigned BEFORE filtering. */
+function environmentWorkerCandidates(): WorkerProvider[] {
+  if (configuredWorkerBaseUrl()) {
+    return configuredEndpointPools().flatMap((pool) =>
+      (pool.provider === 'ollama' ? [pool.keys[0] || 'local'] : pool.keys).map(
+        (apiKey, position) => ({
+          provider: pool.provider,
+          model: pool.model,
+          baseUrl: pool.baseUrl,
+          apiKey,
+          keyIndex: (pool.number - 1) * POOL_KEY_STRIDE + position,
+          keyCount: pool.keys.length,
+          poolNumber: pool.number,
+          contextWindow: pool.contextWindow,
+          laneCount:
+            pool.provider === 'ollama'
+              ? 1
+              : configuredRemoteLanesPerCredential(),
+        }),
+      ),
+    )
+  }
+  for (const provider of WORKER_PROVIDERS) {
+    const keys = keysFor(provider.envVar)
+    if (!keys.length) continue
+    return keys.map((apiKey, keyIndex) => ({
+      provider: provider.provider,
+      model: process.env.TRIOS_QUEEN_WORKER_MODEL || provider.model,
+      apiKey,
+      keyIndex,
+      keyCount: keys.length,
+      laneCount: workerLanesFor(provider.provider),
+    }))
+  }
+  return []
+}
+
+export function environmentContributorKeys(): EnvironmentKey[] {
+  return environmentWorkerCandidates().flatMap((key) => {
+    const provider =
+      key.baseUrl === 'https://integrate.api.nvidia.com/v1'
+        ? 'nvidia'
+        : key.baseUrl === 'https://api.z.ai/api/paas/v4' ||
+            key.provider === 'zai'
+          ? 'zai'
+          : undefined
+    if (!provider || key.keyIndex === undefined || !key.apiKey) return []
+    return [
+      {
+        id: key.keyIndex,
+        provider,
+        apiKey: key.apiKey,
+        model: key.model,
+        baseUrl: key.baseUrl ?? 'https://api.z.ai/api/paas/v4',
+        contextWindow: key.contextWindow,
+      },
+    ]
+  })
+}
+
+function contributorWorkerCandidates(
+  runtime: ContributorRuntime,
+): WorkerProvider[] {
+  const disabled = new Set(runtime.disabled)
+  return [
+    ...environmentWorkerCandidates().filter(
+      (key) => key.keyIndex !== undefined && !disabled.has(key.keyIndex),
+    ),
+    ...runtime.managed.map((key) => ({
+      provider: key.provider === 'zai' ? 'zai' : 'openai-compatible',
+      model: key.model,
+      baseUrl: key.baseUrl,
+      apiKey: key.apiKey,
+      keyIndex: key.id,
+      keyCount: runtime.managed.length,
+      contextWindow: key.contextWindow,
+      laneCount: configuredRemoteLanesPerCredential(),
+    })),
+  ]
+}
+
+export function resolveWorkerProvider(
+  takenKeyIndices: number[] = [],
+  afterKeyIndex?: number,
+  runtime?: ContributorRuntime,
+): WorkerProvider | null {
+  if (!runtime || (!runtime.managed.length && !runtime.disabled.length)) {
+    return resolveEnvironmentWorkerProvider(takenKeyIndices, afterKeyIndex)
+  }
+  const candidates = contributorWorkerCandidates(runtime)
+  if (!candidates.length) return null
+  const cursor = candidates.findIndex((key) => key.keyIndex === afterKeyIndex)
+  let chosen: WorkerProvider | undefined
+  let smallest = Number.POSITIVE_INFINITY
+  for (let step = 1; step <= candidates.length; step++) {
+    const candidate = candidates[(cursor + step) % candidates.length]
+    const occupancy = takenKeyIndices.filter(
+      (index) => index === candidate.keyIndex,
+    ).length
+    if (occupancy < (candidate.laneCount ?? 1) && occupancy < smallest) {
+      chosen = { ...candidate, laneIndex: occupancy }
+      smallest = occupancy
+    }
+  }
+  return (
+    chosen ?? {
+      provider: candidates[0].provider,
+      model: candidates[0].model,
+      exhausted: candidates.reduce(
+        (sum, lane) => sum + (lane.laneCount ?? 1),
+        0,
+      ),
+    }
+  )
+}
+
 /**
  * Every credential lane a one-shot REVIEW may use right now, across every
  * connected pool and every legacy provider that holds a key.
@@ -992,7 +1142,34 @@ export function resolveWorkerProvider(
  */
 export function reviewLaneCandidates(
   takenKeyIndices: number[] = [],
+  runtime?: ContributorRuntime,
 ): WorkerProvider[] {
+  if (runtime && (runtime.managed.length || runtime.disabled.length)) {
+    const managedSecrets = new Set(runtime.managed.map((key) => key.apiKey))
+    const environment = reviewLaneCandidates(takenKeyIndices).filter(
+      (candidate) =>
+        !managedSecrets.has(candidate.apiKey ?? '') &&
+        (candidate.keyIndex === undefined ||
+          !runtime.disabled.includes(candidate.keyIndex)),
+    )
+    const managed = contributorWorkerCandidates(runtime)
+      .filter(
+        (candidate) =>
+          candidate.keyIndex !== undefined && candidate.keyIndex < 0,
+      )
+      .flatMap((candidate) => {
+        const busy = takenKeyIndices.filter(
+          (id) => id === candidate.keyIndex,
+        ).length
+        const laneCount =
+          (candidate.laneCount ?? 1) +
+          reviewExtraLanesPerCredential(candidate.provider)
+        return busy < laneCount
+          ? [{ ...candidate, laneIndex: busy, laneCount }]
+          : []
+      })
+    return [...environment, ...managed]
+  }
   const busy = (index: number) =>
     takenKeyIndices.filter((taken) => taken === index).length
   const out: WorkerProvider[] = []
@@ -4206,7 +4383,8 @@ export async function dispatchBee(
 ): Promise<DispatchOutcome> {
   const branch = `queen-${issue}`
 
-  const chosen = resolveWorkerProvider(takenKeyIndices, afterKeyIndex)
+  const runtime = await contributorRuntime(pool, environmentContributorKeys())
+  const chosen = resolveWorkerProvider(takenKeyIndices, afterKeyIndex, runtime)
   if (chosen?.exhausted !== undefined) {
     // Not a missing credential: every key this deployment has is already
     // carrying a bee. Named separately because the fix is different - one more
@@ -4322,7 +4500,9 @@ export async function dispatchBee(
         ? ` pool ${chosen.poolNumber}`
         : '') +
       (chosen.keyCount && chosen.keyCount > 1
-        ? ` key ${((chosen.keyIndex ?? 0) % POOL_KEY_STRIDE) + 1}/${chosen.keyCount}`
+        ? (chosen.keyIndex ?? 0) < 0
+          ? ` contributor key ${chosen.keyIndex}`
+          : ` key ${((chosen.keyIndex ?? 0) % POOL_KEY_STRIDE) + 1}/${chosen.keyCount}`
         : '') +
       (chosen.laneCount && chosen.laneCount > 1
         ? ` lane ${(chosen.laneIndex ?? 0) + 1}/${chosen.laneCount}`

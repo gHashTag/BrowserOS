@@ -1,0 +1,27 @@
+{
+  "timestamp": "2026-10-01T22:12:00Z",
+  "task_id": "CONTRIBUTOR-KEYS-001",
+  "tracking_issues": [
+    "https://github.com/gHashTag/999-multibots-telegraf/issues/3251",
+    "https://github.com/gHashTag/t27/issues/5472"
+  ],
+  "contract": "Own-account Queen key management preserves immutable credential ownership, existing environment indices and dispatch-derived XP. Management authentication never overrides persisted consent.",
+  "red": [
+    "Removing SQL owner filtering exposed a foreign credential to the actual route test.",
+    "Removing allocation filtering selected a disabled environment key.",
+    "Removing owner AAD made the wrong-owner decrypt test fail."
+  ],
+  "green": {
+    "bun_regression": "268 tests passed, 0 failed, 0 skipped, 1015 assertions across 11 files; includes 9 isolated PostgreSQL tests and compiled Swift core",
+    "typescript": "tsc --noEmit passed",
+    "spec_runtime": "9 native t27 tests passed with Zig 0.16.0",
+    "spec_negative_controls": "9 controls killed; verified by the canonical spec agent",
+    "generated_bindings": "Real t27c gen-ts output; every emitted constant compared with compiler AST in host test",
+    "review_fixes": "Disable does not decrypt; corrupt managed entries do not stop other credentials; removing the management capability retains consent and attribution; Ollama and legacy reviewers retain their paths"
+  },
+  "external_gates": [
+    "Deployment, live provider probes and XP visibility are not proven by these local checks.",
+    "Generated policy contains declarations; protocol, SQL and cryptographic operations remain explicit TypeScript host adapters."
+  ],
+  "learning": "A service capability authenticates management calls, while durable consent remains authoritative without that capability. Credential identity must be assigned before filtering, and disable must remain possible when decryption fails. Concurrent t27 test-report processes need separate TMPDIR directories because the compiler currently derives its work directory from the spec basename."
+}

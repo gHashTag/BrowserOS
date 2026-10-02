@@ -46,9 +46,11 @@
  */
 
 import { Hono } from 'hono'
+import type { Pool } from 'pg'
 import { createQueenPool } from '../../lib/db/queen-pool'
 import { logger } from '../../lib/logger'
 import {
+  liveWorkerCapacity,
   type WorkerCapacityBreakdown,
   workerCapacityBreakdown,
 } from '../services/queen-dispatch'
@@ -85,6 +87,21 @@ interface Card {
   criteriaSource?: string
   /** Spec sections the issue still lacks. */
   needs?: string[]
+  /**
+   * The Queen's verdict on the finished attempt, verbatim from
+   * `queen_dispatch.review_state` - `accept`, `sendBack`, `escalate`, `wait`,
+   * `empty`, ... - and the branch head it was given at.
+   *
+   * PUBLIC BECAUSE THE MERGE READS IT. The t27 publisher opened a pull request
+   * for every `queen-*` branch and armed auto-merge on it without asking her:
+   * measured 2026-10-01, 249 bee pull requests merged and 17 more armed, none
+   * of them gated on a verdict. The owner's rule is that her accept IS the
+   * merge and nothing else is, so the one fact the publisher must read has to
+   * be readable from outside the container - and bound to a commit, or a push
+   * after the accept would ride through on it.
+   */
+  verdict?: string
+  judgedHead?: string
 }
 
 const COLUMNS = [
@@ -107,7 +124,18 @@ const COLUMNS = [
 export interface PublicBoard {
   repo: string
   columns: typeof COLUMNS
-  cards: Array<Pick<Card, 'number' | 'title' | 'column' | 'criteria' | 'needs'>>
+  cards: Array<
+    Pick<
+      Card,
+      | 'number'
+      | 'title'
+      | 'column'
+      | 'criteria'
+      | 'needs'
+      | 'verdict'
+      | 'judgedHead'
+    >
+  >
   pulse: Pick<
     Pulse,
     'rounds' | 'bees' | 'verdicts' | 'lastRoundAt' | 'roundSeconds'
@@ -135,6 +163,8 @@ export function publicBoardProjection(input: {
       column: card.column,
       criteria: card.criteria,
       needs: card.needs,
+      ...(card.verdict ? { verdict: card.verdict } : {}),
+      ...(card.judgedHead ? { judgedHead: card.judgedHead } : {}),
     })),
     pulse: {
       rounds: input.pulse.rounds,
@@ -316,6 +346,26 @@ function dispatchColumn(
   return columnFor(state)
 }
 
+/**
+ * The verdict and the head it was given at, or nothing.
+ *
+ * Only a FINISHED row has one: `upsertDispatch` clears review_state when an
+ * attempt starts, but a row read mid-write must not show the last attempt's
+ * accept on this attempt's card.
+ */
+export function verdictOf(row: Record<string, unknown>): {
+  verdict?: string
+  judgedHead?: string
+} {
+  if (row.finished_at == null || row.review_state == null) return {}
+  const verdict = String(row.review_state)
+  if (verdict === '') return {}
+  const head = row.judged_head == null ? '' : String(row.judged_head)
+  return /^[0-9a-f]{40}$/.test(head)
+    ? { verdict, judgedHead: head }
+    : { verdict }
+}
+
 /** What the dispatch card says under its title. */
 function dispatchDetail(row: Record<string, unknown>): string {
   const said = String(row.detail ?? '')
@@ -450,7 +500,7 @@ async function build(
       // Queen's own sentence underneath said there was nothing to choose.
       `SELECT issue, branch, started, detail, finished_at, outcome,
               review_state, review_note, owned_paths, dispatched_at,
-              send_backs
+              send_backs, judged_head
          FROM queen_dispatch
         WHERE started = true
           AND (finished_at IS NULL OR outcome NOT LIKE 'reaped%')
@@ -512,7 +562,7 @@ async function build(
         (lastTick.rows[0]?.decision as { refusal?: string } | undefined)
           ?.refusal ?? null,
       roundSeconds: Number(process.env.TRIOS_QUEEN_TICK_SECONDS ?? '0') || null,
-      ...boardWorkerCapacity(),
+      ...boardWorkerCapacity(await liveWorkerCapacity(pool as Pool)),
     },
   }
 }
@@ -659,6 +709,7 @@ function addInFlight(
         : (known.get(number)?.paths ?? []),
       detail: dispatchDetail(row),
       worker: 'cloud tick',
+      ...verdictOf(row),
     })
   }
 }

@@ -40,6 +40,7 @@ import { createMonitoringRoutes } from './routes/monitoring'
 import { createOAuthRoutes } from './routes/oauth'
 import { createOpenClawRoutes } from './routes/openclaw'
 import { createProviderRoutes } from './routes/provider'
+import { createQueenContributorKeysRoute } from './routes/queen-contributor-keys'
 import { createQueenDashboardRoute } from './routes/queen-dashboard'
 import { createQueenExportRoute } from './routes/queen-export'
 import {
@@ -395,6 +396,8 @@ export async function createHttpServer(config: HttpServerConfig) {
     // What accepted spec work earned; recorded, not withdrawable. Repository,
     // issue, commit and declared .t27 paths only - no titles, notes or keys.
     .route('/queen/public-earnings', createQueenPublicEarningsRoute())
+    // Separate server-to-server capability; never a public-read or operator-token route.
+    .route('/queen/contributor-keys', createQueenContributorKeysRoute())
     .route('/queen/registry', queenRegistryRoutes)
     // The shell only. It holds no state and no token; every byte of data it
     // shows comes from /queen/lease, which stays guarded. See the route header

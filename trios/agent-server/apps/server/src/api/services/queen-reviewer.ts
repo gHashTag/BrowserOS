@@ -778,7 +778,9 @@ export interface ReviewDeps {
     criteria: string[],
     baseSha?: string | null,
   ) => Promise<CriteriaMeasurement>
-  laneCandidates: (takenKeyIndices: number[]) => WorkerProvider[]
+  laneCandidates: (
+    takenKeyIndices: number[],
+  ) => WorkerProvider[] | Promise<WorkerProvider[]>
   llm: (
     lane: WorkerProvider,
     system: string,

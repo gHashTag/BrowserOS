@@ -1,0 +1,47 @@
+[
+  {
+    "name": "a short proxy token is sufficient",
+    "from": "configured_bytes >= PROXY_TOKEN_MIN_BYTES",
+    "to": "configured_bytes >= PROXY_TOKEN_MIN_BYTES - 1"
+  },
+  {
+    "name": "managed keys collide with environment zero",
+    "from": "managed && index < 0",
+    "to": "managed && index <= 0"
+  },
+  {
+    "name": "owner key limit admits one more key",
+    "from": "owned < MAX_KEYS_PER_OWNER",
+    "to": "owned <= MAX_KEYS_PER_OWNER"
+  },
+  {
+    "name": "probe fanout admits one more request",
+    "from": "active < MAX_PROBES_IN_FLIGHT",
+    "to": "active <= MAX_PROBES_IN_FLIGHT"
+  },
+  {
+    "name": "cooldown permits the excluded boundary",
+    "from": "elapsed_seconds > PROBE_COOLDOWN_SECONDS",
+    "to": "elapsed_seconds >= PROBE_COOLDOWN_SECONDS"
+  },
+  {
+    "name": "empty credentials are accepted",
+    "from": "bytes > 0 && bytes <= MAX_KEY_BYTES",
+    "to": "bytes <= MAX_KEY_BYTES"
+  },
+  {
+    "name": "either owner or fingerprint match is enough",
+    "from": "return subject_matches && fingerprint_matches;",
+    "to": "return subject_matches || fingerprint_matches;"
+  },
+  {
+    "name": "a probe can override a concurrent disable",
+    "from": "success && request_enable && same_revision",
+    "to": "success && (request_enable || same_revision)"
+  },
+  {
+    "name": "adding keys credits a wallet",
+    "from": "pub const CREDIT_WALLET : bool = false;",
+    "to": "pub const CREDIT_WALLET : bool = true;"
+  }
+]
