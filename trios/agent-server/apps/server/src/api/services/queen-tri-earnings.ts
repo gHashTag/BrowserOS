@@ -352,7 +352,7 @@ export async function earningsOfLogin(
   const keys = Object.entries(owners)
     .filter(([, name]) => githubLoginOf(name)?.toLowerCase() === want)
     .map(([index]) => Number(index))
-  const base = {
+  const base: Omit<EarningsOfLogin, 'earnings'> = {
     scheme: EARNING_SCHEME,
     status: EARNINGS_STATUS,
     triPerSpec: TRI_PER_SPEC,
