@@ -103,6 +103,7 @@ import {
   sameModelAs,
   visiblePatchPaths,
 } from './queen-reviewer'
+import { recordEarnings } from './queen-tri-earnings'
 
 /**
  * The last non-secret allocator cursor already written durably. It survives a
@@ -1576,6 +1577,22 @@ export async function runRound(
     })
     return []
   })
+
+  // Write down what accepted spec work has earned, and revoke what a verdict
+  // just took back - after the review and the CI take-back, so this round's
+  // verdicts are what it records (queen-tri-earnings.ts). Housekeeping: a
+  // failure is logged and the round goes on; the next round records the rest.
+  await recordEarnings(pool, repo)
+    .then((done) => {
+      if (done.recorded > 0 || done.revoked > 0) {
+        logger.info('Queen recorded spec earnings', done)
+      }
+    })
+    .catch((error) => {
+      logger.warn('Queen could not record spec earnings', {
+        error: error instanceof Error ? error.message : String(error),
+      })
+    })
 
   const reaped = await reapStalledDispatches(pool)
   if (reaped.length > 0) {

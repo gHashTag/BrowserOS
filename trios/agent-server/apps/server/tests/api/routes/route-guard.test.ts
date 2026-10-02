@@ -85,13 +85,17 @@ describe('route-guard audit over src/api/server.ts', () => {
     // where a route named `public` belongs. Every other number here is
     // unchanged, which is the part worth stating: no guarded route quietly lost
     // its guard to make room for it.
-    // RE-MEASURED 2026-10-02: 45 became 46 with /queen/contributor-keys
+    // RE-MEASURED 2026-10-01: 45 became 46, the same way. One mount added on
+    // purpose - `/queen/public-earnings`, an explicit
+    // `publicReadCorsMiddleware()` on the record of accepted spec work - and
+    // the audit puts it in `public-read`. Prefix and wrapper counts unchanged.
+    // RE-MEASURED 2026-10-02: 46 became 47 with /queen/contributor-keys
     // (#522), a server-to-server route behind its own capability token. It is
     // allowlisted with that reason; no other number moved.
-    expect(report.totalMounts).toBe(46)
+    expect(report.totalMounts).toBe(47)
     expect(report.prefixGuardCount).toBe(18)
     expect(report.guardedSubAppCount).toBe(15)
-    expect(report.publicReadCount).toBe(8)
+    expect(report.publicReadCount).toBe(9)
   })
 
   it('reports zero unguarded mounts once the reasoned allowlist is applied', () => {
@@ -109,7 +113,7 @@ describe('route-guard audit over src/api/server.ts', () => {
     )
   })
 
-  it('splits the twenty-three /queen mounts into 8 public-read, 8 wrapper-guarded and 7 allowlisted', () => {
+  it('splits the twenty-four /queen mounts into 9 public-read, 8 wrapper-guarded and 7 allowlisted', () => {
     const queenMounts = classifyMounts(source).filter(
       (mount) => mount.path === '/queen' || mount.path.startsWith('/queen/'),
     )
@@ -131,11 +135,17 @@ describe('route-guard audit over src/api/server.ts', () => {
     // issue title, no worker text and no credential: only a key's INDEX ever
     // reaches the database, so there is nothing here a stranger could read that
     // the board does not already show.
-    // RE-MEASURED 2026-10-02: twenty-two became twenty-three. The seventh
+    // RE-MEASURED 2026-10-01: twenty-two became twenty-three. The ninth
+    // public-read is /queen/public-earnings - which accepted spec commits were
+    // recorded as earnings and which a later verdict took back. Like the
+    // leaderboard it carries no issue title, no worker text, no review note and
+    // no credential; the repository, issue, commit and declared .t27 paths are
+    // already public on GitHub.
+    // RE-MEASURED 2026-10-02: twenty-three became twenty-four. The seventh
     // allowlisted mount is /queen/contributor-keys (#522), which serves data
     // only to a caller holding QUEEN_CONTRIBUTOR_PROXY_TOKEN - its own guard,
     // not the trusted-origin one, because its caller is a server.
-    expect(queenMounts.length).toBe(23)
+    expect(queenMounts.length).toBe(24)
 
     const counts: Record<string, number> = {
       'public-read': 0,
@@ -149,7 +159,7 @@ describe('route-guard audit over src/api/server.ts', () => {
     // The four buckets must account for every mount with the exact expected
     // split; anything unaccounted for breaks one of these numbers.
     expect(counts).toEqual({
-      'public-read': 8,
+      'public-read': 9,
       'prefix-guard': 0,
       wrapper: 8,
       unguarded: 7,

@@ -288,6 +288,30 @@ CREATE TABLE IF NOT EXISTS queen_report (
 
 CREATE INDEX IF NOT EXISTS idx_queen_report_at ON queen_report (at DESC);
 
+-- What an accepted spec has earned, written down once (queen-tri-earnings.ts).
+--
+-- Append-only: a row is inserted, and later perhaps revoked, never deleted.
+-- queen_dispatch is overwritten in place by a CI take-back, so an earning
+-- derived from it on read would vanish instead of showing as taken back.
+-- work_id is sha256 of the scheme, repository, issue and judged commit, so
+-- anyone can recompute it from public data. No amount column: TRI per spec is
+-- not decided, and a column would invite somebody to fill it.
+CREATE TABLE IF NOT EXISTS queen_tri_earnings (
+  work_id text PRIMARY KEY,
+  repo text NOT NULL,
+  issue int NOT NULL,
+  judged_head text NOT NULL,
+  key_index int NOT NULL,
+  spec_paths jsonb NOT NULL DEFAULT '[]'::jsonb,
+  accepted_at timestamptz NOT NULL,
+  recorded_at timestamptz NOT NULL DEFAULT now(),
+  revoked_at timestamptz,
+  revoked_reason text
+);
+
+CREATE INDEX IF NOT EXISTS idx_queen_tri_earnings_issue
+  ON queen_tri_earnings (repo, issue, judged_head);
+
 CREATE INDEX IF NOT EXISTS idx_conversation_messages_conversation_order
   ON "conversationMessages" ("conversationId", "orderIndex");
 `
