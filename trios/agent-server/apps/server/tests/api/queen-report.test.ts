@@ -7,6 +7,7 @@ import {
 import {
   createQueenReportRoute,
   createSourceLimiter,
+  MAX_LIVE_SOURCES,
   type QueenReportDeps,
 } from '../../src/api/routes/queen-report'
 import { requireTrustedAppOrigin } from '../../src/api/utils/request-auth'
@@ -276,5 +277,58 @@ describe('POST /queen/report - the rate limit', () => {
     expect(limiter.take('a', 1)).toBe(true)
     expect(limiter.take('a', 2)).toBe(false)
     expect(limiter.take('a', 1000)).toBe(true)
+  })
+
+  // Review of #530: `source` is free-form, so a map keyed by it with no
+  // eviction grew forever, and rotating the name dodged the per-source cap.
+  it('keeps the map at or below the cap however many distinct sources arrive', () => {
+    const limiter = createSourceLimiter()
+    let accepted = 0
+    for (let i = 0; i < 1000; i += 1) {
+      if (limiter.take(`rotating-${i}`, i)) accepted += 1
+      expect(limiter.size()).toBeLessThanOrEqual(MAX_LIVE_SOURCES)
+    }
+    expect(MAX_LIVE_SOURCES).toBe(64)
+    expect(accepted).toBe(64)
+  })
+
+  it('evicts a source once its window is empty', () => {
+    let clock = 0
+    const limiter = createSourceLimiter(60, 1000)
+    expect(limiter.take('quiet', clock)).toBe(true)
+    expect(limiter.size()).toBe(1)
+    clock = 1000
+    // A call for a different source is enough to sweep the quiet one out.
+    expect(limiter.take('other', clock)).toBe(true)
+    expect(limiter.size()).toBe(1)
+  })
+})
+
+describe('POST /queen/report - the source cap', () => {
+  it('answers 429 to source number 65 and frees the slot when the hour passes', async () => {
+    process.env.TRIOS_API_TOKEN = TOKEN
+    let clock = 5_000_000
+    const rec = recordingPool()
+    const app = guarded({
+      databaseUrl: () => 'postgres://x',
+      createPool: () => rec.pool,
+      now: () => clock,
+    })
+
+    for (let i = 1; i <= 64; i += 1) {
+      expect((await post(app, { ...good, source: `watch-${i}` })).status).toBe(
+        201,
+      )
+    }
+    const sixtyFifth = await post(app, { ...good, source: 'watch-65' })
+    expect(sixtyFifth.status).toBe(429)
+    expect(sixtyFifth.headers.get('Retry-After')).toBe('3600')
+    expect(rec.calls).toHaveLength(64)
+
+    // A live source still has its own budget while the cap is full.
+    expect((await post(app, { ...good, source: 'watch-1' })).status).toBe(201)
+
+    clock += 60 * 60 * 1000
+    expect((await post(app, { ...good, source: 'watch-65' })).status).toBe(201)
   })
 })

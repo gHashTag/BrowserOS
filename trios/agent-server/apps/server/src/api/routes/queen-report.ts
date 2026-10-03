@@ -55,6 +55,7 @@ export const SOURCE_PATTERN = /^[a-z0-9-]{1,64}$/
 export const HEADLINE_MAX = 200
 export const BODY_MAX = 8000
 export const REPORTS_PER_SOURCE_PER_HOUR = 60
+export const MAX_LIVE_SOURCES = 64
 const HOUR_MS = 60 * 60 * 1000
 
 const FIELDS = ['source', 'headline', 'body', 'needs_you'] as const
@@ -107,28 +108,52 @@ export function parseReport(
 }
 
 /**
- * At most `limit` reports per source in any sliding hour, in memory.
+ * At most `limit` reports per source in any sliding hour, and at most
+ * `maxSources` sources live at once, in memory.
  *
  * In memory on purpose: one process serves this route, a restart forgets the
  * window, and the worst a restart buys is one extra hour of a watcher that
  * already holds the deployment token.
+ *
+ * BOUNDED, BOTH WAYS. `source` is free-form, so a per-name limit alone is no
+ * limit: a caller rotating the name never meets the per-source cap and grows
+ * this map forever (review of #530). Every call drops expired timestamps and
+ * deletes a source whose window is empty, and a NEW source is refused while
+ * `maxSources` are live. Memory is at most maxSources x limit timestamps, and
+ * writes are at most maxSources x limit per hour.
  */
 export function createSourceLimiter(
   limit = REPORTS_PER_SOURCE_PER_HOUR,
   windowMs = HOUR_MS,
+  maxSources = MAX_LIVE_SOURCES,
 ) {
   const seen = new Map<string, number[]>()
+
+  function prune(at: number) {
+    for (const [source, times] of seen) {
+      const recent = times.filter((t) => at - t < windowMs)
+      if (recent.length === 0) seen.delete(source)
+      else if (recent.length !== times.length) seen.set(source, recent)
+    }
+  }
+
   return {
     /** Records the attempt and returns true, or returns false when full. */
     take(source: string, at: number): boolean {
-      const recent = (seen.get(source) ?? []).filter((t) => at - t < windowMs)
-      if (recent.length >= limit) {
-        seen.set(source, recent)
-        return false
+      prune(at)
+      const recent = seen.get(source)
+      if (!recent) {
+        if (seen.size >= maxSources) return false
+        seen.set(source, [at])
+        return true
       }
+      if (recent.length >= limit) return false
       recent.push(at)
-      seen.set(source, recent)
       return true
+    },
+    /** Live sources right now; for tests and nothing else. */
+    size(): number {
+      return seen.size
     },
   }
 }
@@ -158,7 +183,7 @@ export function createQueenReportRoute(deps: QueenReportDeps = {}) {
 
     if (!limiter.take(report.source, now())) {
       c.header('Retry-After', '3600')
-      return c.json({ error: 'Too many reports from this source' }, 429)
+      return c.json({ error: 'Too many reports' }, 429)
     }
 
     const url = databaseUrl()
