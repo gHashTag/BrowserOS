@@ -3,7 +3,7 @@
  * Copyright 2025 BrowserOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
- * GET /queen/public-credits - for each accepted issue, the GitHub login of the
+ * GET /queen/public-credits - for each issue, the GitHub login of the
  * person whose lane carried it (queen-lane-credits.ts). Read by the
  * spec-authors board in gHashTag/trinity.
  */

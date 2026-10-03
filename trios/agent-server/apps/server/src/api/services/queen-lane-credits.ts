@@ -3,15 +3,22 @@
  * Copyright 2025 BrowserOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
- * WHOSE LANE CARRIED EACH ACCEPTED ISSUE.
+ * WHOSE LANE CARRIED EACH ISSUE'S BRANCH.
  *
  * The spec-authors board (gHashTag/trinity, apps/website/scripts/spec-authors.mjs)
  * credits a commit to its GitHub author. A swarm commit reaches master as the
  * squash of a `queen-<issue>` pull request, authored by whoever merged it, so
  * every bee's work read as the merger's own. The owner, 2026-10-03: credit it to
  * the person whose provider key the bee ran on. This is the record that makes
- * that possible: for each accepted issue, the lane that did the accepted turn
- * and the GitHub login of the person who claimed that lane.
+ * that possible: for each issue, the lane of its latest turn - the turn whose
+ * work the `queen-<issue>` branch carries - and the GitHub login of the person
+ * who claimed that lane.
+ *
+ * NOT ONLY ACCEPTED TURNS. Measured 2026-10-03: of 514 queen-<issue> pull
+ * requests merged since 2026-09-17, 89 had an accepted turn; the rest were
+ * merged by the maintainer after a sendBack, escalate or wait verdict. The
+ * merge is what puts the work on master, so the lane that wrote the branch is
+ * the one credited, whatever the Queen's own review said.
  *
  * Public on the same terms as the leaderboard: issue numbers and logins that
  * board already shows, no titles, no worker text, no credential.
@@ -29,11 +36,11 @@ import { githubLoginOf, parseOwners } from './queen-leaderboard'
 export interface LaneCredit {
   issue: number
   github: string
-  /** When the accepted turn was dispatched, ISO. */
+  /** When the credited turn was dispatched, ISO. */
   at: string
 }
 
-export interface AcceptedTurn {
+export interface IssueTurn {
   issue: number
   keyIndex: number
   dispatchedAt: Date
@@ -57,16 +64,16 @@ export function parseOwnersSince(
 }
 
 /**
- * Pure: one credit per issue, from its latest accepted turn, only when that
+ * Pure: one credit per issue, from its latest turn, only when that
  * lane is claimed by a GitHub login and the turn is not older than the login's
- * start date. An issue accepted on an unclaimed lane is left out, not guessed.
+ * start date. An issue last worked on an unclaimed lane is left out, not guessed.
  */
 export function creditIssues(
-  turns: AcceptedTurn[],
+  turns: IssueTurn[],
   owners: Record<number, string>,
   since: Record<string, Date>,
 ): LaneCredit[] {
-  const latest = new Map<number, AcceptedTurn>()
+  const latest = new Map<number, IssueTurn>()
   for (const turn of turns) {
     const seen = latest.get(turn.issue)
     if (!seen || turn.dispatchedAt > seen.dispatchedAt)
@@ -88,17 +95,16 @@ export function creditIssues(
   return credits.sort((a, b) => a.issue - b.issue)
 }
 
-export async function acceptedTurns(pool: Pool): Promise<AcceptedTurn[]> {
+export async function issueTurns(pool: Pool): Promise<IssueTurn[]> {
   const { rows } = await pool.query(
     `SELECT issue, key_index, dispatched_at
        FROM queen_dispatch
-      WHERE review_state = 'accept' AND key_index IS NOT NULL
+      WHERE key_index IS NOT NULL AND dispatched_at IS NOT NULL
      UNION ALL
      SELECT issue, (snapshot->>'key_index')::integer,
             (snapshot->>'dispatched_at')::timestamptz
        FROM queen_dispatch_history
-      WHERE snapshot->>'review_state' = 'accept'
-        AND snapshot->>'key_index' ~ '^-?[0-9]+$'
+      WHERE snapshot->>'key_index' ~ '^-?[0-9]+$'
         AND snapshot->>'dispatched_at' IS NOT NULL`,
   )
   return rows.map((row) => ({
@@ -119,7 +125,7 @@ export async function laneCredits(
     measuredAt: new Date().toISOString(),
     repo: 'gHashTag/t27',
     credits: creditIssues(
-      await acceptedTurns(pool),
+      await issueTurns(pool),
       owners,
       parseOwnersSince(process.env.TRIOS_KEY_OWNERS_SINCE),
     ),
