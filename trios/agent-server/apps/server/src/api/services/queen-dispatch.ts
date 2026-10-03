@@ -936,7 +936,19 @@ function configuredEndpointProvider(
  */
 export function workerProviderForKeyIndex(
   keyIndex: number,
+  runtime?: ContributorRuntime,
 ): WorkerProvider | null {
+  // With the contributor registry in play the Queen allocated from
+  // `contributorWorkerCandidates`: a managed key (negative index) lives only
+  // there, a disabled key is absent, and an owner's model replaces the pool's.
+  // A runner must resolve the order exactly as it was written.
+  if (contributorRuntimeActive(runtime)) {
+    return (
+      contributorWorkerCandidates(runtime).find(
+        (lane) => lane.keyIndex === keyIndex,
+      ) ?? null
+    )
+  }
   const override = process.env.TRIOS_QUEEN_WORKER_MODEL
   if (configuredWorkerBaseUrl()) {
     const pools = configuredEndpointPools()
@@ -4818,7 +4830,10 @@ export async function runClaimedBee(
     return { started: false, issue, branch, detail }
   }
 
-  const chosen = workerProviderForKeyIndex(order.keyIndex)
+  const chosen = workerProviderForKeyIndex(
+    order.keyIndex,
+    await contributorRuntime(pool, environmentContributorKeys()),
+  )
   if (!chosen?.apiKey) {
     // The runner's environment is not the Queen's, or the key list changed
     // under the order. Taking the next credential along would put two bees on

@@ -789,6 +789,13 @@ export interface ReviewDeps {
   reviewsPerRound: () => number
   /** Criteria measurements one sweep may buy. Optional for injected fakes. */
   measurementsPerRound?: () => number
+  /**
+   * Brings a branch a runner left in `queen_bundle` into this checkout, so
+   * everything above reads it as if the bee had run here. Optional for fakes.
+   */
+  importRunnerBranch?: (
+    issue: number,
+  ) => Promise<{ ok: true; imported: boolean } | { ok: false; error: string }>
 }
 
 export function defaultReviewDeps(): ReviewDeps {
