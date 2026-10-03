@@ -95,9 +95,13 @@ describe('route-guard audit over src/api/server.ts', () => {
     // RE-MEASURED 2026-10-03: 47 became 48 with /queen/public-credits, an
     // explicit publicReadCorsMiddleware() on which login's lane carried each
     // accepted issue (issue numbers and logins the leaderboard already shows).
-    expect(report.totalMounts).toBe(48)
+    // RE-MEASURED 2026-10-03 again: 48 became 49 with /queen/report, the door
+    // outside watchers write into her report through. It WRITES, so it is a
+    // guarded wrapper like /queen/needs-you, and `guardedSubAppCount` went 15
+    // to 16. Public-read and prefix counts unchanged.
+    expect(report.totalMounts).toBe(49)
     expect(report.prefixGuardCount).toBe(18)
-    expect(report.guardedSubAppCount).toBe(15)
+    expect(report.guardedSubAppCount).toBe(16)
     expect(report.publicReadCount).toBe(10)
   })
 
@@ -116,7 +120,7 @@ describe('route-guard audit over src/api/server.ts', () => {
     )
   })
 
-  it('splits the twenty-five /queen mounts into 10 public-read, 8 wrapper-guarded and 7 allowlisted', () => {
+  it('splits the twenty-six /queen mounts into 10 public-read, 9 wrapper-guarded and 7 allowlisted', () => {
     const queenMounts = classifyMounts(source).filter(
       (mount) => mount.path === '/queen' || mount.path.startsWith('/queen/'),
     )
@@ -152,7 +156,10 @@ describe('route-guard audit over src/api/server.ts', () => {
     // public-read is /queen/public-credits - for each accepted issue, the
     // GitHub login that claimed the lane it ran on. No title, no worker text,
     // no credential.
-    expect(queenMounts.length).toBe(25)
+    // RE-MEASURED 2026-10-03: twenty-five became twenty-six. The ninth wrapper
+    // is /queen/report, where outside watchers write into her report; guarded
+    // inside its own sub-app because it writes.
+    expect(queenMounts.length).toBe(26)
 
     const counts: Record<string, number> = {
       'public-read': 0,
@@ -168,7 +175,7 @@ describe('route-guard audit over src/api/server.ts', () => {
     expect(counts).toEqual({
       'public-read': 10,
       'prefix-guard': 0,
-      wrapper: 8,
+      wrapper: 9,
       unguarded: 7,
     })
 
