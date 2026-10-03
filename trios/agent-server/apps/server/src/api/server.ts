@@ -65,6 +65,7 @@ import { createQueenPublicResearchRoute } from './routes/queen-public-research'
 import { createQueenPublicStatusRoute } from './routes/queen-public-status'
 import { createQueenRegistryRoute } from './routes/queen-registry'
 import { createQueenRehearsalRoute } from './routes/queen-rehearsal'
+import { createQueenReportRoute } from './routes/queen-report'
 import {
   createQueenRoadmapDataRoute,
   createQueenRoadmapRoute,
@@ -266,6 +267,13 @@ export async function createHttpServer(config: HttpServerConfig) {
     .use('/*', requireTrustedAppOrigin())
     .route('/', createQueenNeedsYouRoute())
 
+  // Outside watchers write into her report here (a relay probe in the bot's
+  // repository is the first). It WRITES, so it is guarded inside its own
+  // sub-app exactly like needs-you above - never a bare factory mount.
+  const queenReportRoutes = new Hono<Env>()
+    .use('/*', requireTrustedAppOrigin())
+    .route('/', createQueenReportRoute())
+
   const queenBoardRoutes = new Hono<Env>()
     .use('/*', requireTrustedAppOrigin())
     .route('/', createQueenBoardRoute())
@@ -422,6 +430,7 @@ export async function createHttpServer(config: HttpServerConfig) {
     // than being served to any origin. The five escalations it exists to
     // surface are for the operator, not for a public page.
     .route('/queen/needs-you', queenNeedsYouRoutes)
+    .route('/queen/report', queenReportRoutes)
     .route('/queen/board', queenBoardRoutes)
     .route('/queen/roadmap', createQueenRoadmapRoute())
     .route('/queen/roadmap/data', queenRoadmapDataRoutes)
