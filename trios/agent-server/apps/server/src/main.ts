@@ -17,7 +17,7 @@ import {
   configureVmRuntime,
   peekOpenClawService,
 } from './api/services/openclaw/openclaw-service'
-import { startBeeRunner } from './api/services/queen-runner'
+import { drainActiveRunner, startBeeRunner } from './api/services/queen-runner'
 import { startQueenTick } from './api/services/queen-tick'
 import { CdpBackend } from './browser/backends/cdp'
 import { Browser } from './browser/browser'
@@ -249,6 +249,9 @@ export class Application {
 
   async stop(reason?: string): Promise<void> {
     logger.info('Shutting down server...', { reason })
+    // Bees first, while the database and the HTTP server are still up: a
+    // runner given a drain window lets its bees end before anything closes.
+    if (reason === 'SIGTERM') await drainActiveRunner().catch(() => {})
     stopSkillSync()
     // Only what was actually started. `getOpenClawService` constructs on
     // demand, so calling it here built the runtime it was meant to stop.
