@@ -92,10 +92,13 @@ describe('route-guard audit over src/api/server.ts', () => {
     // RE-MEASURED 2026-10-02: 46 became 47 with /queen/contributor-keys
     // (#522), a server-to-server route behind its own capability token. It is
     // allowlisted with that reason; no other number moved.
-    expect(report.totalMounts).toBe(47)
+    // RE-MEASURED 2026-10-03: 47 became 48 with /queen/public-credits, an
+    // explicit publicReadCorsMiddleware() on which login's lane carried each
+    // accepted issue (issue numbers and logins the leaderboard already shows).
+    expect(report.totalMounts).toBe(48)
     expect(report.prefixGuardCount).toBe(18)
     expect(report.guardedSubAppCount).toBe(15)
-    expect(report.publicReadCount).toBe(9)
+    expect(report.publicReadCount).toBe(10)
   })
 
   it('reports zero unguarded mounts once the reasoned allowlist is applied', () => {
@@ -113,7 +116,7 @@ describe('route-guard audit over src/api/server.ts', () => {
     )
   })
 
-  it('splits the twenty-four /queen mounts into 9 public-read, 8 wrapper-guarded and 7 allowlisted', () => {
+  it('splits the twenty-five /queen mounts into 10 public-read, 8 wrapper-guarded and 7 allowlisted', () => {
     const queenMounts = classifyMounts(source).filter(
       (mount) => mount.path === '/queen' || mount.path.startsWith('/queen/'),
     )
@@ -145,7 +148,11 @@ describe('route-guard audit over src/api/server.ts', () => {
     // allowlisted mount is /queen/contributor-keys (#522), which serves data
     // only to a caller holding QUEEN_CONTRIBUTOR_PROXY_TOKEN - its own guard,
     // not the trusted-origin one, because its caller is a server.
-    expect(queenMounts.length).toBe(24)
+    // RE-MEASURED 2026-10-03: twenty-four became twenty-five. The tenth
+    // public-read is /queen/public-credits - for each accepted issue, the
+    // GitHub login that claimed the lane it ran on. No title, no worker text,
+    // no credential.
+    expect(queenMounts.length).toBe(25)
 
     const counts: Record<string, number> = {
       'public-read': 0,
@@ -159,7 +166,7 @@ describe('route-guard audit over src/api/server.ts', () => {
     // The four buckets must account for every mount with the exact expected
     // split; anything unaccounted for breaks one of these numbers.
     expect(counts).toEqual({
-      'public-read': 9,
+      'public-read': 10,
       'prefix-guard': 0,
       wrapper: 8,
       unguarded: 7,
