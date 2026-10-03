@@ -45,6 +45,24 @@ export {
 
 export interface CompactionConfig {
   contextWindow: number
+  /** A faster model on the bee's own key that writes summaries first. */
+  summarizer?: LanguageModel
+}
+
+/**
+ * Ask each model in turn and keep the first summary. The summarizer is tried
+ * first; when it is busy or refuses, the bee's own model still gets its turn,
+ * so a fast summarizer can only add summaries, never take one away.
+ */
+async function firstSummary(
+  models: LanguageModel[],
+  summarize: (model: LanguageModel) => Promise<string | null>,
+): Promise<string | null> {
+  for (const model of models) {
+    const summary = await summarize(model)
+    if (summary) return summary
+  }
+  return null
 }
 
 async function consumeStreamText(
@@ -130,7 +148,7 @@ async function summarizeTurnPrefix(
 }
 
 async function compactMessages(
-  model: LanguageModel,
+  models: LanguageModel[],
   messages: ModelMessage[],
   config: ComputedConfig,
   state: CompactionState,
@@ -239,18 +257,22 @@ async function compactMessages(
   if (isSplitTurn && summarizedTurnPrefix.length > 0) {
     if (toSummarize.length > 0) {
       const [historySummary, turnPrefixSummary] = await Promise.all([
-        summarizeMessages(
-          model,
-          toSummarize,
-          state.existingSummary,
-          config.summarizationTimeoutMs,
-          config.summarizerMaxOutputTokens,
+        firstSummary(models, (model) =>
+          summarizeMessages(
+            model,
+            toSummarize,
+            state.existingSummary,
+            config.summarizationTimeoutMs,
+            config.summarizerMaxOutputTokens,
+          ),
         ),
-        summarizeTurnPrefix(
-          model,
-          summarizedTurnPrefix,
-          config.summarizationTimeoutMs,
-          turnPrefixOutputBudget,
+        firstSummary(models, (model) =>
+          summarizeTurnPrefix(
+            model,
+            summarizedTurnPrefix,
+            config.summarizationTimeoutMs,
+            turnPrefixOutputBudget,
+          ),
         ),
       ])
 
@@ -260,20 +282,24 @@ async function compactMessages(
         summary = historySummary ?? turnPrefixSummary
       }
     } else {
-      summary = await summarizeTurnPrefix(
-        model,
-        summarizedTurnPrefix,
-        config.summarizationTimeoutMs,
-        turnPrefixOutputBudget,
+      summary = await firstSummary(models, (model) =>
+        summarizeTurnPrefix(
+          model,
+          summarizedTurnPrefix,
+          config.summarizationTimeoutMs,
+          turnPrefixOutputBudget,
+        ),
       )
     }
   } else {
-    summary = await summarizeMessages(
-      model,
-      toSummarize,
-      state.existingSummary,
-      config.summarizationTimeoutMs,
-      config.summarizerMaxOutputTokens,
+    summary = await firstSummary(models, (model) =>
+      summarizeMessages(
+        model,
+        toSummarize,
+        state.existingSummary,
+        config.summarizationTimeoutMs,
+        config.summarizerMaxOutputTokens,
+      ),
     )
   }
 
@@ -333,6 +359,8 @@ export function createCompactionPrepareStep(
     minSummarizableTokens: config.minSummarizableTokens,
     maxSummarizationInput: config.maxSummarizationInput,
     summarizerMaxOutputTokens: config.summarizerMaxOutputTokens,
+    summarizationTimeoutMs: config.summarizationTimeoutMs,
+    summarizer: userConfig?.summarizer !== undefined,
   })
 
   return async ({
@@ -402,7 +430,10 @@ export function createCompactionPrepareStep(
       },
     )
 
-    const compacted = await compactMessages(model, reduced, config, state)
+    const models = userConfig?.summarizer
+      ? [userConfig.summarizer, model]
+      : [model]
+    const compacted = await compactMessages(models, reduced, config, state)
     return { messages: compacted, experimental_context: state }
   }
 }

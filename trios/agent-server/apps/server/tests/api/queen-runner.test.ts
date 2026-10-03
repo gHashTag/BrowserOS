@@ -20,6 +20,9 @@ import {
   workerProviderForKeyIndex,
 } from '../../src/api/services/queen-dispatch'
 import {
+  type BeeOrder,
+  drainBeeRunner,
+  drainSeconds,
   runnerName,
   runnerSlots,
   waitForEnding,
@@ -341,5 +344,130 @@ describe('the Queen brings a runner branch into her checkout before judging it',
       imported: true,
     })
     expect(sh(queen, 'rev-parse', 'queen-7')).toBe(head)
+  })
+})
+
+describe('a stopping runner drains its bees', () => {
+  const order = (issue: number): BeeOrder => ({
+    issue,
+    branch: `queen-${issue}`,
+    brief: '',
+    ownedPaths: [],
+    conversationId: `c-${issue}`,
+    keyIndex: 0,
+  })
+  const pool = {} as Pool
+
+  it('reads the drain window from the environment, bounded', () => {
+    expect(drainSeconds({})).toBe(0)
+    expect(drainSeconds({ TRIOS_BEE_RUNNER_DRAIN_SECONDS: 'soon' })).toBe(0)
+    expect(drainSeconds({ TRIOS_BEE_RUNNER_DRAIN_SECONDS: '-5' })).toBe(0)
+    expect(drainSeconds({ TRIOS_BEE_RUNNER_DRAIN_SECONDS: ' 900 ' })).toBe(900)
+    expect(drainSeconds({ TRIOS_BEE_RUNNER_DRAIN_SECONDS: '99999' })).toBe(3600)
+  })
+
+  it('waits for the bees in flight and saves nothing when they all end in time', async () => {
+    const orders = new Map([
+      [1, order(1)],
+      [2, order(2)],
+    ])
+    let clock = 0
+    const saved: number[] = []
+    const result = await drainBeeRunner(pool, 'r', {
+      orders,
+      seconds: 600,
+      now: () => clock,
+      sleep: async (ms) => {
+        clock += ms
+        // One bee ends per wait.
+        orders.delete([...orders.keys()][0])
+      },
+      salvage: async () => {
+        throw new Error('nothing should be salvaged')
+      },
+      store: async (_pool, issue) => {
+        saved.push(issue)
+      },
+    })
+    expect(result.saved).toEqual([])
+    expect(saved).toEqual([])
+    expect(orders.size).toBe(0)
+  })
+
+  it('at the deadline salvages and stores every bee still running, and only those', async () => {
+    const orders = new Map([
+      [7, order(7)],
+      [8, order(8)],
+    ])
+    let clock = 0
+    const salvaged: Array<[number, string | null | undefined]> = []
+    const stored: number[] = []
+    const result = await drainBeeRunner(pool, 'r', {
+      orders,
+      seconds: 10,
+      now: () => clock,
+      sleep: async (ms) => {
+        clock += ms
+        orders.delete(8)
+      },
+      salvage: (async (
+        _pool: Pool,
+        issue: number,
+        _reason: string,
+        deps: { conversationId?: string | null },
+      ) => {
+        salvaged.push([issue, deps.conversationId])
+        return { committed: true, files: [], left: [], sha: null, detail: '' }
+      }) as never,
+      store: async (_pool, issue) => {
+        stored.push(issue)
+      },
+    })
+    expect(result.saved).toEqual([7])
+    expect(salvaged).toEqual([[7, 'c-7']])
+    expect(stored).toEqual([7])
+    expect(clock).toBeLessThanOrEqual(10_000)
+  })
+
+  it('with no window it saves the running bees at once instead of waiting', async () => {
+    const orders = new Map([[3, order(3)]])
+    let slept = 0
+    const result = await drainBeeRunner(pool, 'r', {
+      orders,
+      seconds: 0,
+      now: () => 0,
+      sleep: async () => {
+        slept += 1
+      },
+      salvage: (async () => ({
+        committed: false,
+        files: [],
+        left: [],
+        sha: null,
+        detail: '',
+      })) as never,
+      store: async () => {},
+    })
+    expect(slept).toBe(0)
+    expect(result.saved).toEqual([3])
+  })
+
+  it('a bee whose branch cannot be saved does not stop the others from being saved', async () => {
+    const orders = new Map([
+      [4, order(4)],
+      [5, order(5)],
+    ])
+    const result = await drainBeeRunner(pool, 'r', {
+      orders,
+      seconds: 0,
+      now: () => 0,
+      sleep: async () => {},
+      salvage: (async (_p: Pool, issue: number) => {
+        if (issue === 4) throw new Error('git is gone')
+        return { committed: false, files: [], left: [], sha: null, detail: '' }
+      }) as never,
+      store: async () => {},
+    })
+    expect(result.saved).toEqual([5])
   })
 })

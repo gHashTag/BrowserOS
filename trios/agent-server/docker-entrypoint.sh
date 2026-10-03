@@ -156,8 +156,15 @@ run_supervised() {
     done
   ) &
   set +e
+  # A trapped TERM ends `wait` at once (POSIX), while the server is still
+  # draining its bees; leaving here then would end the container and every bee
+  # with it. So wait again for as long as the server is alive.
   wait "$server"
   code=$?
+  while kill -0 "$server" 2>/dev/null; do
+    wait "$server"
+    code=$?
+  done
   # A server that was ended for not answering exits by signal, which `wait`
   # reports as 128+N. Anything but a clean 0 must read as a failure to the
   # platform, or ON_FAILURE would not restart it.

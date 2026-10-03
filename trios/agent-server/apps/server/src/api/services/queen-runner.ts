@@ -39,7 +39,7 @@ import type { Pool } from 'pg'
 import { createQueenPool } from '../../lib/db/queen-pool'
 import { logger } from '../../lib/logger'
 import { bundleOfBranch } from '../routes/queen-export'
-import { runClaimedBee } from './queen-dispatch'
+import { runClaimedBee, salvageDispatch } from './queen-dispatch'
 import { queenLeaseDatabaseUrl } from './queen-lease'
 
 export interface BeeOrder {
@@ -221,16 +221,112 @@ export async function runOneOrder(
     issue: order.issue,
     branch: order.branch,
   })
-  const outcome = await runClaimedBee(pool, order)
-  if (!outcome.started) return order
-  await waitForEnding(pool, order, runner)
-  await storeBundle(pool, order.issue, runner).catch((error) => {
-    logger.warn('Runner could not store the bundle of a finished bee', {
-      issue: order.issue,
-      error: error instanceof Error ? error.message : String(error),
+  inFlight.set(order.issue, order)
+  try {
+    const outcome = await runClaimedBee(pool, order)
+    if (!outcome.started) return order
+    await waitForEnding(pool, order, runner)
+    await storeBundle(pool, order.issue, runner).catch((error) => {
+      logger.warn('Runner could not store the bundle of a finished bee', {
+        issue: order.issue,
+        error: error instanceof Error ? error.message : String(error),
+      })
     })
-  })
-  return order
+    return order
+  } finally {
+    inFlight.delete(order.issue)
+  }
+}
+
+/** The orders this process is carrying right now, by issue. */
+const inFlight = new Map<number, BeeOrder>()
+
+/** The runner this process started, so a shutdown can drain it. */
+let active: { pool: Pool; runner: string; stop: () => void } | null = null
+
+/**
+ * HOW LONG A STOPPING RUNNER WAITS FOR ITS BEES. Measured 2026-10-03: the
+ * server leaves about 2 s after SIGTERM, so every release killed every bee in
+ * flight - thirty at a time, each up to an hour of work - and their issues
+ * waited for the reaper. `TRIOS_BEE_RUNNER_DRAIN_SECONDS` names the wait
+ * (0..3600; unset or unreadable is 0, the old behaviour). The platform must
+ * allow it too: on Railway, RAILWAY_DEPLOYMENT_DRAINING_SECONDS at least as long.
+ */
+export function drainSeconds(
+  env: Record<string, string | undefined> = process.env,
+): number {
+  const raw = env.TRIOS_BEE_RUNNER_DRAIN_SECONDS?.trim() ?? ''
+  if (!/^\d+$/.test(raw)) return 0
+  return Math.min(Number(raw), 3600)
+}
+
+export interface DrainDeps {
+  seconds?: number
+  now?: () => number
+  sleep?: (ms: number) => Promise<void>
+  salvage?: typeof salvageDispatch
+  store?: typeof storeBundle
+  orders?: Map<number, BeeOrder>
+}
+
+/**
+ * Take no more orders and let the bees in flight end on their own, up to the
+ * drain deadline. A bee still running at the deadline is not thrown away: its
+ * uncommitted work is salvaged into its branch and the branch is stored as a
+ * bundle, so the Queen reviews what it did and the next attempt starts from it.
+ */
+export async function drainBeeRunner(
+  pool: Pool,
+  runner: string,
+  deps: DrainDeps = {},
+): Promise<{ waited: number; saved: number[] }> {
+  const orders = deps.orders ?? inFlight
+  const seconds = deps.seconds ?? drainSeconds()
+  const now = deps.now ?? Date.now
+  const sleep =
+    deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
+  const started = now()
+  const deadline = started + seconds * 1000
+  if (orders.size > 0) {
+    logger.info('Runner draining: no new orders, waiting for its bees', {
+      runner,
+      bees: orders.size,
+      seconds,
+    })
+  }
+  while (orders.size > 0 && now() < deadline) {
+    await sleep(Math.min(2000, Math.max(0, deadline - now())))
+  }
+  const saved: number[] = []
+  for (const order of [...orders.values()]) {
+    try {
+      await (deps.salvage ?? salvageDispatch)(pool, order.issue, 'reaped', {
+        conversationId: order.conversationId,
+      })
+      await (deps.store ?? storeBundle)(pool, order.issue, runner)
+      saved.push(order.issue)
+    } catch (error) {
+      logger.warn('Runner could not save the branch of a bee it stopped', {
+        issue: order.issue,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+  if (saved.length > 0) {
+    logger.info('Runner saved the branches of bees it could not wait for', {
+      runner,
+      issues: saved,
+    })
+  }
+  return { waited: Math.round((now() - started) / 1000), saved }
+}
+
+/** For the server's shutdown: drain the runner this process started, if any. */
+export async function drainActiveRunner(): Promise<void> {
+  if (!active) return
+  active.stop()
+  if (drainSeconds() === 0) return
+  await drainBeeRunner(active.pool, active.runner)
 }
 
 /**
@@ -283,9 +379,14 @@ export function startBeeRunner(): void {
   }, every * 1000)
   take()
 
-  process.once('SIGTERM', () => {
+  const stop = (): void => {
     stopped = true
     clearInterval(timer)
+  }
+  active = { pool, runner, stop }
+
+  process.once('SIGTERM', () => {
+    stop()
     // The bees in flight are NOT abandoned here. Their rows stay claimed and
     // unfinished, which is exactly what a Queen that died mid-bee always left,
     // and the boot reaper clears it the same way.
