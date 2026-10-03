@@ -9,6 +9,10 @@ import {
   contributorGithub,
   type EnvironmentKey,
   listContributorKeys,
+  openCredential,
+  ownerModel,
+  providerModels,
+  setContributorModel,
   trustedContributor,
 } from '../services/queen-contributor-keys'
 import { CONTRIBUTOR_POLICY } from '../services/queen-contributor-policy'
@@ -104,14 +108,16 @@ export function createQueenContributorKeysRoute(
     c.set('body', Buffer.concat(chunks).toString('utf8'))
     return await next()
   })
-  app.get('/', async (c) => {
-    const pool = (deps.pool ?? poolForKeys)()
-    const subject = c.get('contributor')
-    const environment = (deps.environment ?? environmentContributorKeys)()
-    const owners = (
-      deps.owners ?? (() => parseOwners(process.env.TRIOS_KEY_OWNERS))
-    )()
-    const keys = await listContributorKeys(pool, subject, environment, owners)
+  const environmentOf = () => (deps.environment ?? environmentContributorKeys)()
+  const ownersOf = () =>
+    (deps.owners ?? (() => parseOwners(process.env.TRIOS_KEY_OWNERS)))()
+  const account = async (pool: Pool, subject: string) => {
+    const keys = await listContributorKeys(
+      pool,
+      subject,
+      environmentOf(),
+      ownersOf(),
+    )
     const work = await keyWork(pool)
     const byKey = new Map(work.map((item) => [item.keyIndex, item]))
     const own = work.filter((item) =>
@@ -131,7 +137,7 @@ export function createQueenContributorKeysRoute(
             hours: entry.hours,
           }
         : emptyContribution()
-    return c.json({
+    return {
       keys: keys.map((key) => {
         const entry = byKey.get(key.id)
         return {
@@ -139,15 +145,78 @@ export function createQueenContributorKeysRoute(
           contribution: contribution(rank(entry ? [entry] : [], {})[0]),
         }
       }),
+      // `model` is what this owner's keys of the provider run on now;
+      // `defaultModel` is what a provider starts on before any choice.
       providers: CONTRIBUTOR_PROVIDERS.map(({ id, label, model }) => ({
         id,
         label,
-        model,
+        model: ownerModel(keys, id),
+        defaultModel: model,
       })),
       contribution: contribution(totals),
       attribution: { subject, github: contributorGithub(subject) },
       scoring: { acceptedXp: ACCEPTED_XP, specXp: SPEC_XP, hourXp: HOUR_XP },
+    }
+  }
+  app.get('/', async (c) => {
+    const pool = (deps.pool ?? poolForKeys)()
+    return c.json(await account(pool, c.get('contributor')))
+  })
+  app.get('/models/:provider', async (c) => {
+    const provider = CONTRIBUTOR_PROVIDERS.find(
+      (p) => p.id === c.req.param('provider'),
+    )
+    if (!provider) throw new ContributorError('unsupported_provider')
+    const pool = (deps.pool ?? poolForKeys)()
+    const subject = c.get('contributor')
+    const environment = environmentOf()
+    const keys = (
+      await listContributorKeys(pool, subject, environment, ownersOf())
+    ).filter((key) => key.provider === provider.id)
+    if (!keys.length) throw new ContributorError('key_not_found', 404)
+    // The catalog is read with one of the owner's own keys, never an operator's.
+    let apiKey = environment.find((entry) =>
+      keys.some((key) => key.source === 'environment' && key.id === entry.id),
+    )?.apiKey
+    if (!apiKey) {
+      const { rows } = await pool.query<{
+        sealed: string
+        fingerprint: string
+      }>(
+        "SELECT sealed,fingerprint FROM queen_contributor_keys WHERE owner_subject=$1 AND provider=$2 AND source='managed' AND sealed IS NOT NULL LIMIT 1",
+        [subject, provider.id],
+      )
+      if (rows[0])
+        apiKey = openCredential(rows[0].sealed, subject, rows[0].fingerprint)
+    }
+    if (!apiKey) throw new ContributorError('key_not_found', 404)
+    return c.json({
+      provider: provider.id,
+      model: ownerModel(keys, provider.id),
+      models: await providerModels(
+        { provider: provider.id, apiKey },
+        deps.fetcher,
+      ),
     })
+  })
+  app.post('/model', async (c) => {
+    let body: unknown
+    try {
+      body = JSON.parse(c.get('body'))
+    } catch {
+      throw new ContributorError('invalid_json')
+    }
+    const pool = (deps.pool ?? poolForKeys)()
+    const subject = c.get('contributor')
+    await setContributorModel(
+      pool,
+      subject,
+      body,
+      environmentOf(),
+      ownersOf(),
+      deps.fetcher,
+    )
+    return c.json(await account(pool, subject))
   })
   app.post('/', async (c) => {
     let body: unknown

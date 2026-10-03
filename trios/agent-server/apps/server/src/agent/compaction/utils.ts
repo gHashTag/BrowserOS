@@ -61,6 +61,51 @@ function safeJsonStringify(value: unknown): string {
   }
 }
 
+/**
+ * HOW LONG A SUMMARY MAY TAKE. Measured 2026-10-03 on the swarm's runners: of
+ * 245 compactions in fifty minutes 194 came back empty, 158 of them 59-64 s
+ * after they began - the fixed 60 s abort, not an answer. z-ai/glm-5.3 under
+ * load and the free glm-4.5-flash cannot summarize 7-30k tokens in a minute,
+ * and an aborted stream ends quietly, so the bee fell back to the sliding
+ * window and lost the start of its own work. TRIOS_COMPACTION_SUMMARIZATION_TIMEOUT_MS
+ * names a longer wait; anything unreadable or outside 10 s..10 min keeps 60 s.
+ */
+export function summarizationTimeoutMs(
+  env: Record<string, string | undefined> = process.env,
+): number {
+  const raw = env.TRIOS_COMPACTION_SUMMARIZATION_TIMEOUT_MS?.trim()
+  const value = raw && /^\d+$/.test(raw) ? Number(raw) : Number.NaN
+  return value >= 10_000 && value <= 600_000
+    ? value
+    : AGENT_LIMITS.COMPACTION_SUMMARIZATION_TIMEOUT_MS
+}
+
+/**
+ * WHICH MODEL WRITES THE SUMMARY. A summary is a short, plain task that a fast
+ * model does in seconds, while the bee's own model may be a slow reasoner.
+ * TRIOS_COMPACTION_SUMMARIZER_MODELS maps a provider to a model on the bee's
+ * own key and endpoint, e.g.
+ * `openai-compatible=nvidia/nemotron-3-super-120b-a12b`. Unset, unmapped, or
+ * the bee's own model: null, and the bee summarizes with its own model.
+ */
+export function summarizerModelFor(
+  provider: string,
+  beeModel: string,
+  env: Record<string, string | undefined> = process.env,
+): string | null {
+  for (const pair of (env.TRIOS_COMPACTION_SUMMARIZER_MODELS ?? '').split(
+    ',',
+  )) {
+    const at = pair.indexOf('=')
+    if (at < 1) continue
+    const model = pair.slice(at + 1).trim()
+    if (pair.slice(0, at).trim() !== provider) continue
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(model)) return null
+    return model === beeModel ? null : model
+  }
+  return null
+}
+
 export function computeConfig(contextWindow: number): ComputedConfig {
   const reserveTokens =
     contextWindow <= AGENT_LIMITS.COMPACTION_SMALL_CONTEXT_WINDOW
@@ -117,7 +162,7 @@ export function computeConfig(contextWindow: number): ComputedConfig {
     minSummarizableTokens,
     maxSummarizationInput,
     summarizerMaxOutputTokens,
-    summarizationTimeoutMs: AGENT_LIMITS.COMPACTION_SUMMARIZATION_TIMEOUT_MS,
+    summarizationTimeoutMs: summarizationTimeoutMs(),
     fixedOverhead,
     safetyMultiplier: AGENT_LIMITS.COMPACTION_SAFETY_MULTIPLIER,
     imageTokenEstimate: AGENT_LIMITS.COMPACTION_IMAGE_TOKEN_ESTIMATE,

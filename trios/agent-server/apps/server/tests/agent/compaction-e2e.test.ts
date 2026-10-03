@@ -734,6 +734,88 @@ describe('compaction E2E — summarization & fallbacks', () => {
   })
 })
 
+describe('compaction E2E — a separate summarizer', () => {
+  it('a named summarizer writes the summary and the bee model is not asked', async () => {
+    const contextWindow = 10_000
+    const config = computeConfig(contextWindow)
+    const triggerAt = Math.floor(contextWindow * config.triggerRatio)
+    let beeCalls = 0
+    const bee = createMock(async () => {
+      beeCalls += 1
+      return summaryResponse(200)
+    })
+    const summarizer = createMock(async () => summaryResponse(200))
+    const prepareStep = createCompactionPrepareStep({
+      contextWindow,
+      summarizer,
+    })
+
+    const result = await prepareStep({
+      messages: buildTextHeavyMessages(8, 2000),
+      steps: [{ usage: { inputTokens: triggerAt + 1000 } }] as StepsStub,
+      model: bee,
+      experimental_context: null,
+    })
+
+    expect(
+      (result.experimental_context as CompactionState).compactionCount,
+    ).toBe(1)
+    expect(summarizer.doStreamCalls.length).toBeGreaterThan(0)
+    expect(beeCalls).toBe(0)
+  })
+
+  it('an empty summarizer answer leaves the summary to the bee model', async () => {
+    const contextWindow = 10_000
+    const config = computeConfig(contextWindow)
+    const triggerAt = Math.floor(contextWindow * config.triggerRatio)
+    const bee = createMock(async () => summaryResponse(200))
+    const summarizer = createMock(async () => textResponse('', 200))
+    const prepareStep = createCompactionPrepareStep({
+      contextWindow,
+      summarizer,
+    })
+
+    const result = await prepareStep({
+      messages: buildTextHeavyMessages(8, 2000),
+      steps: [{ usage: { inputTokens: triggerAt + 1000 } }] as StepsStub,
+      model: bee,
+      experimental_context: null,
+    })
+
+    const state = result.experimental_context as CompactionState
+    expect(state.compactionCount).toBe(1)
+    expect(state.existingSummary).toContain('## Goal')
+    expect(bee.doStreamCalls.length).toBeGreaterThan(0)
+  })
+
+  it('a failing summarizer and a failing bee model still fall back to the window', async () => {
+    const contextWindow = 10_000
+    const config = computeConfig(contextWindow)
+    const triggerAt = Math.floor(contextWindow * config.triggerRatio)
+    const failing = () =>
+      createMock(async () => {
+        throw new Error('busy')
+      })
+    const prepareStep = createCompactionPrepareStep({
+      contextWindow,
+      summarizer: failing(),
+    })
+    const messages = buildTextHeavyMessages(8, 2000)
+
+    const result = await prepareStep({
+      messages,
+      steps: [{ usage: { inputTokens: triggerAt + 1000 } }] as StepsStub,
+      model: failing(),
+      experimental_context: null,
+    })
+
+    expect(
+      (result.experimental_context as CompactionState).compactionCount,
+    ).toBe(0)
+    expect(result.messages.length).toBeLessThanOrEqual(messages.length)
+  })
+})
+
 // ---------------------------------------------------------------------------
 // E2E: Iterative compaction
 // ---------------------------------------------------------------------------

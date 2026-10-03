@@ -92,16 +92,27 @@ describe('route-guard audit over src/api/server.ts', () => {
     // where a route named `public` belongs. Every other number here is
     // unchanged, which is the part worth stating: no guarded route quietly lost
     // its guard to make room for it.
-    // RE-MEASURED 2026-10-01: 45 became 47 with the runner cabinet and the
-    // runner door, both allowlisted with their own-bearer reason; no other
-    // count moved, so no guarded route lost its guard to make room for them.
-    // RE-MEASURED 2026-10-02: 47 became 48 with /queen/contributor-keys
+    // RE-MEASURED 2026-10-01: 45 became 46, the same way. One mount added on
+    // purpose - `/queen/public-earnings`, an explicit
+    // `publicReadCorsMiddleware()` on the record of accepted spec work - and
+    // the audit puts it in `public-read`. Prefix and wrapper counts unchanged.
+    // RE-MEASURED 2026-10-02: 46 became 47 with /queen/contributor-keys
     // (#522), a server-to-server route behind its own capability token. It is
     // allowlisted with that reason; no other number moved.
-    expect(report.totalMounts).toBe(48)
+    // RE-MEASURED 2026-10-03: 47 became 48 with /queen/public-credits, an
+    // explicit publicReadCorsMiddleware() on which login's lane carried each
+    // accepted issue (issue numbers and logins the leaderboard already shows).
+    // RE-MEASURED 2026-10-03 again: 48 became 49 with /queen/report, the door
+    // outside watchers write into her report through. It WRITES, so it is a
+    // guarded wrapper like /queen/needs-you, and `guardedSubAppCount` went 15
+    // to 16. Public-read and prefix counts unchanged.
+    // RE-MEASURED with the runner cabinet merged in: 49 became 51.
+    // /queen/me/runners and /queen/runner are allowlisted with their
+    // own-bearer reasons; no other count moved.
+    expect(report.totalMounts).toBe(51)
     expect(report.prefixGuardCount).toBe(18)
-    expect(report.guardedSubAppCount).toBe(15)
-    expect(report.publicReadCount).toBe(8)
+    expect(report.guardedSubAppCount).toBe(16)
+    expect(report.publicReadCount).toBe(10)
   })
 
   it('reports zero unguarded mounts once the reasoned allowlist is applied', () => {
@@ -111,7 +122,7 @@ describe('route-guard audit over src/api/server.ts', () => {
     expect(report.entriesMissingReason).toEqual([])
   })
 
-  it('reports exactly the reasoned exceptions when the allowlist is dropped', () => {
+  it('reports exactly the eleven reasoned exceptions when the allowlist is dropped', () => {
     // The classifier reports mounts in file order; the assertion is on the
     // exact set, so both sides are sorted before comparing.
     expect([...unguardedMounts(source, [])].sort()).toEqual(
@@ -119,7 +130,7 @@ describe('route-guard audit over src/api/server.ts', () => {
     )
   })
 
-  it('splits the twenty-five /queen mounts into 8 public-read, 8 wrapper-guarded and 9 allowlisted', () => {
+  it('splits the twenty-eight /queen mounts into 10 public-read, 9 wrapper-guarded and 9 allowlisted', () => {
     const queenMounts = classifyMounts(source).filter(
       (mount) => mount.path === '/queen' || mount.path.startsWith('/queen/'),
     )
@@ -141,13 +152,28 @@ describe('route-guard audit over src/api/server.ts', () => {
     // issue title, no worker text and no credential: only a key's INDEX ever
     // reaches the database, so there is nothing here a stranger could read that
     // the board does not already show.
-    // RE-MEASURED 2026-10-01: twenty-two became twenty-four. The two new
-    // allowlisted mounts are not shells: /queen/me/runners and /queen/runner
-    // answer only a bearer they verify themselves (see the reasons).
-    // RE-MEASURED 2026-10-02: twenty-four became twenty-five. The ninth
+    // RE-MEASURED 2026-10-01: twenty-two became twenty-three. The ninth
+    // public-read is /queen/public-earnings - which accepted spec commits were
+    // recorded as earnings and which a later verdict took back. Like the
+    // leaderboard it carries no issue title, no worker text, no review note and
+    // no credential; the repository, issue, commit and declared .t27 paths are
+    // already public on GitHub.
+    // RE-MEASURED 2026-10-02: twenty-three became twenty-four. The seventh
     // allowlisted mount is /queen/contributor-keys (#522), which serves data
-    // only to a caller holding QUEEN_CONTRIBUTOR_PROXY_TOKEN.
-    expect(queenMounts.length).toBe(25)
+    // only to a caller holding QUEEN_CONTRIBUTOR_PROXY_TOKEN - its own guard,
+    // not the trusted-origin one, because its caller is a server.
+    // RE-MEASURED 2026-10-03: twenty-four became twenty-five. The tenth
+    // public-read is /queen/public-credits - for each accepted issue, the
+    // GitHub login that claimed the lane it ran on. No title, no worker text,
+    // no credential.
+    // RE-MEASURED 2026-10-03: twenty-five became twenty-six. The ninth wrapper
+    // is /queen/report, where outside watchers write into her report; guarded
+    // inside its own sub-app because it writes.
+    // RE-MEASURED with the runner cabinet merged in: twenty-six became
+    // twenty-eight. The two new allowlisted mounts are not shells:
+    // /queen/me/runners and /queen/runner answer only a bearer they verify
+    // themselves (see the reasons).
+    expect(queenMounts.length).toBe(28)
 
     const counts: Record<string, number> = {
       'public-read': 0,
@@ -161,9 +187,9 @@ describe('route-guard audit over src/api/server.ts', () => {
     // The four buckets must account for every mount with the exact expected
     // split; anything unaccounted for breaks one of these numbers.
     expect(counts).toEqual({
-      'public-read': 8,
+      'public-read': 10,
       'prefix-guard': 0,
-      wrapper: 8,
+      wrapper: 9,
       unguarded: 9,
     })
 

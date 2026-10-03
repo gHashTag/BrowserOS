@@ -1,4 +1,3 @@
-import { isBrowserlessByConfiguration } from './browserless'
 import { devToolsMiddleware } from '@ai-sdk/devtools'
 import type {
   LanguageModelV3,
@@ -31,8 +30,10 @@ import { buildFilesystemToolSet } from '../tools/filesystem/build-toolset'
 import type { ToolContext } from '../tools/framework'
 import { buildMemoryToolSet } from '../tools/memory/build-toolset'
 import type { ToolRegistry } from '../tools/tool-registry'
+import { isBrowserlessByConfiguration } from './browserless'
 import { CHAT_MODE_ALLOWED_TOOLS } from './chat-mode'
 import { createCompactionPrepareStep, type StepWithUsage } from './compaction'
+import { summarizerModelFor } from './compaction/utils'
 import {
   buildMcpServerSpecs,
   createMcpClients,
@@ -280,8 +281,29 @@ export class AiSdkAgent {
     })
 
     // Configure compaction for context window management
+    // A summary written by a fast model on the bee's own key, when the
+    // operator named one for this provider (see summarizerModelFor).
+    const summarizerName = summarizerModelFor(
+      config.resolvedConfig.provider,
+      config.resolvedConfig.model,
+    )
+    const summarizer = summarizerName
+      ? createLanguageModel({
+          ...config.resolvedConfig,
+          model: summarizerName,
+        })
+      : undefined
+    if (summarizerName) {
+      logger.info('Summaries by a separate model', {
+        conversationId: config.resolvedConfig.conversationId,
+        provider: config.resolvedConfig.provider,
+        beeModel: config.resolvedConfig.model,
+        summarizer: summarizerName,
+      })
+    }
     const compactionPrepareStep = createCompactionPrepareStep({
       contextWindow,
+      summarizer,
     })
     const normalizationOptions = getMessageNormalizationOptions(
       config.resolvedConfig,
