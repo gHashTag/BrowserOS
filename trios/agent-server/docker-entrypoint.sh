@@ -156,8 +156,15 @@ run_supervised() {
     done
   ) &
   set +e
+  # A trapped TERM ends `wait` at once (POSIX), while the server is still
+  # draining its bees; leaving here then would end the container and every bee
+  # with it. So wait again for as long as the server is alive.
   wait "$server"
   code=$?
+  while kill -0 "$server" 2>/dev/null; do
+    wait "$server"
+    code=$?
+  done
   # A server that was ended for not answering exits by signal, which `wait`
   # reports as 128+N. Anything but a clean 0 must read as a failure to the
   # platform, or ON_FAILURE would not restart it.
@@ -267,6 +274,29 @@ derive_worker_cap() {
   [ "$lanes" -le 4 ] || lanes=4
 
   from_keys=$((credentials * lanes))
+
+  # BEES RUN ELSEWHERE: the Queen only writes orders and runners in their own
+  # containers run them, so this container's memory says nothing about how
+  # wide the swarm is. The width is what the runners hold, which only the
+  # operator knows: the named ceiling, else the lanes counted here. (Only the
+  # first pool is counted above; the TypeScript side bounds by every lane.)
+  case "${TRIOS_QUEEN_BEES_RUN_ELSEWHERE:-}" in
+    on|true|1)
+      ceiling=${TRIOS_QUEEN_MAX_WORKERS_CEILING:-}
+      case "$ceiling" in
+        ''|*[!0-9]*) ceiling="" ;;
+      esac
+      if [ -n "$ceiling" ] && [ "$ceiling" -ge 1 ]; then
+        echo "[entrypoint] bees run elsewhere: width is the operator ceiling $ceiling" >&2
+        echo "$ceiling"
+      else
+        echo "[entrypoint] bees run elsewhere: width is the lane count $from_keys" >&2
+        echo "$from_keys"
+      fi
+      return
+      ;;
+  esac
+
   bee_mb=${TRIOS_QUEEN_BEE_MEMORY_MB:-1024}
   case "$bee_mb" in
     ''|*[!0-9]*) bee_mb=1024 ;;

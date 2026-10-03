@@ -69,13 +69,48 @@ verified contributor header. Responses use `Cache-Control: no-store`.
 - `POST /queen/contributor-keys/:id/probe`: check an owned key.
 - `POST /queen/contributor-keys/:id/enable`: check and enable on success.
 - `POST /queen/contributor-keys/:id/disable`: stop assigning new work.
+- `GET /queen/contributor-keys/models/:provider`: the provider's model ids
+  (its `/models` catalog read with one of the owner's keys, cached ten
+  minutes) and the model the owner's keys of that provider run now.
+- `POST /queen/contributor-keys/model`: `{provider, model}` sets one model for
+  every key the owner holds of that provider and returns the account.
+
+## One model for all of an owner's keys
+
+The model switch is all-or-nothing for that owner and that provider, and the
+evidence comes first. One of the owner's keys of the provider is handed the
+model with a single `ping` tool; only a tool call counts. 400/404/410/422 is
+`model_unavailable`, an answer without a tool call is `model_without_tools`,
+and a refused or busy key passes the check to the next key, at most
+`MODEL_CHECK_ATTEMPTS` times, before `model_check_failed` (504). Nothing is
+written unless the check passed.
+
+On success the owner's environment keys are bound (the same binding a probe
+creates) and every owned row of the provider gets `model` plus
+`model_chosen = true`. Allocation, reviews and probes then use that model for
+those keys. Other owners' keys and the operator's pool variables are
+untouched. A key the owner adds later joins the chosen model.
+
+`model_chosen` exists because a binding row has always recorded the model it
+was bound under. Without the flag, a key probed on 2026-10-01 under
+`nemotron-3-ultra` would keep that model after the operator moved the pool to
+another one. An environment row overrides its pool's model only while the
+flag is set. If the owner also holds a managed copy of a secret that the
+environment later received, the copy cannot be bound twice (fingerprints are
+unique); its choice applies to the environment key instead.
+
+The Queen's model ranking (`TRIOS_QUEEN_WORKER_MODEL_CANDIDATES`) reroutes
+only requests that already name one of its candidates. An owner model outside
+that list is sent as chosen.
 
 Successful mutations return `{key}` with the same metadata and actual
 contribution fields as GET. Secrets, ciphertext, provider response bodies,
 upstream error messages and operator configuration are never returned.
 Errors are `{error: <closed code>}`. Foreign/absent keys both return 404.
 
-A probe performs one bounded chat-completion request. An HTTP 200 with no
+A probe performs one bounded chat-completion request, waiting up to
+`PROBE_TIMEOUT_MS` (90 s since v2: on 2026-10-02 `z-ai/glm-5.3` on NVIDIA took
+20-46 s for a short answer and `glm-4.5-flash` on Z.ai up to 87 s). An HTTP 200 with no
 model output is not a successful check. Invalid credentials are disabled;
 temporary rate limits or network failures do not revoke prior consent.
 Each key allows one explicit check per minute, and the process caps concurrent

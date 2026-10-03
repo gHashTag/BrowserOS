@@ -8,15 +8,16 @@
  * Manages server lifecycle: initialization, startup, and shutdown.
  */
 
-import { markBrowserlessByConfiguration } from './agent/browserless'
 import fs from 'node:fs'
 import path from 'node:path'
 import { EXIT_CODES } from '@browseros/shared/constants/exit-codes'
+import { markBrowserlessByConfiguration } from './agent/browserless'
 import { createHttpServer } from './api/server'
 import {
   configureVmRuntime,
   peekOpenClawService,
 } from './api/services/openclaw/openclaw-service'
+import { drainActiveRunner, startBeeRunner } from './api/services/queen-runner'
 import { startQueenTick } from './api/services/queen-tick'
 import { CdpBackend } from './browser/backends/cdp'
 import { Browser } from './browser/browser'
@@ -86,6 +87,9 @@ export class Application {
     // After migrations: the tick's first act is a lease query against a table
     // the migration above creates.
     startQueenTick()
+    // A container that takes bees the Queen ordered. Off unless asked; a
+    // deployment may be a Queen, a runner, or both.
+    startBeeRunner()
 
     // The same asymmetry the comment below describes, one level up: this used
     // to exit when no CDP port was *configured*, while tolerating a configured
@@ -245,6 +249,9 @@ export class Application {
 
   async stop(reason?: string): Promise<void> {
     logger.info('Shutting down server...', { reason })
+    // Bees first, while the database and the HTTP server are still up: a
+    // runner given a drain window lets its bees end before anything closes.
+    if (reason === 'SIGTERM') await drainActiveRunner().catch(() => {})
     stopSkillSync()
     // Only what was actually started. `getOpenClawService` constructs on
     // demand, so calling it here built the runtime it was meant to stop.
