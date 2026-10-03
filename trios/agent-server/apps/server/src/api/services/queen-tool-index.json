@@ -1,0 +1,1817 @@
+{
+  "version": 1,
+  "source": {
+    "repo": "gHashTag/trinity",
+    "path": "apps/website/public/tools/spec-tools.json",
+    "commit": "a1b44cbc3025868316fb1fc4085163ed838ed464",
+    "contentSha256": "600bd2993ca5f45fd4d9c3208b5db98f4492b43f3fed46847cdf5f00c1ce0764"
+  },
+  "programs": {
+    "trios-tri": "trios tri - `trios/bin/tri` in a BrowserOS checkout (many commands reach the worker container and run only on the owner machine)",
+    "trinity-tri": "trinity tri - the Zig CLI of gHashTag/trinity (`src/tri/main.zig`)",
+    "t27-tri": "t27 tri - the Rust CLI of gHashTag/t27",
+    "mcp": "MCP servers - available only where a client has them configured"
+  },
+  "tools": [
+    {
+      "program": "trios-tri",
+      "name": "tri ab",
+      "purpose": "whether the difference stands out from noise, or there is jus..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri accept-rate",
+      "purpose": "whether a brief that CAN fail gets accepted less often"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri agree",
+      "purpose": "two implementations of one rule on real rows: where they dive..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri anom, tri anomalies",
+      "purpose": "step 0: what broke in production (providers, feed, routes)"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri author",
+      "purpose": "open an issue from a measured shortfall, limit 5 open"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri backlog",
+      "purpose": "what the backlog CONTAINS, read issue by issue, not inferred..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri blog",
+      "purpose": "the t27.ai blog (trinity apps/website): receipt states, cavea..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri board",
+      "purpose": "trios dashboard: latest iteration + STATUS.md measurements"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri boundary",
+      "purpose": "what a bee was allowed to touch and what it touched; CREATED..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri brief-gate",
+      "purpose": "check a task draft with the Queen's own parser"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri cast",
+      "purpose": "terminal recordings: real commands -> .cast -> GIF, X/OG card..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri channel",
+      "purpose": "whether the single channel into the container is alive"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri chat",
+      "purpose": "question to the agent (the key is fetched from Railway)"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri ci-diff",
+      "purpose": "which CI failures are NEW and which were red before you"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri clocks",
+      "purpose": "which fields decisions hang on, and whether someone rewrites..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri close-done",
+      "purpose": "close issues with accepted work (leaves epics alone)"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri container",
+      "purpose": "who is PID 1 and how close to process exhaustion"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri coverage",
+      "purpose": "what share of accepted verdicts the audit can check (cache: 1..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri cycle",
+      "purpose": "one pass: measure, anomalies, dashboard, log entry (exit 2 =..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri cycle-anom, tri cycle-anomalies",
+      "purpose": "every anomaly in full: claim, truth, repair (the dashboard fi..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri cycle-dash",
+      "purpose": "show the latest dashboard, with its filesystem age as the fir..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri cycle-doctor",
+      "purpose": "whether everything the loop needs is in place, and whether ev..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri cycle-html",
+      "purpose": "the same measurement, but wide: every number shows the comman..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri cycle-log",
+      "purpose": "pass log: how many anomalies, which ones lingered, what was r..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri cycle-note",
+      "purpose": "prose is written by hand; the dashboard draws a blank if nobo..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri cycle-repair",
+      "purpose": "the same plus the listed safe repairs (a dead owner's lock, C..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri cycle-sense",
+      "purpose": "measure only, no drawing"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri dash",
+      "purpose": "rebuild the production dashboard STATUS.md"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri dash2",
+      "purpose": "loop dashboard from a FRESH measurement: liveness from two si..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri deploy-wait, tri live-wait",
+      "purpose": "wait until the edit reaches the live render"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri devkit",
+      "purpose": "the FPGA flow layer by layer: per-layer time, t27 replacement..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri drift",
+      "purpose": "whether this is the file the timers run, and whether it is in..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri driver",
+      "purpose": "whether anyone is driving iterations at all."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri exposure",
+      "purpose": "what the live service serves to an origin it does not know"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri facts",
+      "purpose": "measured dashboard numbers; what cannot be measured shows as '-'"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri failures",
+      "purpose": "which chain steps fail, how often, and with what evidence"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri feed",
+      "purpose": "feeding only: push, close, open, no audits"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fence",
+      "purpose": "which paths stuck jobs hold (boundaries to avoid)"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fields",
+      "purpose": "whether code reads fields the query does not select"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri flaky",
+      "purpose": "which red tests fail ALWAYS and which only sometimes"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri forked-files",
+      "purpose": "a file that lives in two places must not start saying differe..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fp-check",
+      "purpose": "whether the checkers accuse known-good work"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga",
+      "purpose": "where the UART is (behind a hub or direct), openocd, latest r..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-audit",
+      "purpose": "anomalies: key in logs, log > 1 MB, unfinished log, a \"verifi..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-batch",
+      "purpose": "the batched wire protocol design gate: conformance/tern_tc_ba..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-batch-cosim",
+      "purpose": "conformance/tern_tc_batch_rtl_cosim.py: the rehearsal's recor..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-batch-rehearsal",
+      "purpose": "the batched protocol's job stream: conformance/tern_tc_batch_..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-budget",
+      "purpose": "wire budget of a finished generation run: request and answer..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-build",
+      "purpose": "build a node bitstream locally (openXC7, prjxray-db ab1fc60);..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-claim, tri fpga-release",
+      "purpose": "loop iteration lock (exit 75 = held by another)"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-cost",
+      "purpose": "LUT/FF/CARRY4/DSP/BRAM (B36+B18) under four synth_xilinx flag..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-decode",
+      "purpose": "the board ids of a generation log as text; refuses unless eve..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-derive",
+      "purpose": "rebuild the kept corpus from its chain (~/t27 at the pinned c..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-fire",
+      "purpose": "open the NEXT fire: lock row + fire-log stub built in memory,..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-firelog",
+      "purpose": "move fire-log entries whose fires lost their LOCKS rows to .c..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-flash",
+      "purpose": "load a bitstream into SRAM (sudo openocd, the owner types the..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-genscore",
+      "purpose": "score t27_bench gen candidates for a behavioral criterion: li..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-hole",
+      "purpose": "UART hole size from nonce arithmetic (expected = 0x10000 + ve..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-hostnet",
+      "purpose": "before a LAN run: the route to IP is direct on a local interf..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-ioclients",
+      "purpose": "who holds IOKit user clients on the CP2102N (pid, count, aliv..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-jtag",
+      "purpose": "JTAG chain behind a Xilinx Platform Cable USB II (DLC10, 03fd..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-keep",
+      "purpose": "keep a volatile /tmp tree durably: every file -> artifacts/mo..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-keycheck",
+      "purpose": "how many times the key occurs in each file (prints counts, ne..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-lesson, tri fpga-next, tri fpga-task, tri game-finding, tri game-gate, tri game-task, tri tg-msg, tri tg-search, tri tg-who, tri x7-bench, tri x7-lesson, tri x7-next, tri x7-refs, tri x7-status, tri x7-task",
+      "purpose": "Named by `tri help` without a description; its case arm carri..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-loopcheck",
+      "purpose": "the standing per-fire sweep in one call: git status (informat..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-loopstate",
+      "purpose": "lint .claude/loop-state.md (read-only): sections, UART lock p..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-pins",
+      "purpose": "the blast radius of editing FILE, before the edit: every spec..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-prcheck",
+      "purpose": "before a PR: bare #N refs, the Claude Code trailer, estimated..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-push",
+      "purpose": "fetch, rebase, key check of the outgoing patch, push with the..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-quiet",
+      "purpose": "wait until the 1-min load stays <= X per cpu for HOLD s; exit..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-rehearse, tri fpga-run",
+      "purpose": "COMMAND..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-repin",
+      "purpose": "propagate a sha256 change of FILE through the pin graph to a..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-restore",
+      "purpose": "the post-power-event chain in one command: probe the JTAG cha..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-runlog",
+      "purpose": "one command for a run's progress: grammar-parsed status of a..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-rxcap",
+      "purpose": "E3 RX capture at the RX flip-flops in the same SDF (conforman..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-rxer",
+      "purpose": "E3 RX_ER cases in simulation (conformance/eth_rxer_bench.py,..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-seeds",
+      "purpose": "Fmax as a distribution over nextpnr-xilinx seeds: CSV row per..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-selftest",
+      "purpose": "off-board --self-test of every conformance/*.py a .t27 spec n..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-specs",
+      "purpose": "every conformance/*_from_spec.mjs --check: .t27 specs compile..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-stamps",
+      "purpose": "the audit's stamp check alone: HH:MM stamps that postdate the..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-status",
+      "purpose": "USB (UART behind a hub?), openocd, lock, what is loaded (from..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-steps",
+      "purpose": "where a pre-registered board sequence stands (default plan NO..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-tmpcheck",
+      "purpose": "every file a .t27 spec pins by sha256 under /tmp (emptied at..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-tools",
+      "purpose": "every board-tool's own --self-test in one call (runlog, budge..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-tristate",
+      "purpose": "pads whose output enable comes out inverted (OLOGIC pad pip o..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-txhold",
+      "purpose": "E3 TX hold and setup at the TX output buffers in nextpnr-xili..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-usb",
+      "purpose": "CP2102N placement: DIRECT/HUB by the locationID rule, cross-c..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-watch-clients",
+      "purpose": "sample IOKit user clients on the CP2102N into board_runs/NAME..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri fpga-wire",
+      "purpose": "what the CP2102N actually sends (24 MHz / N) and which reques..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game",
+      "purpose": "game loop for t27.ai/#/queen: state (iteration, tasks, findings)"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-activity",
+      "purpose": "sample of /queen/public-activity over N hours: kinds, review..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-anomalies",
+      "purpose": "live checks: endpoints, apex vs main, publisher, chunk; --hea..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-bar",
+      "purpose": "column widths of the resource bar at four desktop sizes in bo..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-bees",
+      "purpose": "live bees from public-board and the age of each one's last wo..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-blog",
+      "purpose": "does every post in t27.ai's served Blog chunk have its /blog/..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-branch",
+      "purpose": "first action of a cycle: fetch origin and branch NAME from or..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-cadence",
+      "purpose": "the apex publisher's real cadence vs its */15 cron: fired-slo..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-claim, tri game-release",
+      "purpose": "loop lock (exit 75 = another run holds it)"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-clock",
+      "purpose": "whether the status endpoint exposes its clock to the browser..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-close",
+      "purpose": "close a cycle: task done, anomalies --heal, closed_at, iterat..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-contract",
+      "purpose": "create qa/queen-NAME-contract.mjs from the pick harness, regi..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-copy",
+      "purpose": "English and Russian value of a COPY key from Queen.tsx and ho..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-dash",
+      "purpose": "DASHBOARD.md + dashboard.html (Claude Code design); last step..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-events",
+      "purpose": "recent events of one kind on the activity wire with their sta..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-feed",
+      "purpose": "what the INTEL FEED header should say about a fresh wire resp..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-foundation",
+      "purpose": "GitHub snapshot for the foundation (closed issues, epics with..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-gates",
+      "purpose": "the Queen gate chain (full = + 5 headless-Chrome contracts, ~..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-ingest",
+      "purpose": "merge the workflow plan from journal.jsonl into the backlog (..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-iterate",
+      "purpose": "new cycle: counter + last_run"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-lesson",
+      "purpose": "record a lesson in queen-game-loop/LESSONS.md"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-lessons",
+      "purpose": "index of queen-game-loop lessons (no words), or the lessons c..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-local",
+      "purpose": "\"run it locally\": vite preview of the built site on 127.0.0.1..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-measure",
+      "purpose": "run ONE headless contract qa/queen-NAME-contract.mjs on the c..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-merged",
+      "purpose": "audit the PAST: every merged queen-* PR on t27 against her ve..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-models",
+      "purpose": "field models (public/queen/models) with sizes and licence; pu..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-next",
+      "purpose": "top open backlog task"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-objects",
+      "purpose": "field object inventory: what is drawn, on which layer, and wh..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-plan",
+      "purpose": "module building plan from modules.json, by the same pure func..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-prove",
+      "purpose": "wait until t27.ai serves the Queen chunk with the marker / th..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-report",
+      "purpose": "latest cycle report (first N lines)"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-round",
+      "purpose": "whether the Queen ticks: lastRoundAt and roundSeconds against..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-selftest",
+      "purpose": "run every queen-game-loop script's --self-test (found by grep..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-served",
+      "purpose": "do t27.ai's llms.txt/agents.t27 match the trinity commit the..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-ship",
+      "purpose": "PATHSPEC..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-site",
+      "purpose": "can trinity main build t27.ai?"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-spike",
+      "purpose": "engine measurement on the current checkout: canvas2D vs Babyl..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-status",
+      "purpose": "what the status pill and the VERDICTS tile read: swarmState,..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-tick",
+      "purpose": "one loop tick: run the anomaly scan and print only what chang..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-vault",
+      "purpose": "content-addressed snapshots of the loop's skill dir + tri its..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-verdicts",
+      "purpose": "Queen's verdicts on the public board + every ARMED bee PR on..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-verify",
+      "purpose": "self-check of the game loop state: duplicate ids, unknown sta..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-wire",
+      "purpose": "what the public endpoints actually carry (fields on N cards)"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri game-writers",
+      "purpose": "who wrote t27.ai (ghashtag.github.io) in the last DAYS (7): e..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri handover",
+      "purpose": "owner summary from the newest wave: start + options + age"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri handover-116-archived",
+      "purpose": "frozen wave 116 briefing (archive, not the current state)"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri heal",
+      "purpose": "all swarm repairs in one chain, in the right order"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri help",
+      "purpose": "tri help: this help"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri holds",
+      "purpose": "what the swarm holds now and whether two dispatches claim one..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri idle",
+      "purpose": "how long the swarm stood idle and what blocked the rounds (go..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri iter, tri iter-anchors, tri iter-dash, tri iter-log",
+      "purpose": "loop state, dashboard, log"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri iter-render",
+      "purpose": "measure the swarm, update the anchors, redraw the dashboard"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri iter-unlock",
+      "purpose": "release the loop lock (only if `tri iter` says stale)"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri jobs",
+      "purpose": "campaign status in one line (guards/urgent/iterations)"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri jobs-anomalies, tri jobs-journal",
+      "purpose": "what is wrong / iteration history"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri jobs-board",
+      "purpose": "funnel by stage"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri jobs-check",
+      "purpose": "four guards: leaks, truth, duplicate signature, voice"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri jobs-dash",
+      "purpose": "rebuild the dashboard (and open it)"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri jobs-drafts",
+      "purpose": "draft triage: what went out, what waits"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri jobs-guards",
+      "purpose": "prove the guards before sending (exit 1 = do not send)"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri jobs-leads",
+      "purpose": "clients on topic: who is worth writing to"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri jobs-lesson",
+      "purpose": "record a lesson in correspondence-crm/LESSONS.md"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri jobs-next",
+      "purpose": "what to do next, by descending payoff"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri jobs-owed",
+      "purpose": "who is waiting for a reply, oldest debt first"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri jobs-run",
+      "purpose": "one loop iteration: preflight -> sync -> anomalies -> dashboard"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri jobs-show",
+      "purpose": "one whole conversation, both sides"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri judge-calibration",
+      "purpose": "measure the JUDGE on questions whose answer is arithmetic; ex..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri judge-packet",
+      "purpose": "build a packet for a judge to read"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri land",
+      "purpose": "land accepted work left on branches outside the base"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri latency",
+      "purpose": "where the time goes: review vs bee work, and how many tasks p..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri learn",
+      "purpose": "how many memory index pointers lead to a file that does not e..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri lease",
+      "purpose": "claim lease with an idle timer, retry cap 2"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri lesson",
+      "purpose": "quickly record a lesson in loop-opus/LESSONS.md"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri lesson-orphans",
+      "purpose": "which lessons from state.json reached NOT A SINGLE skill of t..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri live-verify",
+      "purpose": "live fingerprint of the chain in one run"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri locks",
+      "purpose": "who holds the trios cassette/e2e locks now"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri loop",
+      "purpose": "tail of the loop report"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri loop-coverage",
+      "purpose": "which loop tools have never run their live branch"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri loop-lesson",
+      "purpose": "record a LOOP lesson in state.json and ledger.jsonl in one co..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri loop-selftest",
+      "purpose": "calibration of the loop's own instruments (no network; the ru..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri mix",
+      "purpose": "what KIND of work the swarm is doing: load and acceptance wil..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri morning",
+      "purpose": "morning summary loop/MORNING.md"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri mutants-logic-refresh",
+      "purpose": "rebuild .trinity/build/QueenCore with the default toolchain a..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri needs-you",
+      "purpose": "what waits for a human and how long it has waited"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri next",
+      "purpose": "tail of the latest trios wave."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri proof",
+      "purpose": "whether what a document refers to exists (exit 2 if not)"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri prov, tri providers",
+      "purpose": "live provider status (what the agent can work with)"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri proven",
+      "purpose": "whether fresh work proves anything; --by-source: split by kin..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri push-work",
+      "purpose": "push bee branches that are missing on the remote"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri queue",
+      "purpose": "queue depth (not the open count): what nobody has started yet"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri reach",
+      "purpose": "which step of the heal chain GETS TO run and which is always..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri reap",
+      "purpose": "worktree collection at 80/60 thresholds, no --force"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri reap-finished",
+      "purpose": "remove trees whose work is already published (by age, not by..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri reap-local",
+      "purpose": "remove merged and clean worktrees from the laptop disk"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri regress",
+      "purpose": "loop regression check (15 checks)"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri regression",
+      "purpose": "board + locks + live-verify in one command"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri rejudge",
+      "purpose": "a verdict the current code would no longer repeat (agreement..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri rescue",
+      "purpose": "rescue work a bee did not commit before it gets wiped"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri salvage",
+      "purpose": "what survived from a stale branch: names missing from the bas..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri selftest",
+      "purpose": "dependency check"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri share-modules",
+      "purpose": "one dependency install, linked into every tree"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri silent-loop",
+      "purpose": "attempts that do not spend the retry limit: the loop has no c..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri skills",
+      "purpose": "which skills are on disk and which have no SKILL.md of their own"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri spec-diag",
+      "purpose": "error class of every spec that does not build"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri stale-escalations",
+      "purpose": "release an escalation whose cause no longer reproduces"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri status",
+      "purpose": "stack health + feed + loop state"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri swarm",
+      "purpose": "live Queen state in one line"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri t27-gen",
+      "purpose": "regenerate ring T27-00 from .t27 (the artifact is not edited..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri t27-parity",
+      "purpose": "whether the generated ring and its handwritten production twi..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri t27-tri",
+      "purpose": "run t27's own Rust tri (newest built target/*/tri), e.g."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tb",
+      "purpose": "TurboBaby: production summary + separation from woody-weed-bot"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tb-deploy",
+      "purpose": "safe deploy of turbobaby-bot (link->up->wait->verify)"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tb-lint",
+      "purpose": "both CI clippy gates locally (+ --test for cargo test)"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tb-verify",
+      "purpose": "separation invariants: vars/migrations/foreign health"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-abpair",
+      "purpose": "igla-coder-gpu: paired A/B of two arena final dirs (same item..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-arena",
+      "purpose": "igla-coder-gpu: the selection arena -- which checkpoint goes..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-ask",
+      "purpose": "manual CPU front door: print a tc completion for a prompt"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-audit",
+      "purpose": "igla-coder-gpu: the splice audit (2026-10-01 judge hole)."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-board",
+      "purpose": "igla-coder-gpu: the live board (board/, Railway service \"boar..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-card",
+      "purpose": "render a tern_tc release from its card spec, then run its ver..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-catalog",
+      "purpose": "igla-coder-gpu: new judgeable t27 items from the trinity webs..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-cathead",
+      "purpose": "igla-coder-gpu (loop 30): catalog headline per arm on ALL 57..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-ceiling",
+      "purpose": "igla-coder-gpu: the \"sample more and select\" ceiling from com..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-comptime",
+      "purpose": "igla-coder-gpu: does the judge's \"compile\" undercount?"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-contract",
+      "purpose": "igla-coder-gpu: does the mask the host SENDS constrain what t..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-coreleak",
+      "purpose": "igla-coder-gpu: is the mask core fitted on the EVAL set?"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-cpuft",
+      "purpose": "igla-coder-gpu: CPU fine-tune of the 9M tc model on Railway (..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-cpuft-cmp",
+      "purpose": "igla-coder-gpu: a live replication vs its reference run, step..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-cpuft-collect",
+      "purpose": "igla-coder-gpu: one poll of a tc-cpuft job; when done: fetch..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-curve",
+      "purpose": "igla-coder-gpu: compare two selfcheck runs' budget curves fro..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-diffjudge",
+      "purpose": "igla-coder-gpu: differential judge IN t27 -- inserts __gold_<..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-disc",
+      "purpose": "igla-coder-gpu: paired A/B readout -- EXACT per-item discorda..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-draft",
+      "purpose": "igla-coder-gpu: tern_tc as a DRAFT MODEL FOR A VERIFIER -- on..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-gpuft",
+      "purpose": "igla-coder-gpu: the B fine-tune on a RunPod 4090 (remote/gpu_..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-honest",
+      "purpose": "igla-coder-gpu: the honest strict headline from the diff judg..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-loop",
+      "purpose": "igla-coder-gpu: the improvement loop's first command every it..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-maskcheck",
+      "purpose": "igla-coder-gpu: the mask gate."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-mutant3",
+      "purpose": "igla-coder-gpu: value-pinning audit -- judge `return 2;`/`ret..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-mutscore",
+      "purpose": "igla-coder-gpu: mutation score per bench item -- operator mut..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-pair",
+      "purpose": "igla-coder-gpu: PAIRED A/B of two selfcheck arms at one seed..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-podwait",
+      "purpose": "igla-coder-gpu: block until the first listed RunPod runq job..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-prefill",
+      "purpose": "igla-coder-gpu: prefill A/B bench -- chunked (default C) vs s..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-reach",
+      "purpose": "param reach at the return decision, teacher-forced on gold: P..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-relabel",
+      "purpose": "judge relabeling: probe tests whose expected values t27c obse..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-remote",
+      "purpose": "igla-coder-gpu: heavy judge jobs run on RAILWAY, never on the..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-restore",
+      "purpose": "igla-coder-gpu: a reboot wipes /tmp -- the pinned bench tree..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-retrieve",
+      "purpose": "igla-coder-gpu: retrieval ceiling -- copy a same-name train f..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-rounds",
+      "purpose": "igla-coder-gpu: poll a selfcheck run WITHOUT touching it -- r..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-seen",
+      "purpose": "seen-vs-unseen gold-body NLL per item group (did the fine-tun..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-soundness",
+      "purpose": "igla-coder-gpu: mask SOUNDNESS over a remote taxonomy dump --..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-speed",
+      "purpose": "igla-coder-gpu: rebuild c_infer/tc_fast, run the near-parity..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-sync",
+      "purpose": "igla-coder-gpu: is a --diff arena arm an exact pair of its pl..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-t27bench",
+      "purpose": "igla-coder-gpu: the t27 fill-in-the-middle bench on the C eng..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-t27mask",
+      "purpose": "igla-coder-gpu: scope-aware identifier MASKED generation on t..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-t27selfcheck",
+      "purpose": "igla-coder-gpu: the model verifies ITSELF through t27c -- rou..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-taxonomy",
+      "purpose": "igla-coder-gpu: one-command failure taxonomy over mask artifa..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tc-val",
+      "purpose": "igla-coder-gpu: masked val bits/byte of tc ckpts on a data di..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri tg-dialogs, tri tg-unread",
+      "purpose": "telegram: unread / chats (read only)"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri trend",
+      "purpose": "rate of the counters, not their level"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri trinity-report",
+      "purpose": "run trinity's OWN work-report validator on a PR body before p..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri two-views",
+      "purpose": "whether /health and the ssh gateway agree at the same moment"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri unpark",
+      "purpose": "lift a retry cap spent on silence rather than work"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri unverdicted",
+      "purpose": "dispatches with no VERDICT block: review will never judge them"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri unwired",
+      "purpose": "a gate that is written but that nobody runs"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri verdict-audit",
+      "purpose": "check a bee's claimed verdict against its diff"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri verdicts",
+      "purpose": "share accepted, returned and unjudged: health, not load"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri verify",
+      "purpose": "whether someone else's merge overwrote the last edit"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri vibee-feed",
+      "purpose": "last N posts of the vibee feed with stars/views (RENAMED 2026..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri wave",
+      "purpose": "skeleton of the next wave wave-loop-NNN.md"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri wave-plan",
+      "purpose": "the whole plan of the CURRENT wave (newest wave-loop-*.md) wi..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri which-board",
+      "purpose": "which GitHub board each loop instrument reads and whether it..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri why",
+      "purpose": "why the swarm is stalled: cause, evidence and what to do abou..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri x7-audit",
+      "purpose": "spec tests, generated .rs vs .t27 (content), bitwalk CRC 12/1..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri x7-board",
+      "purpose": "bitwalk on a real 200T build: byte-compare + timing vs openXC..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri x7-claim, tri x7-release",
+      "purpose": "fire lock (exit 75 = held by another fire)"
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri x7-fasm",
+      "purpose": "bitwalk --fasm byte-identical to fasm2frames on ~/.cache/x7/f..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri x7-mutate",
+      "purpose": "mutation catalogue: every defect must fail the spec tests AND..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri x7-part",
+      "purpose": "far.t27 part table vs prjxray-db part.json (exit 1 = drift; -..."
+    },
+    {
+      "program": "trios-tri",
+      "name": "tri x7-writer",
+      "purpose": "bitwalk --write byte-identical to xc7frames2bit on ~/.cache/x..."
+    },
+    {
+      "program": "trinity-tri",
+      "name": "tri bench",
+      "purpose": "Run performance benchmarks"
+    },
+    {
+      "program": "trinity-tri",
+      "name": "tri bio",
+      "purpose": "Biology v14.0 — DNA/RNA/Protein sacred analysis"
+    },
+    {
+      "program": "trinity-tri",
+      "name": "tri blindspots",
+      "purpose": "Blind Spots v1.0 — 90+ new formulas across 8 domains"
+    },
+    {
+      "program": "trinity-tri",
+      "name": "tri conscious",
+      "purpose": "Consciousness awakening simulator (IIT+GWT+OrchOR+Qutrit+Acti..."
+    },
+    {
+      "program": "trinity-tri",
+      "name": "tri constants",
+      "purpose": "Display sacred constants (φ, π, e, μ, χ, σ, ε)"
+    },
+    {
+      "program": "trinity-tri",
+      "name": "tri cosmos",
+      "purpose": "Cosmology v15.0 — Universe through φ"
+    },
+    {
+      "program": "trinity-tri",
+      "name": "tri dashboard",
+      "purpose": "Sacred dashboard"
+    },
+    {
+      "program": "trinity-tri",
+      "name": "tri fib",
+      "purpose": "Fibonacci numbers with BigInt"
+    },
+    {
+      "program": "trinity-tri",
+      "name": "tri fpga",
+      "purpose": "FPGA toolchain via FORGE v2.0 (native Zig)"
+    },
+    {
+      "program": "trinity-tri",
+      "name": "tri gematria",
+      "purpose": "Gematria word value calculator"
+    },
+    {
+      "program": "trinity-tri",
+      "name": "tri govern",
+      "purpose": "Sacred governance"
+    },
+    {
+      "program": "trinity-tri",
+      "name": "tri hardware",
+      "purpose": "Hardware deployment — deploy, status, stop nodes"
+    },
+    {
+      "program": "trinity-tri",
+      "name": "tri identity",
+      "purpose": "Sacred identity"
+    },
+    {
+      "program": "trinity-tri",
+      "name": "tri lucas",
+      "purpose": "Lucas numbers (L(2)=3=TRINITY)"
+    },
+    {
+      "program": "trinity-tri",
+      "name": "tri mesh",
+      "purpose": "Global mesh management — status, topology, discovery"
+    },
+    {
+      "program": "trinity-tri",
+      "name": "tri needle",
+      "purpose": "Structural editor core"
+    },
+    {
+      "program": "trinity-tri",
+      "name": "tri needle-check",
+      "purpose": "Needle check"
+    },
+    {
+      "program": "trinity-tri",
+      "name": "tri needle-search",
+      "purpose": "Needle search"
+    },
+    {
+      "program": "trinity-tri",
+      "name": "tri omega",
+      "purpose": "Omega phase"
+    },
+    {
+      "program": "trinity-tri",
+      "name": "tri particles",
+      "purpose": "Particle physics sacred formulas (49 constants from φ)"
+    },
+    {
+      "program": "trinity-tri",
+      "name": "tri phi",
+      "purpose": "Compute φⁿ (golden ratio power)"
+    },
+    {
+      "program": "trinity-tri",
+      "name": "tri quantum",
+      "purpose": "Quantum Trinity"
+    },
+    {
+      "program": "trinity-tri",
+      "name": "tri reputation",
+      "purpose": "Reputation system — show node reputation, leaderboard"
+    },
+    {
+      "program": "trinity-tri",
+      "name": "tri sacred-const",
+      "purpose": "Sacred constants FPGA synthesis (0 DSP48)"
+    },
+    {
+      "program": "trinity-tri",
+      "name": "tri spiral",
+      "purpose": "φ-spiral coordinates"
+    },
+    {
+      "program": "trinity-tri",
+      "name": "tri swarm",
+      "purpose": "Sacred swarm intelligence"
+    },
+    {
+      "program": "trinity-tri",
+      "name": "tri test",
+      "purpose": "Generate comprehensive test suites"
+    },
+    {
+      "program": "trinity-tri",
+      "name": "tri vsa",
+      "purpose": "Vector Symbolic Architecture operations"
+    },
+    {
+      "program": "trinity-tri",
+      "name": "tri wallet",
+      "purpose": "Wallet management — connect, balance, claim rewards"
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri abandoned",
+      "purpose": "Recovery sites whose own comment names the construct they dis..."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri cell",
+      "purpose": "Records a checkpoint step in the active cell."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri census",
+      "purpose": "Specs the compiler cannot read, ranked by the construct that..."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri ci",
+      "purpose": "Is the hardware this plan assumes actually attached?"
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri competitors",
+      "purpose": "The competitor table against its own contract: how many of it..."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri discard",
+      "purpose": "What the parser reads and throws away, ranked against its pin..."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri doctor",
+      "purpose": "Start, stop or show the doctor state kept in .trinity/state/d..."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri elab",
+      "purpose": "Classify a compiler's error output before quoting a number fr..."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri emit",
+      "purpose": "Does the same binary produce the same generated code twice?"
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri experience",
+      "purpose": "Saves an experience episode to the akashic log."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri fleet",
+      "purpose": "`tri fleet` -- is the hardware this plan assumes actually att..."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri fmt",
+      "purpose": "Type names with more than one definition in the spec tree."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri fpga",
+      "purpose": "FPGA programming via the in-tree DLC10 driver (pure Rust)."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri gates",
+      "purpose": "Find workflows that have never once succeeded."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri gen",
+      "purpose": "Generates backends from a .t27 spec file using t27c."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri harness",
+      "purpose": "Source files no crate root reaches, and so nothing compiles."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri health",
+      "purpose": "Returns queen and swarm health status from .trinity state."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri hooks",
+      "purpose": "Pure-Rust ports of repository commit / push gates."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri issues",
+      "purpose": "Open issues whose headline calls a workflow red, against what..."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri jumps",
+      "purpose": "What happened to every `break` and `continue` the Verilog emi..."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri kinds",
+      "purpose": "Match arms whose own comment names a case the pattern omits."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri lean",
+      "purpose": "Completeness theorems whose Lean model is empty."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri ledgers",
+      "purpose": "Does each ledger's gate notice when one of its entries stops..."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri loop",
+      "purpose": "What is failing on the default branch right now, and since when."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri merging",
+      "purpose": "Is a merge in flight here, and does this branch carry the base?"
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri misread",
+      "purpose": "The specs the compiler reads WRONGLY."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri mods",
+      "purpose": "`tri mods orphan` -- `.rs` files no crate root reaches."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri mutate",
+      "purpose": "Find the constants in a checker that nothing actually checks."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri now",
+      "purpose": "Write a docs/now/ entry without hand-writing the frame."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri one-away",
+      "purpose": "Failing specs one defect from compiling, and what that defect is"
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri orphaned",
+      "purpose": "Checks whose input is not in the tree."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri pr",
+      "purpose": "Is this pull request actually safe to merge?"
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri prose",
+      "purpose": "Specs a literate author left prose in, and how far that prose..."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri quantifiers",
+      "purpose": "Every quantified clause, its binders, and the size of its dom..."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri red",
+      "purpose": "`tri red` -- what is failing on main right now, and since when."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri reseal",
+      "purpose": "Recompute the FROZEN_HASH seal from the file it seals."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri rtl",
+      "purpose": "The structural check t27.ai offers, run locally: five verdict..."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri seals",
+      "purpose": "What `.trinity/seals` says about a spec, when it says it twice."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri serve",
+      "purpose": "Serve the trinity depin HTTP API over axum: POST /prove, GET..."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri skill",
+      "purpose": "Begins a new PHI LOOP skill session bound to an issue."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri status",
+      "purpose": "Returns PHI LOOP status including active skill, cell, issue b..."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri sweep",
+      "purpose": "Synthesise across a parameter and check the area actually moves."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri synth",
+      "purpose": "Synthesise a top module and report area, with the instrument..."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri test",
+      "purpose": "Runs tests for a .t27 spec file using t27c."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri topic",
+      "purpose": "Has anyone already done this, or are they doing it now?"
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri types",
+      "purpose": "One type name, more than one definition."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri unparsed",
+      "purpose": "Specs the compiler cannot read, ranked by the CONSTRUCT that..."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri vectors",
+      "purpose": "The executed-vector registry: run a module's vectors, or inve..."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri verdict",
+      "purpose": "Checks for toxic regressions by analyzing swarm health metrics."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri vsim",
+      "purpose": "How far each spec gets when its generated Verilog is actually..."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri window",
+      "purpose": "Was the base you measured against still the tip when you repo..."
+    },
+    {
+      "program": "t27-tri",
+      "name": "tri worktrees",
+      "purpose": "What the checkouts on this disk are holding."
+    },
+    {
+      "program": "mcp",
+      "name": "mcp/gitbutler",
+      "purpose": "External GitButler MCP server launched as `but mcp`; the repo..."
+    },
+    {
+      "program": "mcp",
+      "name": "mcp/inngest-dev",
+      "purpose": "MCP face of the self-hosted Inngest server (Railway project 9..."
+    },
+    {
+      "program": "mcp",
+      "name": "mcp/needle",
+      "purpose": "Zig MCP server for AST-aware code editing (needle): structura..."
+    },
+    {
+      "program": "mcp",
+      "name": "mcp/neon",
+      "purpose": "External MCP server `neon` registered in .mcp.json; launched..."
+    },
+    {
+      "program": "mcp",
+      "name": "mcp/notebooklm",
+      "purpose": "External MCP server `notebooklm` registered in .claude/mcp.js..."
+    },
+    {
+      "program": "mcp",
+      "name": "mcp/railway-mcp-server",
+      "purpose": "External MCP server `railway-mcp-server` registered in .mcp.j..."
+    },
+    {
+      "program": "mcp",
+      "name": "mcp/t27-traceability",
+      "purpose": "MCP server over stdio that checks L1 TRACEABILITY (Closes #N)..."
+    },
+    {
+      "program": "mcp",
+      "name": "mcp/tri-mcp",
+      "purpose": "Rust MCP server exposing the PHI LOOP tri commands as tools:..."
+    },
+    {
+      "program": "mcp",
+      "name": "mcp/tri-ssot",
+      "purpose": "SSOT Integration for t27: GitHub Issues + PRs + Documentation..."
+    },
+    {
+      "program": "mcp",
+      "name": "mcp/trinity",
+      "purpose": "Zig MCP server (JSON-RPC over stdio, Content-Length framing)..."
+    },
+    {
+      "program": "mcp",
+      "name": "mcp/zig-docs",
+      "purpose": "External MCP server `zig-docs` registered in .mcp.json; launc..."
+    }
+  ]
+}
