@@ -4860,6 +4860,51 @@ check('the CLI the timers run is the CLI in this repository', async () => {
   if (v.code !== 0) throw new Error(`${v.word}: ${v.why} - run \`tri drift\` for the per-path reading`)
 })
 
+// cast-ship: the landing step that dry-runs `tri cast ship` on a bee's
+// recording. Each case proves the step REFUSES something before trusting that
+// it does anything.
+check('cast-ship does nothing unless TRI_CAST_SHIP is exactly 1', async () => {
+  const CS = await import('./cast-ship.mjs')
+  let asked = false
+  const fetch = async () => { asked = true; return { out: 'CAST-MISSING' } }
+  for (const v of [undefined, '', '0', 'true', 'yes']) {
+    const r = await CS.shipCast(7, { env: { TRI_CAST_SHIP: v }, fetch })
+    if (r.result !== 'off') throw new Error(`TRI_CAST_SHIP=${v} must be off, got ${r.result}`)
+  }
+  if (asked) throw new Error('an off step must not reach the container')
+})
+
+check('cast-ship decodes the hex answer, and refuses chatter as an answer', async () => {
+  const CS = await import('./cast-ship.mjs')
+  if (CS.decodeFetch('Using SSH\nCAST-MISSING\n') !== 'missing') throw new Error('missing not read')
+  if (CS.decodeFetch('Using SSH key\n') !== null) throw new Error('chatter read as an answer')
+  if (CS.decodeFetch('CAST-BEGIN\nabc\nCAST-END') !== null) throw new Error('odd hex read as bytes')
+  const b = CS.decodeFetch(`CAST-BEGIN\n${Buffer.from('Existing\n').toString('hex')}\nCAST-END\n`)
+  if (!Buffer.isBuffer(b) || b.toString() !== 'Existing\n') throw new Error('a line channel.clean() would drop did not survive')
+})
+
+check('cast-ship never ships a recording tri cast check refuses', async () => {
+  const CS = await import('./cast-ship.mjs')
+  const seen = []
+  const run = (argv) => { seen.push(argv.slice(1, 3).join(' ')); return { code: argv[2] === 'check' ? 1 : 0, out: 'FAIL: exit codes 0 1' } }
+  const fetch = async () => ({ out: `CAST-BEGIN\n${Buffer.from('{}').toString('hex')}\nCAST-END` })
+  const r = await CS.shipCast(8, { env: { TRI_CAST_SHIP: '1' }, fetch, run, dir: path.join(tmp, 'casts') })
+  if (r.result !== 'unclean') throw new Error(`expected unclean, got ${r.result}`)
+  if (seen.includes('cast ship')) throw new Error('an unclean recording was shipped')
+})
+
+check('cast-ship ships a clean recording WITHOUT --confirm and WITHOUT --repo', async () => {
+  const CS = await import('./cast-ship.mjs')
+  let shipArgv = null
+  const run = (argv) => { if (argv[2] === 'ship') shipArgv = argv; return { code: 0, out: 'OK' } }
+  const fetch = async () => ({ out: `CAST-BEGIN\n${Buffer.from('{}').toString('hex')}\nCAST-END` })
+  const r = await CS.shipCast(9, { env: { TRI_CAST_SHIP: '1' }, fetch, run, dir: path.join(tmp, 'casts'), title: 'T', desc: 'D' })
+  if (r.result !== 'drafted') throw new Error(`expected drafted, got ${r.result}`)
+  if (!shipArgv) throw new Error('ship was never run')
+  if (shipArgv.includes('--confirm') || shipArgv.includes('--repo')) throw new Error(`ship must be a dry run: ${shipArgv.join(' ')}`)
+  if (shipArgv[4] !== 'queen-9') throw new Error(`the id must be queen-9, got ${shipArgv[4]}`)
+})
+
 check('the harness can fail an async check', async () => {
   // Guarding the fix above: before it, this file reported 0 failures while an
   // async case was rejecting into the void.

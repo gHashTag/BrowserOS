@@ -42,6 +42,13 @@ import { createQueenPool } from '../../lib/db/queen-pool'
 import { logger } from '../../lib/logger'
 import { startModelProbes, workerModelRanking } from '../../lib/model-ranking'
 import { outstandingEscalations } from '../routes/queen-needs-you'
+import {
+  castPathFor,
+  castRecorderPath,
+  castSentence,
+  castStatus,
+  readBeeCast,
+} from './queen-cast'
 import { githubCiDeps, takeBackRefusedAcceptances } from './queen-ci-verdict'
 import { contributorRuntime } from './queen-contributor-keys'
 import {
@@ -103,6 +110,12 @@ import {
   sameModelAs,
   visiblePatchPaths,
 } from './queen-reviewer'
+import {
+  loadToolIndex,
+  toolIndexSection,
+  toolUse,
+  toolUseSentence,
+} from './queen-tools'
 
 /**
  * The last non-secret allocator cursor already written durably. It survives a
@@ -1560,7 +1573,18 @@ export async function runRound(
   })
   const reviewed = await reviewFinishedDispatches(pool, deps.review)
   if (reviewed.acted.length > 0) {
-    logger.info('Queen reviewed her own work', { verdicts: reviewed.acted })
+    logger.info('Queen reviewed her own work', {
+      verdicts: reviewed.acted,
+      // The efficiency signal: tool calls and indexed commands per job, and
+      // every tool a bee said it had to do without - an issue to open.
+      tools: reviewed.efficiency.map(
+        (e) =>
+          `#${e.issue}: ${e.calls} call(s), indexed ${e.indexed.join(', ') || 'none'}`,
+      ),
+      missingTools: reviewed.efficiency.flatMap((e) =>
+        e.missingTools.map((what) => `#${e.issue}: ${what}`),
+      ),
+    })
   }
 
   // An acceptance whose pull request a REQUIRED check refused is not one:
@@ -2042,6 +2066,9 @@ export function briefFor(
     'Anything the issue does not ask for. Work that seems obviously needed and',
     'is not asked for is a thing to raise here, not to do quietly.',
     '',
+    // The tools we already have (queen-tools.ts): generated from the site's
+    // tool catalog, shipped with the image, no network at spawn.
+    ...toolIndexSection(loadToolIndex()),
     '## Finishing',
     '',
     'Everything you write is English - source, comments, documentation, commit',
@@ -2060,12 +2087,52 @@ export function briefFor(
     "Sealing (`t27c seal`) and the `docs/now/` entry are the operator's at",
     'harvest time, not yours: they fall outside your boundary.',
     '',
+    ...castSection(issue),
     // The template, one numbered slot per criterion (#1421). Emitted only when
     // the task states criteria, so a task with none is unchanged: its bee
     // states its own criteria first and still needs the standing generic
     // request to answer them in.
-    ...verdictSection(criteria),
+    ...verdictSection(criteria, castPathFor(issue)),
   ].join('\n')
+}
+
+/**
+ * The last step of every job: record the commands that prove it.
+ *
+ * The VERDICT block is the bee's word and the review measures what it can on
+ * the commit - but the commands the bee says it ran (the test, the `tri` step
+ * the issue named) were seen by nobody. A recording of them, made where they
+ * ran, is something the Queen can check and the operator can replay as a
+ * `tri cast` page. The recorder writes exactly what `tri cast record` writes,
+ * so the Mac side accepts a bee cast unchanged.
+ *
+ * Stated here and echoed in `workerSystemPrompt`, like the trailer rule: the
+ * system prompt survives a context the brief may have scrolled out of.
+ */
+function castSection(issue: number): string[] {
+  const path = castPathFor(issue)
+  return [
+    '## Recording your work',
+    '',
+    'The LAST step of every job, after your commit: record the commands that',
+    'prove the work as a terminal session, so the review can see what you ran',
+    'instead of taking your word for it. From your working directory run:',
+    '',
+    `    bun ${castRecorderPath()} record ${path} -- "<command 1>" "<command 2>"`,
+    '',
+    'Record the checks you quote in your verdict: `t27c parse` and',
+    '`t27c typecheck` for each `.t27` file you changed, the test you ran, the',
+    '`tri` command the issue names. Output and exit codes are recorded as they',
+    'happen; your home directory is written as ~ and no environment value is',
+    'stored. Never record a command that prints a secret (`env`, `printenv`, a',
+    'key file). If the recorder says FAIL, fix the failing command and record',
+    'again.',
+    '',
+    `Then name the file in your verdict block, under the criterion lines, as \`cast: ${path}\`.`,
+    'A missing recording, a recorded command that exited non-zero, or a home',
+    'path or secret in it is written into the review of your work.',
+    '',
+  ]
 }
 
 /**
@@ -2138,7 +2205,7 @@ function criteriaBlock(criteria: string[], source: string): string[] {
  * `criteriaBlock` to state its own criteria before working, and numbering
  * slots here would number criteria nobody has written yet.
  */
-function verdictSection(criteria: string[]): string[] {
+function verdictSection(criteria: string[], castPath: string): string[] {
   // THE BLOCK GOES FIRST, and this is the measurement that moved it.
   //
   // Only 17% of dispatches in a three-hour window were accepted; 33% came back
@@ -2168,11 +2235,16 @@ function verdictSection(criteria: string[]): string[] {
     '',
     '## VERDICT',
   ]
-  if (criteria.length === 0) {
+  // The cast line is not a bullet and carries no number, so it can never be
+  // read as a criterion or fill a slot; `parseVerdictFrom` reads it apart.
+  const castLine = `cast: ${castPath}`
+  const noCriteria = criteria.length === 0
+  if (noCriteria) {
     return [
       ...head,
       "- <the criterion, in the issue's own words>: met | unmet | could-not-check",
       '- <the next one>: met | unmet | could-not-check',
+      castLine,
       '',
       'One line per criterion in "What you will be judged by", in that order. A',
       'criterion you could not check is could-not-check, never met - claiming met',
@@ -2187,6 +2259,7 @@ function verdictSection(criteria: string[]): string[] {
         `- ${i + 1}. <criterion ${i + 1}, in the issue's own words>: ` +
         'met | unmet | could-not-check',
     ),
+    castLine,
     '',
     'One numbered slot per criterion in "What you will be judged by", same',
     'numbers, same order. A slot you leave out is read as unmet, so answer',
@@ -2229,6 +2302,10 @@ export function workerSystemPrompt(
     // system prompt survives a context that the brief may have scrolled out
     // of. A bee that finishes without the trailer costs a hand rewrite.
     `The T27 compiler t27c is installed on this machine; run \`t27c parse\` and \`t27c typecheck\` on every .t27 file you change, because the review runs them on your commit. Your final commit message ends with the line \`Closes #${issue}\`.`,
+    // The recording rule, echoed for the same reason as the trailer.
+    `After your commit, the last step of every job is to record the commands that prove the work with \`bun ${castRecorderPath()} record ${castPathFor(issue)} -- "<command>" ...\` and to write the line \`cast: ${castPathFor(issue)}\` under the criterion lines of your verdict block; the review checks that recording.`,
+    // The tool rule, echoed beside it for the same reason.
+    'Before you write a new script or do a multi-step job by hand, look it up in the "Tools you already have" index of your brief and use the command that does it; if none does and the job will come up again, write `missing-tool: <what>` under the criterion lines of your verdict block.',
   )
   return lines.join(' ')
 }
@@ -2481,9 +2558,19 @@ export interface ReviewTally {
   unjudged: number
 }
 
+/** What one reviewed job used, and the tools its bee said were missing. */
+export interface ReviewEfficiency {
+  issue: number
+  calls: number
+  indexed: string[]
+  missingTools: string[]
+}
+
 interface ReviewRound {
   /** `#1234:accept`, one per dispatch judged this round. */
   acted: string[]
+  /** Tool use and `missing-tool:` lines, per dispatch reviewed this round. */
+  efficiency: ReviewEfficiency[]
   /** Issues whose commit reached outside the boundary, and where. */
   strays: Array<{ issue: number; paths: string[] }>
   /** Judged and unjudged, per dispatch reviewed this round (#1420, FR-001). */
@@ -2685,6 +2772,14 @@ export async function reviewFinishedDispatches(
             -- work was salvaged rather than written; it changes NOTHING about
             -- how the work is judged.
             d.salvaged_at, d.salvaged_sha, d.salvaged_files, d.salvage_left,
+            -- When this attempt began, so a recording left by an earlier
+            -- attempt at the same issue is not read as this attempt.
+            d.dispatched_at,
+            -- The tool calls of the bee, for the efficiency signal: one short row
+            -- per call (queen-dispatch.ts writes "<tool>  <what>").
+            (SELECT array_agg(left(t.text, 300) ORDER BY t.seq)
+               FROM queen_transcript t
+              WHERE t.conversation_id = d.conversation_id AND t.kind = 'tool') AS tool_calls,
             (SELECT string_agg(t.text, '' ORDER BY t.seq)
                FROM queen_transcript t
               WHERE t.conversation_id = d.conversation_id AND t.kind = 'say')
@@ -2710,6 +2805,7 @@ export async function reviewFinishedDispatches(
   const acted: string[] = []
   const strayed: Array<{ issue: number; paths: string[] }> = []
   const tally: ReviewTally[] = []
+  const efficiency: ReviewEfficiency[] = []
   // The reviewer's lane budget for this sweep, and the keys running bees hold,
   // read once and only if a review is actually bought.
   let reviewsLeft = deps.reviewsPerRound()
@@ -2809,6 +2905,28 @@ export async function reviewFinishedDispatches(
     // ended without committing. It is appended to whatever verdict the policy
     // reaches, below and in the empty path.
     const salvaged = salvageSentence(row)
+    // THE BEE'S RECORDING OF ITS WORK - checked and SAID, never weighed. The
+    // rule that every job ends with a cast is new, and bees already in flight
+    // were never told it, so a missing or failing cast is a WARNING written
+    // in front of the note (where the length cap cannot reach it, like the
+    // salvage fact) and logged; it moves no state and no counter. Making it a
+    // machine line that can send work back is a later, separate decision.
+    const cast = (deps.castReport ?? readBeeCast)(issue, row.dispatched_at)
+    // THE EFFICIENCY SIGNAL, said the same way: what the job used, which
+    // indexed commands among it, and the tools the bee said were missing.
+    const use = toolUse(row.tool_calls, loadToolIndex())
+    const missingTools = parseVerdictMissingTools(said)
+    efficiency.push({
+      issue,
+      calls: use.calls,
+      indexed: use.indexed,
+      missingTools,
+    })
+    const provenance = [
+      salvaged,
+      castSentence(cast, parseVerdictCast(said)),
+      toolUseSentence(use, missingTools),
+    ].join(' ')
     const strays = await boundaryStrays(files, row.owned_paths ?? [])
     if (strays.length > 0) {
       strayed.push({ issue, paths: strays })
@@ -2875,7 +2993,7 @@ export async function reviewFinishedDispatches(
           ? `\n\nThe last review's findings still stand:\n${priorFinding}`
           : '')
       const note = noteWithSalvage(
-        salvaged,
+        provenance,
         deadLetter
           ? `${freeAttempts} consecutive attempts produced nothing judgeable ` +
               '(no commit, or no criterion anyone could establish), so this is ' +
@@ -2892,6 +3010,7 @@ export async function reviewFinishedDispatches(
         source: row.criteria_source ?? 'none',
         priorSendBacks,
         strays: strays.length,
+        cast: castStatus(cast),
         specs: 0,
         t27c: 'absent',
         machineUnmet: 0,
@@ -3637,6 +3756,7 @@ export async function reviewFinishedDispatches(
       source: row.criteria_source ?? 'none',
       priorSendBacks,
       strays: strays.length,
+      cast: castStatus(cast),
       specs: specCount,
       t27c: witness?.kind === 'witnessed' ? witness.t27c : 'absent',
       machineUnmet: machineFailed.length,
@@ -3754,7 +3874,7 @@ export async function reviewFinishedDispatches(
                 ? `Waiting for the adversarial reviewer before judging a commit on the worker's word (${reviewerSkipped || 'no reviewer verdict yet'}).`
                 : policyNote
     const note = noteWithSalvage(
-      salvaged,
+      provenance,
       deadLetter
         ? `${freeAttempts} consecutive attempts produced nothing judgeable ` +
             '(no commit, or no criterion anyone could establish), so this is ' +
@@ -3780,7 +3900,7 @@ export async function reviewFinishedDispatches(
       unjudged: unjudged.length,
     })
   }
-  return { acted, strays: strayed, tally }
+  return { acted, strays: strayed, tally, efficiency }
 }
 
 /** Lanes one review may try before the round moves on. */
@@ -4012,9 +4132,86 @@ export function parseVerdictBlockDetailed(text: string): VerdictLine[] {
   return best
 }
 
+/**
+ * The `cast:` line of a verdict block: the path the bee says it recorded its
+ * work to (see `castSection`). Not a bullet and never a criterion.
+ *
+ * A bullet `- cast: met` is a CRITERION named "cast" and is read as one first;
+ * only a line that is not a criterion is tried as a cast line, and a value that
+ * is itself a verdict word is not a path.
+ */
+const CAST_LINE = /^\s*(?:[-*]\s+)?cast:\s*`?([^`\s]+)`?\s*$/i
+
+function castLineValue(line: string): string | null {
+  const m = line.match(CAST_LINE)
+  const verdictWord = m !== null && /^(met|unmet|could-not-check)$/i.test(m[1])
+  return m && !verdictWord ? m[1] : null
+}
+
+/**
+ * The `missing-tool:` line of a verdict block: a job the bee did by hand that
+ * a tool should do (see `toolIndexSection` in queen-tools.ts). Like the cast
+ * line, never a criterion and never the end of the block.
+ */
+const MISSING_TOOL_LINE = /^\s*(?:[-*]\s+)?missing-tool:\s*(.+?)\s*$/i
+
+function missingToolValue(line: string): string | null {
+  const m = line.match(MISSING_TOOL_LINE)
+  const verdictWord = m !== null && /^(met|unmet|could-not-check)$/i.test(m[1])
+  return m && !verdictWord ? m[1].replace(/^`|`$/g, '').slice(0, 200) : null
+}
+
+/** Every `missing-tool:` a report names, across its blocks, deduplicated. */
+export function parseVerdictMissingTools(text: string): string[] {
+  const all: string[] = []
+  for (
+    let i = text.indexOf('## VERDICT');
+    i >= 0;
+    i = text.indexOf('## VERDICT', i + 1)
+  ) {
+    for (const what of readVerdictFrom(text, i).missingTools) {
+      const fresh = !all.includes(what)
+      if (fresh) all.push(what)
+    }
+  }
+  return all
+}
+
+/**
+ * The cast path a report names, or null. Read from the same block
+ * `parseVerdictBlockDetailed` keeps - the most complete one - and failing that
+ * from the first block that names one.
+ */
+export function parseVerdictCast(text: string): string | null {
+  let best: { lines: number; cast: string | null } | null = null
+  let first: string | null = null
+  for (
+    let i = text.indexOf('## VERDICT');
+    i >= 0;
+    i = text.indexOf('## VERDICT', i + 1)
+  ) {
+    const read = readVerdictFrom(text, i)
+    const firstNamed = first === null && read.cast !== null
+    if (firstNamed) first = read.cast
+    const longer = best === null || read.lines.length > best.lines
+    if (longer) best = { lines: read.lines.length, cast: read.cast }
+  }
+  return best?.cast ?? first
+}
+
 /** One VERDICT block, read from a known offset. */
 function parseVerdictFrom(text: string, at: number): VerdictLine[] {
+  return readVerdictFrom(text, at).lines
+}
+
+/** One VERDICT block's criterion lines, its `cast:` and `missing-tool:` lines. */
+function readVerdictFrom(
+  text: string,
+  at: number,
+): { lines: VerdictLine[]; cast: string | null; missingTools: string[] } {
   const out: VerdictLine[] = []
+  let cast: string | null = null
+  const missingTools: string[] = []
   // A WRAPPED CRITERION IS STILL ONE CRITERION.
   //
   // Read line by line, a bullet that runs onto a second line did not match, and
@@ -4036,9 +4233,13 @@ function parseVerdictFrom(text: string, at: number): VerdictLine[] {
   for (const raw of text.slice(at).split('\n').slice(1)) {
     const isBullet = /^\s*[-*]\s/.test(raw)
     const previous = joined[joined.length - 1]
+    // A cast or missing-tool line is complete too: nothing that follows it
+    // is its wrap.
     const previousIsComplete =
       previous === undefined ||
-      /:\s*(met|unmet|could-not-check)\s*$/i.test(previous)
+      /:\s*(met|unmet|could-not-check)\s*$/i.test(previous) ||
+      castLineValue(previous) !== null ||
+      missingToolValue(previous) !== null
     if (!isBullet && !previousIsComplete && raw.trim() !== '') {
       joined[joined.length - 1] = `${previous} ${raw.trim()}`
       continue
@@ -4048,9 +4249,23 @@ function parseVerdictFrom(text: string, at: number): VerdictLine[] {
   for (const line of joined) {
     const m = line.match(/^\s*[-*]\s*(.+?):\s*(met|unmet|could-not-check)\s*$/i)
     if (!m) {
-      // A blank line inside the block is fine; anything else ends it, because
-      // the bee was told nothing follows the block.
-      if (line.trim() === '') continue
+      // A blank line inside the block is fine, and so is its `cast:` line,
+      // which is read apart and is no criterion; anything else ends it,
+      // because the bee was told nothing follows the block.
+      const blank = line.trim() === ''
+      if (blank) continue
+      const named = castLineValue(line)
+      const isCast = named !== null
+      if (isCast) {
+        cast = cast ?? named
+        continue
+      }
+      const gap = missingToolValue(line)
+      const isGap = gap !== null
+      if (isGap) {
+        missingTools.push(gap)
+        continue
+      }
       break
     }
     out.push({
@@ -4062,7 +4277,7 @@ function parseVerdictFrom(text: string, at: number): VerdictLine[] {
       verdict: m[2].toLowerCase() as VerdictLine['verdict'],
     })
   }
-  return out
+  return { lines: out, cast, missingTools }
 }
 
 /**
@@ -4159,6 +4374,18 @@ async function report(
         `boundary it was given: ${stray.paths.slice(0, 8).join(', ')}` +
         (stray.paths.length > 8 ? ', ...' : '') +
         '.',
+    )
+  }
+  // The tools a bee said it lacked. Listed, not filed: opening an issue is
+  // a network call this round does not make, and the owner decides.
+  const missing = reviewed.efficiency.flatMap((e) =>
+    e.missingTools.map((what) => `#${e.issue} ${what}`),
+  )
+  const anyMissing = missing.length > 0
+  if (anyMissing) {
+    lines.push(
+      `Missing tools named by bees (${missing.length}): ` +
+        `${missing.slice(0, 6).join('; ')}${missing.length > 6 ? '; ...' : ''}.`,
     )
   }
   const noRoom = containerRefusal(started)

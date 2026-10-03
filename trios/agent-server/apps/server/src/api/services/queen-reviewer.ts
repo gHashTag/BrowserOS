@@ -35,6 +35,7 @@
 
 import { createHash, randomUUID } from 'node:crypto'
 import type { LLMProvider } from '@browseros/shared/schemas/llm'
+import type { CastReport } from './queen-cast'
 import { type CriteriaMeasurement, measureCriteria } from './queen-criteria-run'
 import {
   baseRef,
@@ -789,6 +790,12 @@ export interface ReviewDeps {
   reviewsPerRound: () => number
   /** Criteria measurements one sweep may buy. Optional for injected fakes. */
   measurementsPerRound?: () => number
+  /**
+   * The bee's terminal recording of its work, read and checked
+   * (queen-cast.ts). Optional for injected fakes; the review falls back to
+   * reading the file at `castPathFor(issue)`.
+   */
+  castReport?: (issue: number, dispatchedAt: unknown) => CastReport
 }
 
 export function defaultReviewDeps(): ReviewDeps {

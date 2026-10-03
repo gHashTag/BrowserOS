@@ -440,6 +440,8 @@ if (isMain) {
   }
 
   let landed = 0
+  const CS = await import(path.join(DIR, 'cast-ship.mjs'))
+  const casts = []
   for (const r of batch.filter((x) => x.clean)) {
     const title = sh(`gh issue view ${r.issue} --repo ${REPO} --json title -q .title`) || `queen work for #${r.issue}`
     /*
@@ -510,6 +512,19 @@ if (isMain) {
     if (merged === null) { console.log(`  opened ${url} but it did not merge - left for a person`); continue }
     console.log(`  landed ${r.branch} as ${url}`)
     landed++
+    // THE BEE'S RECORDING, rendered for the owner - a dry run, opt-in
+    // (TRI_CAST_SHIP=1), never sent and never committed: `tri cast ship`
+    // without --confirm. A recording that fails `tri cast check` is reported
+    // and not rendered. See cast-ship.mjs.
+    const castShipOn = CS.shipEnabled()
+    if (castShipOn) {
+      const shipped = await CS.shipCast(r.issue, {
+        title: String(title).slice(0, 90),
+        desc: `The commands a Queen bee ran to prove its work on ${REPO}#${r.issue}, landed as ${url}.`,
+      })
+      console.log(CS.shipLine(shipped))
+      casts.push({ issue: r.issue, result: shipped.result })
+    }
   }
 
   // DID THE NUMBER ACTUALLY MOVE?
@@ -546,6 +561,7 @@ if (isMain) {
     }
   }
   const L = await import(path.join(DIR, 'loop.mjs'))
-  L.append({ kind: 'land', landed, landable: landable.length, after: stillLandable, batch: BATCH })
+  const castsRan = casts.length > 0
+  L.append({ kind: 'land', landed, landable: landable.length, after: stillLandable, batch: BATCH, ...(castsRan ? { casts } : {}) })
   process.exit(0)
 }
