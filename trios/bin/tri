@@ -5,15 +5,15 @@
 # syntax error on a line that was, and is, correct - it had simply seen a
 # truncated file, because open(path,'w') truncates before it writes.
 # Edits to this file are written to a temp file and renamed.
-# tri — Trinity S³AI ops CLI. Дефолт (без аргументов) — прежнее поведение:
-# railway ssh → claude. Подкоманды работают локально и ускоряют цикл.
+# tri — Trinity S³AI ops CLI. Default (no arguments) is the old behaviour:
+# railway ssh → claude. Subcommands run locally and speed up the loop.
 set -uo pipefail
 REPO="$HOME/999-multibots-telegraf"
-KEY_HELP='ключ: railway variables list -s vibee-render -e production --kv | grep ^AGENT_KEYS= | cut -d= -f2- (взять первый ключ до ":")'
+KEY_HELP='key: railway variables list -s vibee-render -e production --kv | grep ^AGENT_KEYS= | cut -d= -f2- (take the first key, up to ":")'
 
 case "${1:-}" in
   ""|ssh)
-    # прежний путь — без изменений
+    # the old path, unchanged
     railway link -p reasonable-perception -e production > /dev/null 2>&1
     railway service link opencode > /dev/null 2>&1
     exec railway ssh -- bash -lc 'claude --dangerously-skip-permissions'
@@ -23,13 +23,13 @@ case "${1:-}" in
     echo; echo "== player =="; curl -s -m 5 -o /dev/null -w "5174:%{http_code}\n" http://localhost:5174/ 2>/dev/null || echo "player down"
     echo; echo "== feed stats =="; curl -s -m 8 https://vibee-render-production.up.railway.app/api/feed/stats 2>/dev/null | head -c 300
     echo; echo "== loop state =="; cat "$REPO/loop/state.json" 2>/dev/null
-    echo; echo "== последние витки =="; tail -5 "$REPO/loop/LOOP_STATE.md" 2>/dev/null
+    echo; echo "== latest iterations =="; tail -5 "$REPO/loop/LOOP_STATE.md" 2>/dev/null
     ;;
   regress)
     bash "$REPO/loop/regression-check.sh"
     ;;
   morning)
-    cat "$REPO/loop/MORNING.md" 2>/dev/null || echo "нет MORNING.md — прогони morning-summary.ts"
+    cat "$REPO/loop/MORNING.md" 2>/dev/null || echo "no MORNING.md — run morning-summary.ts"
     ;;
   loop)
     tail -60 "$REPO/loop/LOOP_REPORT.md" 2>/dev/null
@@ -42,12 +42,12 @@ case "${1:-}" in
     # had never once run from its timer.
     curl -s -m 8 "https://vibee-render-production.up.railway.app/api/feed?limit=${2:-5}" \
       | python3 -c "import sys,json; d=json.load(sys.stdin); [print(t['id'], t.get('name','')[:50], '| ⭐', t.get('starsCount',0), '| 👁', t.get('viewsCount',0)) for t in d.get('templates',[])]" 2>/dev/null \
-      || echo "лента недоступна"
+      || echo "feed unavailable"
     ;;
   chat)
     shift
     KEY=$(railway variables list -s vibee-render -e production --kv 2>/dev/null | grep ^AGENT_KEYS= | cut -d= -f2- | cut -d, -f1 | cut -d: -f1)
-    if [ -z "$KEY" ] || [ -z "${1:-}" ]; then echo "нужен текст: tri chat \"вопрос\"; $KEY_HELP"; exit 1; fi
+    if [ -z "$KEY" ] || [ -z "${1:-}" ]; then echo "text required: tri chat \"question\"; $KEY_HELP"; exit 1; fi
     curl -sN -m 120 https://vibee-render-production.up.railway.app/api/agent/chat \
       -H "X-Agent-Key: $KEY" -H 'Content-Type: application/json' \
       -d "$(python3 -c 'import json,sys; print(json.dumps({"messages":[{"role":"user","content":sys.argv[1]}]}))' "$*")" \
@@ -57,114 +57,114 @@ for line in sys.stdin:
     try: ev = json.loads(line)
     except: continue
     if ev.get('тип') == 'текст': print(ev['текст'], end='')
-    elif ev.get('тип') == 'результат': print(f\"  [{ev['имя']} · {ev['мс']}мс]\", file=sys.stderr)
+    elif ev.get('тип') == 'результат': print(f\"  [{ev['имя']} · {ev['мс']}ms]\", file=sys.stderr)
 print()
 "
     ;;
   handover)
-    # СВОДКА ВЛАДЕЛЬЦУ ЧИТАЕТСЯ, А НЕ ПОМНИТСЯ.
+    # THE OWNER SUMMARY IS READ, NOT REMEMBERED.
     #
-    # Здесь стоял heredoc, замороженный на волне 116, и он печатал состояние
-    # четырнадцати волн назад как текущее: дерево было на 130, а первая строка
-    # говорила «волна 116». Заметить это было неоткуда — рука к тому же не
-    # упоминалась в `tri help`. Правка 2026-09-13: источник теперь тот же, что у
-    # `tri next` — самый свежий trios/.trinity/wave-loop-*.md, и первой строкой
-    # печатается ВОЗРАСТ файла, взятый с файловой системы. Сводка недельной
-    # давности не должна выглядеть как сегодняшняя.
+    # A heredoc frozen at wave 116 used to sit here, and it printed the state
+    # of fourteen waves ago as current: the tree was at 130 while the first line
+    # said "wave 116". Nothing could notice it — the arm was not even
+    # mentioned in `tri help`. Fix of 2026-09-13: the source is now the same as for
+    # `tri next` — the newest trios/.trinity/wave-loop-*.md — and the first line
+    # printed is the file's AGE, taken from the filesystem. A week-old summary
+    # must not look like today's.
     #
-    # Печатается начало волны (о чём она) и её хвост с вариантами продолжения;
-    # середину даёт `tri wave-plan` — волна целиком.
+    # It prints the start of the wave (what it is about) and its tail with the options;
+    # the middle is in `tri wave-plan`, the whole wave.
     T=/Users/playra/BrowserOS/trios
     w=$(ls "$T/.trinity"/wave-loop-*.md 2>/dev/null | sort | tail -1)
-    [ -z "$w" ] && { echo "нет ни одной волны в $T/.trinity/wave-loop-*.md"; exit 1; }
+    [ -z "$w" ] && { echo "no wave found in $T/.trinity/wave-loop-*.md"; exit 1; }
     total=$(ls "$T/.trinity"/wave-loop-*.md 2>/dev/null | wc -l | tr -d ' ')
     age=$(( ( $(date +%s) - $(stat -f %m "$w") ) / 3600 ))
-    echo "СВОДКА ВЛАДЕЛЬЦУ — из $w"
-    echo "записана ${age} ч назад; волн на диске: $total"
+    echo "OWNER SUMMARY — from $w"
+    echo "written ${age} h ago; waves on disk: $total"
     echo
-    # ЗАГОЛОВОК, А НЕ СЛОВО. Первый вариант этой строки искал `[Вв]арианты` где
-    # угодно — и в этом же дереве есть строка «Инвариант — работающий
-    # механизм», где слово «вариант» сидит внутри другого слова. Ищем строку
-    # ЗАГОЛОВКА (`^#`) и целиком ту формулировку, которой волны называют свой
-    # хвост, на обоих языках, которыми они написаны.
+    # A HEADING, NOT A WORD. The first version of this line searched for the
+    # Russian word for "options" anywhere, and this tree has a line about an
+    # "invariant" whose Russian spelling contains that word. So we match a
+    # HEADING line (`^#`) and the full phrase the waves use to name their
+    # tail, in both languages the waves are written in.
     opt=$(grep -n -m1 -E '^#{1,6} .*([Oo]ptions for the next wave|вариант(а|ы|ов) (сотрудничества|на следующую))' "$w" | cut -d: -f1)
     nlines=$(wc -l < "$w" | tr -d ' ')
     head_end=40
     if [ -n "$opt" ] && [ "$opt" -le 41 ]; then head_end=$((opt-1)); fi
     [ "$head_end" -ge 1 ] && sed -n "1,${head_end}p" "$w"
     if [ -n "$opt" ]; then
-      [ "$opt" -gt $((head_end+1)) ] && echo "…(середина пропущена — волна целиком: tri wave-plan)"
+      [ "$opt" -gt $((head_end+1)) ] && echo "…(middle skipped — whole wave: tri wave-plan)"
       echo
       sed -n "${opt},\$p" "$w"
     elif [ "$nlines" -gt "$head_end" ]; then
-      echo "…(ещё $((nlines-head_end)) строк, заголовка с вариантами в этой волне нет — целиком: tri wave-plan)"
+      echo "…(another $((nlines-head_end)) lines; this wave has no options heading — whole wave: tri wave-plan)"
     fi
     echo
-    echo "(проза выше написана автором волны, не сгенерирована здесь)"
+    echo "(the prose above was written by the wave author, not generated here)"
     ;;
   handover-116-archived)
-    # Замороженная сводка волны 116, снятая с `tri handover` 2026-09-13. Она
-    # остаётся читаемой, но больше не выдаёт себя за текущее состояние: её
-    # волна названа в имени команды.
+    # The frozen wave-116 summary, taken off `tri handover` on 2026-09-13. It
+    # stays readable but no longer passes itself off as the current state: its
+    # wave is named in the command name.
     cat <<'BRIEF'
-СВОДКА ВОЛНЫ 116 (АРХИВ, НЕ ТЕКУЩЕЕ СОСТОЯНИЕ) — три открытые границы
-(t27 развалилась на две по измерению 5d837a855 — mesh-корпус и
-rings-спеки это РАЗНОЕ)
+WAVE 116 SUMMARY (ARCHIVE, NOT THE CURRENT STATE) — three open frontiers
+(t27 split in two per measurement 5d837a855 — the mesh corpus and
+the rings specs are DIFFERENT)
 
-ЗАКРЫТО ВЫХОДНЫМИ (вашими фиксами — обе подтверждены этим циклом):
-- LOCK-АНОМАЛИЯ: была бэктиком в `: "..."` комментарии (4d56070ef) —
-  `make check` в бэктиках исполнялся как подстановка команд. Плоский
-  make cassettes даёт вердикт за ~2 мин (было 26+ мин зависания).
-  Обходы (TRIOS_SKIP_LOCK и имена) — мёртвая история; удалять вам.
-- ПРОВАЙДЕРНЫЙ КЛЮЧ: пчела работает в контейнере без ключа (d26a4abfc)
-  через openai-compatible + loopback-репетицию (TRIOS_QUEEN_REHEARSAL,
-  никогда тихий фолбэк при живом ключе). Диспатч исполнялся 3×, параллельно.
+CLOSED OVER THE WEEKEND (by your fixes — both confirmed by this cycle):
+- LOCK ANOMALY: it was a backtick in a `: "..."` comment (4d56070ef) —
+  `make check` in backticks ran as command substitution. A flat
+  make cassettes gives a verdict in ~2 min (it used to hang 26+ min).
+  The workarounds (TRIOS_SKIP_LOCK and names) are dead history; yours to delete.
+- PROVIDER KEY: the bee works in the container without a key (d26a4abfc)
+  via openai-compatible + a loopback rehearsal (TRIOS_QUEEN_REHEARSAL,
+  never a silent fallback when a live key exists). Dispatch ran 3×, in parallel.
 
-ОТКРЫТО:
+OPEN:
 
-1a. ГЕНЕРАТОР T27 — MESH-КОРПУС (сабмодуль trios-mesh, ваш ~/t27):
-    13 несобирающихся спек, 11 причин в t27c: главный класс (9 спек) —
-    параметры-массивы без mut в эмите, один патч закрывает 6+.
-    Карта: wave-loop-098. Проверка после фикса: tri spec-diag.
+1a. T27 GENERATOR — MESH CORPUS (submodule trios-mesh, your ~/t27):
+    13 specs that do not build, 11 causes in t27c: the main class (9 specs) —
+    array parameters emitted without mut; one patch closes 6+.
+    Map: wave-loop-098. Check after the fix: tri spec-diag.
 
-1b. T27 — RINGS-СПЕКИ (rings/T27-00|01|02): t27c ЗДЕСЬ НЕ блокер —
-    exit 0 + 121 строк Rust на decision core (измерено 5d837a855).
-    Отсутствует: спека T27-02 (Queen tick), сгенерированные .rs,
-    хостящий крейт. can_start_another задублирован в двух языках
-    (queen_core.t27:198 + QueenDelegation.swift:472) — сегодня
-    согласованы, это и есть риск расползания. Облачная пчела это
-    делать НЕ может (в образе нет Swift/Rust/t27c) — только локально.
+1b. T27 — RINGS SPECS (rings/T27-00|01|02): t27c is NOT the blocker HERE —
+    exit 0 + 121 lines of Rust for the decision core (measured 5d837a855).
+    Missing: the T27-02 spec (Queen tick), the generated .rs,
+    a host crate. can_start_another is duplicated in two languages
+    (queen_core.t27:198 + QueenDelegation.swift:472) — today they
+    agree; that is exactly the drift risk. The cloud bee CANNOT
+    do this (the image has no Swift/Rust/t27c) — local only.
 
-2. RELEASE-ПЕРЕСБОРКА: стор юзера — 0 отпечатков (приложение старее
-   фикса). Починка доказана живьём: fp 9d26541f, 8 воспроизведений
-   (tri regression). Одна пересборка двигает число.
+2. RELEASE REBUILD: the user's store has 0 fingerprints (the app predates
+   the fix). The fix is proven live: fp 9d26541f, 8 reproductions
+   (tri regression). One rebuild moves the number.
 
-Также в полёте: фикс четырёх кассет (одна причина, aa3b6fc14) — после
-него плоский make cassettes должен позеленеть. MVP-архитектура теперь
-в репо (docs/architecture/, 6d1d50656) — доска цитирует внутреннюю копию.
+Also in flight: a fix for four cassettes (one cause, aa3b6fc14) — after
+it a flat make cassettes should go green. The MVP architecture is now
+in the repo (docs/architecture/, 6d1d50656) — the board quotes the internal copy.
 
-СЛОМАН ОРАКУЛ (найдено волной 120): Swift-e2e сьют (make test /
-make mutants) не собирается с 12b97dedc — шесть rings-файлов делают
-import QueenCore, а tests/swift/run_chat_sse_e2e.sh:91 гонит rings
-одним модулем. Все 22 мутанта нескорируемы; гейт честно FAIL-closed,
-зелёным не врёт. Лечение — научить скрипт модулю QueenCore (учесть
-дубль-копию QueenSpecQuality.swift в rings против queen-core).
-С ВОЛНЫ 125 СКРИПТ БЛОКИРОВАЛ И ЖИВОЙ ПРОТОКОЛ — ЦЕПОЧКА ВОССТАНОВЛЕНА
-циклом (волны 126-130): скрипт починен паттерном build.sh, сьют 972/972
-зелёный, 22-й мутант пойман, бандл пересобран (cp x x-баг build.sh
-исправлен), девятое live-verify: вердикт met, fp d3c1d66d (новый хеш —
-дерево двинулось; прежние 8 — 9d26541f). Осталось владельцу: сверка
-списков модуля 11 vs 15, флаг library-evolution, и пост-бандл шаг
-`swift test` падает (libQueenCore.a как input — утечка модульных
-флагов).
+ORACLE BROKEN (found by wave 120): the Swift e2e suite (make test /
+make mutants) has not built since 12b97dedc — six rings files do
+import QueenCore, while tests/swift/run_chat_sse_e2e.sh:91 builds rings
+as one module. All 22 mutants are unscorable; the gate honestly fails closed,
+it does not lie green. Cure: teach the script the QueenCore module (mind
+the duplicate QueenSpecQuality.swift in rings vs queen-core).
+FROM WAVE 125 THE SCRIPT ALSO BLOCKED THE LIVE PROTOCOL — CHAIN RESTORED
+by the loop (waves 126-130): script fixed with the build.sh pattern, suite 972/972
+green, the 22nd mutant caught, bundle rebuilt (the cp x x bug in build.sh
+is fixed), ninth live-verify: verdict met, fp d3c1d66d (new hash —
+the tree moved; the earlier 8 are 9d26541f). Left for the owner: reconcile
+the module lists 11 vs 15, the library-evolution flag, and the post-bundle step
+`swift test` fails (libQueenCore.a as an input — a leak of the module
+build flags).
 BRIEF
     ;;
   mutants-logic-refresh)
-    # Волна 122: build.sh эмитит .trinity/build/QueenCore тулчейном,
-    # под которым его запустили; сюиты clade-e2e компилирует дефолтным.
-    # Рассинхрон (6.0.3 против 6.3.3) роняет mutants-logic на import.
-    # Здесь: пересобрать артефакт дефолтным тулчейном (вызов из
-    # build.sh:607-613) и прогнать гейт. DRY=1 — только печать.
+    # Wave 122: build.sh emits .trinity/build/QueenCore with the toolchain
+    # it was started under; the clade-e2e suites compile with the default one.
+    # The mismatch (6.0.3 vs 6.3.3) breaks mutants-logic at import.
+    # Here: rebuild the artifact with the default toolchain (the call from
+    # build.sh:607-613) and run the gate. DRY=1 only prints.
     T=/Users/playra/BrowserOS/trios; QC="$T/.trinity/build/QueenCore"
     CORE=(rings/SR-00/QueenSpecQuality rings/SR-00/QueenIssueBoundary \
       rings/SR-00/QueenBeeResult rings/SR-00/QueenBoundaryPaths \
@@ -189,13 +189,13 @@ BRIEF
     make -C "$T" mutants-logic
     ;;
   spec-diag)
-    # Батч-диагноз несобирающихся спек (волна 099): gen-rust + rustc,
-    # класс ошибки на спеку. Перезапускать после генераторных фиксов t27.
+    # Batch diagnosis of specs that do not build (wave 099): gen-rust + rustc,
+    # one error class per spec. Rerun after t27 generator fixes.
     T=/Users/playra/BrowserOS/trios; T27C="$T/.trinity/t27c-build/release/t27c"
     L="${2:-$T/.trinity/wave-097-lowering.log}"
     D=$(mktemp -d /tmp/tri_specdiag.XXXXXX)
     for s in $(grep -oE "nocompile\] [a-z0-9_]+" "$L" 2>/dev/null | awk '{print $2}' | sort -u); do
-      F=$(find "$T/rings" -name "$s.t27" | head -1); [ -z "$F" ] && { echo "$s => спека не найдена"; continue; }
+      F=$(find "$T/rings" -name "$s.t27" | head -1); [ -z "$F" ] && { echo "$s => spec not found"; continue; }
       "$T27C" gen-rust "$F" > "$D/$s.txt" 2>/dev/null
       E=$(rustc --edition 2021 --crate-type lib --emit=metadata --out-dir "$D" "$D/$s.txt" 2>&1 \
         | grep -oE "error\[E[0-9]+\]|error: [a-z ]+" | sort | uniq -c | tr '\n' ' ')
@@ -203,93 +203,93 @@ BRIEF
     done; rm -rf "$D"
     ;;
   regression)
-    # Живая регрессия цикла (волна 095): доска + локи + live-verify
-    # одной командой — обязательный минимум Queen-волны по протоколу.
+    # Live loop regression (wave 095): board + locks + live-verify
+    # in one command — the protocol's required minimum for a Queen wave.
     tri board; echo; tri locks; echo
     tri live-verify "${2:-}" "${3:-}" 2>&1 | tail -1
     ;;
   live-verify)
-    # Живой отпечаток одним запуском (рецепт волны 081): цепочка
-    # approve→delegate→verify через env-канал test-бандла, затем стор.
+    # A live fingerprint in one run (wave 081 recipe): the chain
+    # approve→delegate→verify via the test bundle env channel, then the store.
     T=/Users/playra/BrowserOS/trios
     ISSUE="${2:-gHashTag/trios#1286}"; CRIT="${3:-make check passes}"
     pkill -f "trios-test.app/Contents" 2>/dev/null; sleep 1
     ( cd "$T" && TRIOS_E2E_QUEEN_COMMAND="/approve $ISSUE;;/delegate $ISSUE queen-swift --paths docs --criteria $CRIT;;/verify $ISSUE $CRIT met" \
         ./trios-test.app/Contents/MacOS/trios > /tmp/tri_live_verify.log 2>&1 ) &
-    echo "живой прогон пошёл (/tmp/tri_live_verify.log); стор через ~75с:"
+    echo "live run started (/tmp/tri_live_verify.log); store in ~75s:"
     sleep 75; pkill -f "trios-test.app/Contents" 2>/dev/null
     python3 -c "
 import json
 try:
     for t in json.load(open('$T/.trinity-test/state/queen_delegation.json')):
         print(t['id'][:8], t['state'], 'verdicts:', t.get('criterionVerdicts'), 'fp:', (t.get('treeStateFingerprint') or 'NONE')[:20])
-except FileNotFoundError: print('стор не создан')"
+except FileNotFoundError: print('store not created')"
     ;;
   selftest)
-    echo "tri: ок"; command -v railway >/dev/null && echo "railway: ок" || echo "railway: НЕТ"
-    command -v python3 >/dev/null && echo "python3: ок"
-    [ -d "$REPO/loop" ] && echo "loop-каталог: ок" || echo "loop-каталог: НЕТ"
+    echo "tri: ok"; command -v railway >/dev/null && echo "railway: ok" || echo "railway: MISSING"
+    command -v python3 >/dev/null && echo "python3: ok"
+    [ -d "$REPO/loop" ] && echo "loop dir: ok" || echo "loop dir: MISSING"
     ;;
   anomalies|anom)
-    # Шаг 0 витка: что сломалось на проде, пока меня не было.
+    # Step 0 of a loop turn: what broke in production while I was away.
     node "$REPO/.claude/loop-opus/anomalies.mjs"
     ;;
   verify)
-    # Не затёрла ли прошлую правку чужим мержем (страховка непрерывного цикла).
+    # Whether someone else's merge overwrote the last edit (continuous-loop safety net).
     node "$REPO/.claude/loop-opus/verify-landed.mjs"
     ;;
   providers|prov)
-    # Живой статус провайдеров через детектор аномалий (маршрут /api/providers/status
-    # за авторизацией и голым curl отдаёт 401; anomalies.mjs берёт его правильно).
+    # Live provider status via the anomaly detector (the /api/providers/status route
+    # is behind auth and a bare curl gets 401; anomalies.mjs fetches it correctly).
     node "$REPO/.claude/loop-opus/anomalies.mjs" 2>/dev/null \
       | sed -n '/Провайдеры/,/Конвейер/p' | sed '$d'
-    echo "  (FAL/ElevenLabs — ждут владельца; GLM работает)"
+    echo "  (FAL/ElevenLabs — waiting for the owner; GLM works)"
     ;;
   lesson)
-    # Быстро записать урок в оснастку цикла: tri lesson "заголовок" "тело"
+    # Quickly record a lesson in the loop tooling: tri lesson "title" "body"
     shift
     L="$REPO/.claude/loop-opus/LESSONS.md"
-    if [ -z "${1:-}" ]; then echo "нужен заголовок: tri lesson \"заголовок\" [тело]"; exit 1; fi
+    if [ -z "${1:-}" ]; then echo "title required: tri lesson \"title\" [body]"; exit 1; fi
     { printf '\n## %s\n\n' "$1"; [ -n "${2:-}" ] && printf '%s\n' "$2"; } >> "$L"
-    echo "записано в $L"
+    echo "written to $L"
     ;;
   dash)
-    # Пересобрать и показать продакшн-дашборд (замер запуском, не память).
+    # Rebuild and show the production dashboard (measured by a run, not from memory).
     node "$REPO/scripts/dashboard.cjs" 2>/dev/null | tail -40 \
       || cat "$REPO/docs/dashboard/STATUS.md" 2>/dev/null
     ;;
   board)
-    # Дашборд trios: последняя итерация + живые замеры STATUS.md
+    # trios dashboard: latest iteration + live STATUS.md measurements
     T=/Users/playra/BrowserOS/trios
     tail -1 "$T/.trinity/dashboard/iterations.jsonl" 2>/dev/null | python3 -c 'import json,sys
 try:
     d=json.load(sys.stdin)
-    print("итерация", d["iteration"], ":", d["title"])
+    print("iteration", d["iteration"], ":", d["title"])
     print("gate:", d.get("gate","?"))
-except Exception as e: print("iterations.jsonl не читается:", e)'
+except Exception as e: print("iterations.jsonl unreadable:", e)'
     echo; sed -n '/## Measured here/,/## How to update/p' "$T/.trinity/dashboard/STATUS.md" 2>/dev/null | head -25
     ;;
   wave)
-    # Каркас следующей волны: trios/.trinity/wave-loop-NNN.md
+    # Skeleton of the next wave: trios/.trinity/wave-loop-NNN.md
     T=/Users/playra/BrowserOS/trios
     n=$(ls "$T/.trinity"/wave-loop-*.md 2>/dev/null | sed 's/.*loop-0*//;s/\.md//' | sort -n | tail -1)
     next=$((10#${n:-0}+1)); f="$T/.trinity/wave-loop-$(printf '%03d' "$next").md"
     printf '# T27 Wave Loop - Plan WAVE-%03d\n\nDomain: \n\n## Audit - weak spots\n\n| ID | Weak spot | Evidence |\n|----|-----------|----------|\n\n## Competitor research\n\n- \n\n## Plan\n\n## Report\n\n## Three options for the next wave\n\n1. \n2. \n3. \n' "$next" > "$f" && echo "$f"
     ;;
   locks)
-    # Кто держит общие локи триоса прямо сейчас
+    # Who holds the shared trios locks right now
     for d in /tmp/trios_harness.lock /tmp/trios_e2e.lock; do
-      if [ -e "$d/pid" ]; then o=$(cat "$d/pid" 2>/dev/null); echo "$d: pid=${o:-?} $(ps -p "$o" -o etime= 2>/dev/null || echo '(мёртв — лок можно вернуть)')"
-      elif [ -d "$d" ]; then echo "$d: занят, pid-файла нет"; else echo "$d: свободен"; fi
+      if [ -e "$d/pid" ]; then o=$(cat "$d/pid" 2>/dev/null); echo "$d: pid=${o:-?} $(ps -p "$o" -o etime= 2>/dev/null || echo '(dead — the lock can be reclaimed)')"
+      elif [ -d "$d" ]; then echo "$d: busy, no pid file"; else echo "$d: free"; fi
     done
     w=$(pgrep -f "Serialised against every other harness" 2>/dev/null | wc -l | tr -d ' ')
-    echo "ожидают лок кассет: $w процесс(ов)"
+    echo "waiting for the cassette lock: $w process(es)"
     ;;
   next)
-    # Три варианта сотрудничества из последней волны
+    # The three collaboration options from the latest wave
     T=/Users/playra/BrowserOS/trios
     w=$(ls "$T/.trinity"/wave-loop-*.md 2>/dev/null | sort | tail -1)
-    echo "$w:"; sed -n '/[Oo]ptions for the next wave/,$p' "$w" 2>/dev/null || echo "нет волн"
+    echo "$w:"; sed -n '/[Oo]ptions for the next wave/,$p' "$w" 2>/dev/null || echo "no waves"
     ;;
   # ---- continuous improvement loop (added 2026-09-04) -----------------------
   # State, ledger and dashboard live in trios/.trinity/loop/. Every command
@@ -745,6 +745,753 @@ console.log(\"parked dispatches: \"+r.rows.length+\"   paths they fence: \"+s.si
     fi
     node /Users/playra/BrowserOS/trios/.trinity/loop/t27-parity.mjs --build
     ;;
+  tc-audit)
+    # igla-coder-gpu: the splice audit (2026-10-01 judge hole). A body that
+    # closes its fn itself and keeps going turned its tail into module text;
+    # t27c swallowed the spec's own tests -> pair11_d fits_budget FALSE PASS.
+    # The judge now refuses these (blocked_splice); this audits RECORDED
+    # results with the same rule (t27_bench.splice_exact).
+    #   tri tc-audit                   # every results/t27/* dir: EXACT/recorded
+    #   tri tc-audit results/t27/x ... # chosen dirs, or cands.jsonl:results.jsonl
+    #   tri tc-audit --gold            # gate: all 466 gold bodies exact
+    cd /Users/playra/igla-coder-gpu || exit 1
+    shift
+    python3 scripts/t27_splice_audit.py "${@:---all}"
+    ;;
+  tc-contract)
+    # igla-coder-gpu: does the mask the host SENDS constrain what tc_fast
+    # DRAWS? (2026-10-01: undeclared VALUE words were completion targets
+    # that could never terminate -> EMPTY allow-list -> unconstrained draw;
+    # 39/209 m-arm samples in pair11_e, 0 survived.)
+    #   tri tc-contract deadends results/t27/<run>        offline census
+    #   tri tc-contract repro results/t27/<run> '<substr>' --seed N
+    cd /Users/playra/igla-coder-gpu || exit 1
+    shift
+    python3 scripts/t27_mask_contract.py "$@"
+    ;;
+  tc-coreleak)
+    # igla-coder-gpu: is the mask core fitted on the EVAL set? Replays
+    # recorded bodies under a train-derived core (T27_CORE_FROM=train).
+    #   tri tc-coreleak sets | gold | replay <run> ... [--min-train 53]
+    cd /Users/playra/igla-coder-gpu || exit 1
+    shift
+    python3 scripts/t27_core_leak.py "$@"
+    ;;
+  tc-comptime)
+    # igla-coder-gpu: does the judge's "compile" undercount? Re-judges
+    # recorded blocked_compile rows with raw capture; a comptime test
+    # assertion failure is compile+FAIL, not a compile error. Heavy:
+    # queue after `tri tc-loop guard` is idle.
+    #   tri tc-comptime rejudge <run>... [--workers 4] [--items F] | report <run>...
+    cd /Users/playra/igla-coder-gpu || exit 1
+    shift
+    python3 scripts/t27_comptime.py "$@"
+    ;;
+  tc-mutscore)
+    # igla-coder-gpu: mutation score per bench item -- operator mutants
+    # (<=/<, ==/!=, &&/||, +/-, n+1, true/false) on the gold bodies; WEAK =
+    # a valid mutant survives the spec's tests. Re-tags recorded passes.
+    #   tri tc-mutscore cands [--max 8] | names [--max 4] | run [--workers 6] | report [--json]
+    #   tri tc-mutscore passes   -- every exact pass body: GOLD | CONST | NAME | OTHER
+    #   tri tc-mutscore decoys [--max 6] -- return-<in-scope name> bodies; CLEAN = strict minus decoy-passable
+    #   (iteration 9: most model passes are bool-constant coincidences)
+    cd /Users/playra/igla-coder-gpu || exit 1
+    shift
+    python3 scripts/t27_mutscore.py "$@"
+    ;;
+  tc-remote)
+    # igla-coder-gpu: heavy judge jobs run on RAILWAY, never on the MacBook
+    # (owner's rule after two reboots, 2026-10-01). Image = t27c@3f07e547c +
+    # zig 0.16.0 + bench specs@ef7781b52 (remote/Dockerfile).
+    #   tri tc-remote up --job "python3 scripts/t27_diffjudge.py build --workers 4; ..."
+    #   tri tc-remote logs [-n 40] [--build] | wait (exit 0 ok/1 fail/2 timeout) | fetch [--take results/t27/diff] | down
+    cd /Users/playra/igla-coder-gpu || exit 1
+    shift
+    python3 scripts/remote_judge.py "$@"
+    ;;
+  tc-arena)
+    # igla-coder-gpu: the selection arena -- which checkpoint goes to WARS.
+    # Same gates (G1 file, G2 engine, G3 teacher NLL), same items, same seed,
+    # same t27c judge for every candidate; rank by diff-checked pass, the
+    # champion changes only on McNemar p<0.05 (scripts/tc_arena.py docstring).
+    # HEAVY: runs on Railway. Progress streams to the board (tri tc-board).
+    #   tri tc-arena up [--workers 40]   stage + deploy the arena job
+    #   tri tc-arena fetch               pull results/t27/arena after JOB DONE
+    #   tri tc-arena report              local, light: leaderboard table
+    cd /Users/playra/igla-coder-gpu || exit 1
+    shift
+    case "${1:-report}" in
+      up) shift; python3 scripts/remote_judge.py up --job "$(python3 scripts/tc_arena.py job "$@")" ;;
+      fetch) python3 scripts/remote_judge.py fetch --take results/t27/arena ;;
+      *) python3 scripts/tc_arena.py "$@" ;;
+    esac
+    ;;
+  tc-board)
+    # igla-coder-gpu: the live board (board/, Railway service "board" in
+    # project igla-judge): https://board-production-2dec.up.railway.app
+    # Rebuild board/snapshot.json from committed artifacts and redeploy.
+    #   tri tc-board            snapshot + deploy
+    #   tri tc-board snap       snapshot only (board/snapshot.json)
+    #   tri tc-board open       print the URL
+    #   tri tc-board t27 [--out P]  the same board as a t27 module
+    #       (queen_igla_board) for app.t27.ai/game/wars; copy it to trinity
+    #       apps/website/specs/queen/igla_board.t27, then run
+    #       node scripts/igla-board-from-spec.mjs there (recompiles it and
+    #       re-derives every McNemar p). LEVERS in scripts/board_t27.py is the
+    #       only hand list.
+    cd /Users/playra/igla-coder-gpu || exit 1
+    shift
+    case "${1:-deploy}" in
+      snap) python3 scripts/board_snapshot.py ;;
+      t27) shift; python3 scripts/board_t27.py "$@" ;;
+      open) echo "https://board-production-2dec.up.railway.app" ;;
+      *) python3 scripts/board_snapshot.py && (cd work/remote/ctx && \
+           railway up /Users/playra/igla-coder-gpu/board --path-as-root -s board -d) ;;
+    esac
+    ;;
+  tc-restore)
+    # igla-coder-gpu: a reboot wipes /tmp -- the pinned bench tree and the
+    # t27c judge live there, and every judge's Pool then respawns workers
+    # forever on FileNotFoundError (2026-10-01 night10). Recreate both
+    # (worktree prune first: a stale "prunable" entry fools `worktree list`).
+    G=/Library/Developer/CommandLineTools/usr/bin/git
+    $G -C "$HOME/t27" worktree prune
+    [ -d /tmp/t27-bench/specs ] || $G -C "$HOME/t27" worktree add --detach /tmp/t27-bench ef7781b52 >/dev/null
+    [ -d /tmp/t27c-build/bootstrap ] || $G -C "$HOME/t27" worktree add --detach /tmp/t27c-build 3f07e547c >/dev/null
+    [ -x /tmp/t27c-build/target/release/t27c ] || (cd /tmp/t27c-build && cargo build --release -p t27c 2>&1 | tail -1)
+    ls -la /tmp/t27c-build/target/release/t27c && ls -d /tmp/t27-bench/specs
+    shift
+    ;;
+  tc-diffjudge)
+    # igla-coder-gpu: differential judge IN t27 -- inserts __gold_<fn> and
+    # `f(x) == __gold_f(x)` tests on edge inputs the spec never tries; gold
+    # vs itself gates each tuple. diff_kill = spec tests pass, diff fails.
+    #   tri tc-diffjudge build [--k 12] | judge mutants|passes | report
+    #   (scripts/t27_diffjudge.py; heavy, guard sees it)
+    #   wider coverage (loop 18): DJ_OUT=diff_d DJ_STRUCT=1 DJ_NULLARY=1 DJ_BOUNDS=48
+    #   build -> struct-of-scalars + &str + nullary items; run it remotely.
+    cd /Users/playra/igla-coder-gpu || exit 1
+    shift
+    python3 scripts/t27_diffjudge.py "$@"
+    ;;
+  tc-mutant3)
+    # igla-coder-gpu: value-pinning audit -- judge `return 2;`/`return 7;`
+    # per numeric item; LOOSE = the spec's tests accept a wrong constant.
+    #   tri tc-mutant3 cands | report [--model <run> ...]   (scripts/t27_mutant3.py)
+    cd /Users/playra/igla-coder-gpu || exit 1
+    shift
+    python3 scripts/t27_mutant3.py "$@"
+    ;;
+  tc-retrieve)
+    # igla-coder-gpu: retrieval ceiling -- copy a same-name train fn body,
+    # judge it exactly; identical bodies reported apart (leakage).
+    #   tri tc-retrieve index | report [--model <run> ...]   (scripts/t27_retrieval.py)
+    cd /Users/playra/igla-coder-gpu || exit 1
+    shift
+    python3 scripts/t27_retrieval.py "$@"
+    ;;
+  tc-cathead)
+    # igla-coder-gpu (loop 30): catalog headline per arm on ALL 57 vs the
+    # MS=1 set (44 items whose tests kill every valid mutant): exact compile,
+    # logic, spec pass, honest (diff-judged, keyed by item+body), unjudged.
+    #   tri tc-cathead [--judge <judge_passes.jsonl>] [run ...]
+    shift; cd /Users/playra/igla-coder-gpu && exec python3 scripts/t27_cat_headline.py "$@"
+    ;;
+  tc-disc)
+    # igla-coder-gpu: paired A/B readout -- EXACT per-item discordants
+    # (splice-audited), compute contract counters, chars/sample.
+    #   tri tc-disc <base_run> <run> [run ...]     (names under results/t27/)
+    #   catalog runs: tri tc-disc catalog/sc_tuned catalog/sc_cpu_b_s1 (own items+tree; exact McNemar)
+    cd /Users/playra/igla-coder-gpu || exit 1
+    shift
+    python3 scripts/t27_disc.py "$@"
+    ;;
+  tc-loop)
+    # igla-coder-gpu: the improvement loop's first command every iteration.
+    # Live selfcheck runs + progress, finished/dead/untracked results dirs,
+    # log Tracebacks, mask-edited-mid-run, journal tail. Exit 1 = anomaly.
+    #   tri tc-loop                    # status + anomalies
+    #   tri tc-loop run <out> K=V ...  # lock-guarded background selfcheck
+    #                                  # (REFUSES while another is live)
+    #   tri tc-loop chain "<out> K=V" "<out2> K=V"  # queue, one at a time,
+    #                                  # each waits on guard (use nohup)
+    #   tri tc-loop guard              # exit 1 if a run is live (before
+    #                                  # editing t27_gen_masked.py!)
+    cd /Users/playra/igla-coder-gpu || exit 1
+    shift
+    python3 scripts/tc_loop.py "${@:-status}"
+    ;;
+  tc-curve)
+    # igla-coder-gpu: compare two selfcheck runs' budget curves from RAW
+    # results.jsonl under ONE fixed definition (pass-union / past-parser-
+    # union). NEVER compare summary.json curves across runs -- they were
+    # built under different definitions (2026-09-30: a strict1 summary
+    # said compile@1=68, raw rows give 253; a "3.7x jump" claim died only
+    # at recomputation).
+    #   tri tc-curve <dirA> <dirB> [budgets=1,2,3,5,10,15]
+    cd /Users/playra/igla-coder-gpu || exit 1
+    python3 scripts/t27_curve_cmp.py "$2" "$3" ${4:+--budgets "$4"}
+    ;;
+  tc-pair)
+    # igla-coder-gpu: PAIRED A/B of two selfcheck arms at one seed -- the
+    # causal protocol (skill paired-ab-tiny-model; without SC_SEED a
+    # 30-item pass count is NOISE, see research/REPAIR_BODY_2026-09-29.md).
+    #   tri tc-pair <SEED> [BUDGET=15] [ITEMS=30]
+    # Env: PAIR_A / PAIR_B = env-string for arm B's EXTRA knobs, e.g.
+    #   PAIR_B="SC_REPAIR=1"        (treatment: repair on)
+    #   PAIR_B="SC_EARLY=1"         (treatment: early abort)
+    #   PAIR_B="SC_PROBE=1 SC_REDRAW=3"  (probe abort + kill-and-restart)
+    # Arm A is always the bare base. Both arms get SC_SEED, same rounds,
+    # same items; output dirs results/t27/pair<SEED>_{a,b}. Prints the
+    # summary diff + paired-body identity count (0 unexplained = causal).
+    IG=/Users/playra/igla-coder-gpu
+    cd "$IG" || exit 1
+    SEED="${2:?usage: tri tc-pair <SEED> [BUDGET=15] [ITEMS=30]}"
+    BUD="${3:-15}"; N="${4:-30}"
+    for arm in a b; do
+      KNOBS=""; [ "$arm" = b ] && KNOBS="${PAIR_B:-}"
+      eval "env SC_OUT=results/t27/pair${SEED}_${arm} SC_ROUNDS=$BUD \
+        SC_ITEMS=$N SC_SEED=$SEED $KNOBS tri tc-t27selfcheck" \
+        || exit 1
+    done
+    python3 - "$SEED" <<'PYEOF'
+import json, sys
+seed = sys.argv[1]
+sa = json.load(open(f"results/t27/pair{seed}_a/summary.json"))
+sb = json.load(open(f"results/t27/pair{seed}_b/summary.json"))
+for k in ("items", "samples", "resolved_pass", "resolved_compile"):
+    d = "" if sa[k] == sb[k] else "   <-- DELTA"
+    print(f"{k:18s} A {sa[k]:>5}   B {sb[k]:>5}{d}")
+ra = {json.loads(l)["id"]: json.loads(l)["status"]
+      for l in open(f"results/t27/pair{seed}_a/results.jsonl")}
+rb = {json.loads(l)["id"]: json.loads(l)["status"]
+      for l in open(f"results/t27/pair{seed}_b/results.jsonl")}
+diff = [i for i in set(ra) & set(rb) if ra[i] != rb[i]]
+print(f"item status diffs: {len(diff)}")
+for i in diff[:10]: print(f"  {i}: {ra[i]} -> {rb[i]}")
+ba = {(r["id"], r["round"], r["k"]): r["body"]
+      for l in open(f"results/t27/pair{seed}_a/cands.jsonl")
+      for r in ([json.loads(l)] if '"body"' in l else [])}
+bb = {(r["id"], r["round"], r["k"]): r["body"]
+      for l in open(f"results/t27/pair{seed}_b/cands.jsonl")
+      for r in ([json.loads(l)] if '"body"' in l else [])}
+common = set(ba) & set(bb)
+same = sum(1 for k in common if ba[k] == bb[k])
+print(f"paired bodies: {len(common)} common, {same} identical, "
+      f"{len(common)-same} differ (treatment transform)")
+PYEOF
+    ;;
+  tc-taxonomy)
+    # igla-coder-gpu: one-command failure taxonomy over mask artifacts --
+    # BOTH halves of the failure mass in one run:
+    #   blocked_compile -> scripts/t27_error_taxonomy.py (first zig error:
+    #     undeclared 65%, type 12.5%, ...)
+    #   blocked_codegen -> scripts/t27_codegen_taxonomy.py (t27 parser:
+    #     module keywords in body 30%, brace imbalance 50%, unterminated
+    #     strings 9%; see research/REPAIR_BODY_2026-09-29.md)
+    # Defaults to the committed v1/v2/v3 sets; TX_SAMPLE caps each run
+    # (0 = all codegen; the compile script has its own --sample default 120).
+    IG=/Users/playra/igla-coder-gpu
+    cd "$IG" || exit 1
+    T27=${TX_T27:-/tmp/t27-bench}
+    T27C=${TX_T27C:-/tmp/t27c-build/target/release/t27c}
+    CANDS=${TX_CANDS:-"results/t27/masked_tc.jsonl results/t27/masked2_tc.jsonl results/t27/masked3_tc.jsonl"}
+    CHECKS=${TX_CHECKS:-"results/t27/check_masked/results.jsonl results/t27/check_masked2/results.jsonl results/t27/check_masked3/results.jsonl"}
+    [ -d "$T27" ] && [ -x "$T27C" ] || { echo "need $T27 and $T27C (tri tc-t27bench sets them up)"; exit 1; }
+    echo "== blocked_compile (zig stage, first error) =="
+    python3 scripts/t27_error_taxonomy.py \
+      --cands results/t27/masked_tc.jsonl --check results/t27/check_masked/results.jsonl \
+      --items t27/items.jsonl --t27 "$T27" --t27c "$T27C" \
+      --sample "${TX_SAMPLE_COMPILE:-120}" --workers "${TX_WORKERS:-4}"
+    echo "== blocked_codegen (t27 parser stage) =="
+    python3 scripts/t27_codegen_taxonomy.py \
+      --cands $CANDS --check $CHECKS \
+      --items t27/items.jsonl --t27 "$T27" --t27c "$T27C" \
+      --sample "${TX_SAMPLE:-0}" --workers "${TX_WORKERS:-4}" \
+      --out "${TX_OUT:-/tmp/codegen_taxonomy.json}"
+    ;;
+  tc-maskcheck)
+    # igla-coder-gpu: the mask gate. Default = unit battery only (seconds,
+    # safe while the MacBook is loaded); --full adds the gold replay (~6 min
+    # single core; the remote arena job runs it as its first line anyway).
+    #   tri tc-maskcheck [--full] [--mask-src <old mask>]   (negative control)
+    IG=/Users/playra/igla-coder-gpu
+    cd "$IG" || exit 1
+    shift
+    if [ "${1:-}" = "--full" ]; then shift; set -- "$@"; else set -- --units-only "$@"; fi
+    nice python3 scripts/t27_mask_check.py --t27 /tmp/t27-bench \
+      --tokenizer results/data8k/tokenizer.json "$@" | grep -v '^OK'
+    exit "${PIPESTATUS[0]}"
+    ;;
+  tc-gpuft)
+    # igla-coder-gpu: the B fine-tune on a RunPod 4090 (remote/gpu_ft.sh: 5 arms
+    # in ~12 min + the catalog judge on the pod, ~25 min/model). Loop 25.
+    #   tri tc-gpuft up|status|collect [pod name, default gpuft]
+    # up/collect read the balance (log both in LEDGER.md); pod self-stops.
+    #   JOB=gpu_ft2 GPU="NVIDIA L4,NVIDIA RTX PRO 4000 Blackwell" tri tc-gpuft up gpuft2
+    # JOB picks remote/<JOB>.sh (loop 26: param gate + --fim-logic arms, see
+    # its docstring); GPU is a priority list (the volume pins EU-RO-1).
+    cd /Users/playra/igla-coder-gpu || exit 1
+    shift
+    exec bash scripts/gpu_ft_pod.sh "$@"
+    ;;
+  tc-podwait)
+    # igla-coder-gpu: block until the first listed RunPod runq job is DONE
+    # (loop 29; scripts/pod_wait.sh). Run it in the background.
+    #   tri tc-podwait gpuft5a:gpu_ft5a gpuft5b:gpu_ft5b   (exit 0 done / 2 timeout)
+    cd /Users/playra/igla-coder-gpu || exit 1
+    shift
+    exec bash scripts/pod_wait.sh "$@"
+    ;;
+  tc-cpuft-collect)
+    # igla-coder-gpu: one poll of a tc-cpuft job; when done: fetch ONLY this
+    # suffix's arms + judges, down (only after a good fetch), val + tc-disc.
+    #   SEED=1 SHUF=0 tri tc-cpuft-collect   (exit 0 ok/1 job fail/2 running/3 fetch fail)
+    cd /Users/playra/igla-coder-gpu || exit 1
+    exec bash scripts/cpu_ft_collect.sh
+    ;;
+  tc-cpuft-cmp)
+    # igla-coder-gpu: a live replication vs its reference run, step by step
+    # (train loss + eval bpb deltas) with a verdict SAME-ORDER / INTERLEAVE /
+    # REPLICA. Loop 22: "seed 1" sat on seed 0's data order.
+    #   tri tc-cpuft-cmp b_mix_s1 b_mix [--local]
+    cd /Users/playra/igla-coder-gpu || exit 1
+    shift
+    exec python3 scripts/cpu_ft_cmp.py "$@"
+    ;;
+  tc-cpuft)
+    # igla-coder-gpu: CPU fine-tune of the 9M tc model on Railway (loop 20),
+    # no RunPod key needed. HF TC02 bins -> train.py ckpts (scripts/tc02_to_pt.py,
+    # byte gate) -> two arms of remote/cpu_ft.sh -> val.jsonl + exported .tc02.
+    # Railway quota is 24 CPUs (nproc lies 48): <=16 torch threads per process.
+    # SEED=N [SHUF=0|1] tri tc-cpuft (suffix rule: remote/cpu_ft_env.sh; SHUF=1 default
+    # for N>0 = --shuffle_chunks, a real data-order replication) = replication arms, trained AND judged on the 57
+    # catalog items in the same container (remote/cpu_ft_judge.sh): the local
+    # uplink cannot ship the 34 MB of bins (loop 21). Ships one file of cpu_ft,
+    # never the dir (it holds the local .tc02 bins).
+    # Then: tri tc-remote fetch --sub results/t27/cpu_ft results/t27/catalog/sc_cpu_a_sN
+    #   results/t27/catalog/sc_cpu_b_sN ; tri tc-remote down
+    cd "$HOME/igla-coder-gpu" || exit 1
+    s=${SEED:-0}; shift
+    exec python3 scripts/remote_judge.py up --ssh --ship cpu_ft/ft_cat8k.tar.xz catalog/items.decon.jsonl \
+      catalog/pool.txt catalog/manifest.json \
+      --job "SEED=$s SHUF=${SHUF:-} bash remote/cpu_ft.sh; SEED=$s SHUF=${SHUF:-} bash remote/cpu_ft_judge.sh" "$@"
+    ;;
+  tc-val)
+    # igla-coder-gpu: masked val bits/byte of tc ckpts on a data dir (light,
+    # 2 threads): tri tc-val --data work/ft_mix8k --ckpt a.pt b.pt [--tokens N]
+    cd "$HOME/igla-coder-gpu" || exit 1
+    shift
+    OMP_NUM_THREADS=${OMP_NUM_THREADS:-2} exec python3 scripts/tc_val.py "$@"
+    ;;
+  tc-honest)
+    # igla-coder-gpu: the honest strict headline from the diff judge (loop 19).
+    # computed_pass = fn has args AND agrees with gold on every diff tuple;
+    # nullary_pass only confirms a value; splice = judged as another program.
+    # Reads results/t27/diff_d/judge_passes.jsonl (refresh it remotely:
+    # tri tc-remote up --ship diff_d <model dirs> --job "DJ_OUT=diff_d
+    # python3 scripts/t27_diffjudge.py judge passes --workers 16"). Light.
+    cd /Users/playra/igla-coder-gpu || exit 1
+    DJ_OUT=diff_d python3 scripts/t27_diffjudge.py report | sed -n '/^honest strict/,$p'
+    ;;
+  tc-sync)
+    # igla-coder-gpu: is a --diff arena arm an exact pair of its plain arm?
+    # Same body on every shared sample; pass->diff_kill the only status
+    # change. Run it BEFORE reading `tri tc-abpair` on a diff arm. Light.
+    #   tri tc-sync final_tuned_m14 final_tuned_diff
+    cd /Users/playra/igla-coder-gpu || exit 1
+    shift
+    python3 scripts/tc_arena.py sync "$@"
+    ;;
+  tc-abpair)
+    # igla-coder-gpu: paired A/B of two arena final dirs (same items, seed
+    # policy, engine): exact McNemar on per-item compile + pass and compiled
+    # samples per mask arm. Light, local.
+    #   tri tc-abpair final_tuned final_tuned_m12
+    #   tri tc-abpair A B A_s12 B_s12      (per seed + POOLED replication test)
+    #   tri tc-abpair                      (every tagged arm vs the baseline OF ITS
+    #                                       SEED: *_sN -> final_tuned_old_sN, else
+    #                                       final_tuned; never pairs across seeds)
+    IG=/Users/playra/igla-coder-gpu
+    cd "$IG" || exit 1
+    shift
+    if [ $# -ge 2 ]; then
+      nice python3 scripts/tc_arena.py pair "$@"
+    else
+      for d in results/t27/arena/final_tuned_*/; do
+        d=$(basename "$d"); [ "$d" = final_tuned_e8 ] && continue   # a candidate, not an arm
+        case "$d" in
+          final_tuned_old_s*) continue ;;                            # a baseline
+          *_s[0-9]*) base="final_tuned_old_${d##*_}" ;;
+          *) base=final_tuned ;;
+        esac
+        [ -d "results/t27/arena/$base" ] || { echo "== $d: no same-seed baseline $base, skipped"; continue; }
+        echo "== $base vs $d"
+        nice python3 scripts/tc_arena.py pair "$base" "$d"
+      done
+    fi
+    ;;
+  tc-seen)
+    # seen-vs-unseen gold-body NLL per item group (did the fine-tune learn its bodies?) (igla-coder-gpu)
+    shift; cd "$HOME/igla-coder-gpu" && exec nice python3 scripts/t27_seen_nll.py "$@" ;;
+  tc-reach)
+    # param reach at the return decision, teacher-forced on gold: P_param vs P_const,
+    # pre-registered LIVE/PARTIAL/DEAD verdict; run before any 'must read X' rule (igla-coder-gpu)
+    #   tri tc-reach --models work/arena/tuned.pt ... [--groups catalog bench]
+    shift; cd "$HOME/igla-coder-gpu" && exec nice python3 scripts/t27_reach.py "$@" ;;
+  tc-card)
+    # render a tern_tc release from its card spec, then run its verify.sh on a COPY
+    # (never inside the release tree) (igla-coder-gpu, loop 28)
+    #   tri tc-card specs/hf/model_card_ft_b.t27 hf_release_ft_b
+    shift; spec="${1:?usage: tri tc-card <card.t27> <release dir>}"; rel="${2:?release dir}"
+    cd "$HOME/igla-coder-gpu" || exit 1
+    node scripts/model_card_t27_from_spec.mjs --spec "$spec" --release "$rel" || exit 1
+    tmp=$(mktemp -d "${TMPDIR:-/tmp}/tc-card.XXXXXX") && cp -R "$rel"/. "$tmp"/ \
+      && (cd "$tmp" && sh scripts/verify.sh); rc=$?; rm -rf "$tmp"; exit $rc ;;
+  tc-relabel)
+    # judge relabeling: probe tests whose expected values t27c observes (igla-coder-gpu)
+    shift; cd "$HOME/igla-coder-gpu" && exec nice python3 scripts/t27_relabel.py "$@" ;;
+  tc-catalog)
+    # igla-coder-gpu: new judgeable t27 items from the trinity website spec
+    # catalog (stage locally -> items on Railway -> decon vs the bench).
+    #   tri tc-catalog stage --catalog <trinity>/apps/website/public/t27/files
+    #   tri tc-catalog decon | report
+    # Remote recipe and leak classes: scripts/t27_catalog.py docstring.
+    shift; cd "$HOME/igla-coder-gpu" && exec nice python3 scripts/t27_catalog.py "$@"
+    ;;
+  tc-ceiling)
+    # igla-coder-gpu: the "sample more and select" ceiling from committed
+    # artifacts -- union of items that EVER passed over every run, with the
+    # diff-judge verdict per item. Price a selection lever before spending.
+    #   tri tc-ceiling [results/t27/<dir> ...]   (default: arena finals + strict runs)
+    cd /Users/playra/igla-coder-gpu || exit 1
+    shift
+    nice python3 scripts/t27_union_ceiling.py "$@"
+    ;;
+  tc-soundness)
+    # igla-coder-gpu: mask SOUNDNESS over a remote taxonomy dump -- every
+    # `undeclared identifier` death on a declare-rule arm (m*) is a mask
+    # defect or a known gap: glued_decl / static_leak / body_keyword /
+    # in_body / type_core / truncated / value_core / other. Light, local.
+    #   tri tc-soundness [rows.jsonl cands.jsonl]   (default: arena champion)
+    #   tri tc-soundness ab [tag ...]               baseline vs final_tuned_<tag>
+    #                                               (default tags: m12 m13)
+    # Rows come from t27_error_taxonomy.py --dump (run it via tri tc-remote).
+    IG=/Users/playra/igla-coder-gpu
+    cd "$IG" || exit 1
+    shift
+    if [ "${1:-}" = "ab" ]; then
+      shift
+      tags=("$@"); [ ${#tags[@]} -eq 0 ] && tags=(m12 m13)
+      pairs=("tuned_rows:final_tuned")
+      for t in "${tags[@]}"; do pairs+=("tuned_${t}_rows:final_tuned_${t}"); done
+      for pair in "${pairs[@]}"; do
+        r=results/t27/tax12/${pair%%:*}.jsonl; c=results/t27/arena/${pair##*:}/cands.jsonl
+        [ -f "$r" ] && [ -f "$c" ] && nice python3 scripts/t27_mask_soundness.py --rows "$r" --cands "$c" | grep -v '^core_vocab' || echo "missing $r or $c"
+      done
+    else
+      nice python3 scripts/t27_mask_soundness.py \
+        --rows "${1:-results/t27/tax12/tuned_rows.jsonl}" \
+        --cands "${2:-results/t27/arena/final_tuned/cands.jsonl}" "${@:3}"
+    fi
+    ;;
+  tc-prefill)
+    # igla-coder-gpu: prefill A/B bench -- chunked (default C) vs sequential
+    # (TC_PREFILL_CHUNK=0) at several prompt sizes x thread counts, using the
+    # E8 pair (/tmp/tt8 if present, else model3_q8). Prints the [split:] lines
+    # and the speed ratio per cell; the exactness gate lives in tc-speed.
+    # Env: PF_SIZES (comma list of prompt ids, default 512,1535,3990),
+    #      PF_CHUNKS (default 32), PF_THREADS (default 1,5).
+    IG=/Users/playra/igla-coder-gpu
+    M=$IG/c_infer/model3_q8.bin
+    [ -f /tmp/tt8/model.bin ] && M=/tmp/tt8/model.bin
+    PF_SIZES=${PF_SIZES:-512,1535,3990}
+    PF_CHUNKS=${PF_CHUNKS:-32}
+    PF_THREADS=${PF_THREADS:-1,5}
+    for n in $(echo $PF_SIZES | tr , ' '); do
+      IDS=$(python3 -c "print(','.join((('1 3 204 276 405 659 85 1516 278 320 306 317 445 779 317 85 1516 740 306 317 705 779 317 85').split()*200)[:$n]))")
+      for t in $(echo $PF_THREADS | tr , ' '); do
+        TC_PREFILL_CHUNK=0 "$IG/c_infer/tc_fast" "$M" --simd --threads $t \
+          --greedy --prompt-ids "$IDS" --max 10 2>/dev/null | grep 'split:' > /tmp/pf_seq.$$ 2>/dev/null
+        s0=$(grep -o 'prefill [0-9]* ids in [0-9.]*s' /tmp/pf_seq.$$ | grep -o '[0-9.]*s$' | tr -d s)
+        line="n$n t$t seq ${s0}s:"
+        for c in $(echo $PF_CHUNKS | tr , ' '); do
+          TC_PREFILL_CHUNK=$c "$IG/c_infer/tc_fast" "$M" --simd --threads $t \
+            --greedy --prompt-ids "$IDS" --max 10 2>/dev/null | grep 'split:' > /tmp/pf_c.$$ 2>/dev/null
+          sc=$(grep -o 'prefill [0-9]* ids in [0-9.]*s' /tmp/pf_c.$$ | grep -o '[0-9.]*s$' | tr -d s)
+          [ -n "$s0" ] && [ -n "$sc" ] && ratio=$(python3 -c "print(f'x{$s0/$sc:.2f}')") || ratio='?'
+          line="$line C$c ${sc}s $ratio;"
+        done
+        echo "$line"
+      done
+    done
+    rm -f /tmp/pf_seq.$$ /tmp/pf_c.$$
+    ;;
+  tc-speed)
+    # igla-coder-gpu: rebuild c_infer/tc_fast, run the near-parity gate,
+    # then the greedy ladder (t1/t4/t5) and one sampled run. The one
+    # command for "did the fast engine survive the night and how fast
+    # is it now" -- the same sequence every speed change is gated by.
+    IG=/Users/playra/igla-coder-gpu
+    T=/tmp/t27c-build/target/release/t27c
+    (cd "$IG/c_infer" && T27C="$T" make tc_fast 2>&1 | grep -E "error" && exit 1)
+    (cd "$IG" && python3 scripts/parity_tc_fast.py --skip-build --nll-tol 0.05 \
+      --model c_infer/model_q8.bin --model-fast c_infer/model3_q8.bin) | tail -1
+    echo "-- greedy ladder (500 tok) --"
+    for t in 1 4 5; do
+      "$IG/c_infer/tc_fast" "$IG/c_infer/model3_q8.bin" --simd --threads $t \
+        --greedy --prompt "module fib;" --tokens 500 2>&1 \
+        | grep -o "= [0-9.]* tok/s" | sed "s/^/t$t /"
+    done
+    echo "-- sampled (default temp) --"
+    "$IG/c_infer/tc_fast" "$IG/c_infer/model3_q8.bin" --simd --threads 5 \
+      --prompt "module fib;" --tokens 500 2>&1 | grep -o "= [0-9.]* tok/s"
+    echo "-- prefill A/B (1535-id prompt, t5; C0=sequential, C32=chunked default) --"
+    IDS=$(python3 -c "print(','.join((('1 3 204 276 405 659 85 1516 278 320 306 317 445 779 317 85 1516 740 306 317 705 779 317 85').split()*70)[:1535]))")
+    for c in 0 32; do
+      TC_PREFILL_CHUNK=$c "$IG/c_infer/tc_fast" "$IG/c_infer/model3_q8.bin" --simd --threads 5 \
+        --greedy --prompt-ids "$IDS" --max 50 2>&1 | grep 'split:' | sed "s/^/C$c /"
+    done
+    echo "-- kv-i8 ladder (gate: median|dNLL|<0.02 max<0.10) --"
+    (cd "$IG" && python3 scripts/kv_ladder.py --files 3 --ctx 2048 \
+      --threads 1,5 2>/dev/null || echo "kv ladder unavailable") | tail -7
+    ;;
+  tc-t27bench)
+    # igla-coder-gpu: the t27 fill-in-the-middle bench on the C engine.
+    # Generates 466 items x 10 samples from the t27-tuned tc model via
+    # tc_fast (restart-safe, ~80 min first run) and judges them with the
+    # exact judge (t27c test-report). Env knobs: T27_ITEMS, TC_MODEL,
+    # CANDS, N. Prints the parse/compile/pass summary at the end.
+    IG=/Users/playra/igla-coder-gpu
+    WT=/tmp/t27-bench
+    /Library/Developer/CommandLineTools/usr/bin/git -C "$HOME/t27" worktree list \
+      | grep -q "$WT" || /Library/Developer/CommandLineTools/usr/bin/git -C "$HOME/t27" \
+        worktree add --detach "$WT" ef7781b5 >/dev/null
+    cd "$IG" || exit 1
+    # regression gate first: mask-rule changes must keep the gold replay
+    # and the unit invariants green (t27_mask_check exits 1 otherwise)
+    python3 scripts/t27_mask_check.py --t27 "$WT" \
+      --tokenizer results/data8k/tokenizer.json || exit 1
+    # MERGE FIRST: if the run was parallelised, the side files
+    # cands_tc_2a/2b exist -- fold them (dedup by id,k) back into CANDS
+    # so the gen step sees their ids as done instead of redoing them.
+    if compgen -G "results/t27/cands_tc_2*.jsonl" > /dev/null; then
+      python3 - "${CANDS:-results/t27/cands_tc.jsonl}" results/t27/cands_tc_2*.jsonl <<'PYEOF'
+import json, sys
+main, seen = sys.argv[1], set()
+rows = [l for l in open(main)]
+for l in rows:
+    j = json.loads(l)
+    seen.add((j["id"], j["k"]))
+with open(main, "a") as fo:
+    added = 0
+    for path in sys.argv[2:]:
+        for l in open(path):
+            j = json.loads(l)
+            if (j["id"], j["k"]) in seen: continue
+            seen.add((j["id"], j["k"]))
+            fo.write(l)
+            added += 1
+print(f"folded {added} samples into {main} (now {len(seen)})")
+PYEOF
+    fi
+    .venv-eval/bin/python3 scripts/t27_gen_tc.py --t27 "$WT" \
+      --items "${T27_ITEMS:-t27/items.jsonl}" --model "${TC_MODEL:-c_infer/t27_tuned/model.bin}" \
+      --tokenizer results/data8k/tokenizer.json --out "${CANDS:-results/t27/cands_tc.jsonl}" \
+      --n "${N:-10}" --max-new 384 || exit 1
+    python3 t27_bench.py check --t27 "$WT" --items "${T27_ITEMS:-t27/items.jsonl}" \
+      --cands "${CANDS:-results/t27/cands_tc.jsonl}" --out results/t27/check_tc \
+      --t27c /tmp/t27c-build/target/release/t27c --workers 4
+    ;;
+  tc-t27mask)
+    # igla-coder-gpu: scope-aware identifier MASKED generation on the t27
+    # bench via tc_fast --step-io (see scripts/t27_gen_masked.py). Same 30
+    # failed items as the feedback arm, so the three arms (plain / feedback
+    # / masked) compare back-to-back. Env: MASK_VER (artifact version
+    # suffix, default 3 -- v1/v2/v3 must NOT fold into one file), MASK_N,
+    # MASK_THREADS, MASK_OFF=1 for the paired no-mask control,
+    # MASK_KV_I8=1 for the int8 KV cache (faster, approximate -- the
+    # token stream shifts, not comparable to f32-KV artifacts).
+    IG=/Users/playra/igla-coder-gpu
+    WT=/tmp/t27-bench
+    /Library/Developer/CommandLineTools/usr/bin/git -C "$HOME/t27" worktree list \
+      | grep -q "$WT" || /Library/Developer/CommandLineTools/usr/bin/git -C "$HOME/t27" \
+        worktree add --detach "$WT" ef7781b5 >/dev/null
+    cd "$IG" || exit 1
+    # regression gate first: mask-rule changes must keep the gold replay
+    # and the unit invariants green (t27_mask_check exits 1 otherwise)
+    python3 scripts/t27_mask_check.py --t27 "$WT" \
+      --tokenizer results/data8k/tokenizer.json || exit 1
+    # MERGE FIRST: parallel drivers write masked_tc_0/1/2.jsonl -- fold them
+    # into the main file (dedup by id,k) before gen sees what is done.
+    if compgen -G "results/t27/masked${MASK_VER:-3}_tc_[0-9]*.jsonl" > /dev/null; then
+      python3 - "${MASK_OUT:-results/t27/masked${MASK_VER:-3}_tc.jsonl}" results/t27/masked${MASK_VER:-3}_tc_[0-9]*.jsonl <<'PYEOF'
+import json, sys, os
+main, seen = sys.argv[1], set()
+if os.path.exists(main):
+    for l in open(main):
+        j = json.loads(l); seen.add((j["id"], j["k"]))
+    rows = []
+else:
+    rows = []
+with open(main, "a") as fo:
+    added = 0
+    for path in sys.argv[2:]:
+        for l in open(path):
+            j = json.loads(l)
+            if (j["id"], j["k"]) in seen: continue
+            seen.add((j["id"], j["k"])); fo.write(l); added += 1
+print(f"folded {added} samples into {main} (now {len(seen)})")
+PYEOF
+    fi
+    EXTRA=""
+    [ -n "${MASK_OFF:-}" ] && EXTRA="--off"
+    [ "${MASK_KV_I8:-0}" = "1" ] && EXTRA="$EXTRA --kv-i8"
+    python3 scripts/t27_gen_masked.py --t27 "$WT" \
+      --items t27/items.jsonl --cands results/t27/cands_tc.jsonl \
+      --check results/t27/check_tc_partial/results.jsonl \
+      --model c_infer/t27_tuned/model.bin --tokenizer results/data8k/tokenizer.json \
+      --out "${MASK_OUT:-results/t27/masked${MASK_VER:-3}_tc.jsonl}" --slice 0:30 \
+      --n "${MASK_N:-5}" --temperature 0.8 --threads "${MASK_THREADS:-2}" $EXTRA || exit 1
+    python3 t27_bench.py check --t27 "$WT" --items t27/items.jsonl \
+      --cands "${MASK_OUT:-results/t27/masked${MASK_VER:-3}_tc.jsonl}" \
+      --out "results/t27/check_masked${MASK_VER:-3}/results.jsonl" \
+      --t27c /tmp/t27c-build/target/release/t27c --workers 4
+    ;;
+  tc-t27selfcheck)
+    # igla-coder-gpu: the model verifies ITSELF through t27c -- rounds of
+    # (generate one sample per unresolved item -> t27c test-report -> stop
+    # the item at its first pass). Arms rotate per round: m<temp> masked,
+    # p<temp> plain. MEASURED 2026-09-29: diversity must come from mask
+    # RULES, not temperatures (3 rule-arms: compile 15/30 union vs 3/30
+    # for 3 temps); plain arms are dead weight -- defaults are masked-only.
+    # Restart-safe: re-run with a larger --rounds to CONTINUE the rotation.
+    # Env: SC_OUT (default results/t27/selfcheck1), SC_ROUNDS (5),
+    # SC_ARMS (m0.8,w0.8,m0.7,w0.7 -- w = wide VALUE-core rule), SC_ITEMS (30), SC_STOP (pass|compile),
+    # SC_SEED=<int> (deterministic per-job sampling seeds; PAIRED A/Bs:
+    #   same seed base + same arms = identical streams, a pass delta is
+    #   causal; without it tc_fast is time-seeded and 30-item pass counts
+    #   are noise -- 2026-09-29 base30 3 vs repair30 0 on same code paths)
+    # SC_WORKERS (3), SC_REPAIR=1 (strip module-level lines + unterminated
+    # strings; keep ON), SC_EARLY=1 (abort repetition tail-locks mid-decode
+    # via engine "x", cascade_abort n=6/reps=3 -- gold-safe 0/466, catches
+    # 22/218 cascades; measured WEAK, A/B before trusting)
+    # SC_ITEMS_FILE=<jsonl> (default t27/items.jsonl): a different item set,
+    # e.g. results/t27/selftrain/items.jsonl (train-side yield; use SC_POOL=strict).
+    # NOTE the mask core is computed from that file too.
+    # SC_POOL=strict = every strict item (both mutants caught) of items.jsonl
+    # -- the honest full-bench number; NOTE --n-items still CUTS the pool
+    # after picking, so pass SC_ITEMS=500 with strict (the 2026-09-29 trap
+    # that silently ran 30 of 391),
+    # SC_KV_I8=1 (int8 KV cache: ~1.6x at 1.7K ctx,
+    # approximate -- pass numbers not comparable to f32-KV runs).
+    # SC_ANALYZE=1: free selector oracle over the
+    # committed v1/v2/v3 mask artifacts -- no model, no generation.
+    # The mask is FROZEN per run into <SC_OUT>/mask_snapshot.py (workers
+    # re-import it each round; editing scripts/ mid-run is now safe).
+    # SC_MASK_REV=<commit>: run with the mask as of that commit -- the
+    # paired baseline arm of a mask A/B (e.g. 305105e = pre-typed mask).
+    # SC_DIFF=1: every spec-test pass is diff-judged vs gold (diff_c tuples);
+    # diff_kill = compile, not pass, and the item keeps sampling. Not
+    # comparable to plain-pass runs. Heavy: run it remotely.
+    IG=/Users/playra/igla-coder-gpu
+    MASK_SRC=""
+    if [ -n "${SC_MASK_REV:-}" ]; then
+      MASK_SRC="${TMPDIR:-/tmp}/t27_mask_${SC_MASK_REV}.py"
+      /Library/Developer/CommandLineTools/usr/bin/git -C "$IG" show \
+        "$SC_MASK_REV:scripts/t27_gen_masked.py" > "$MASK_SRC" || exit 1
+    fi
+    WT=/tmp/t27-bench
+    /Library/Developer/CommandLineTools/usr/bin/git -C "$HOME/t27" worktree list \
+      | grep -q "$WT" || /Library/Developer/CommandLineTools/usr/bin/git -C "$HOME/t27" \
+        worktree add --detach "$WT" ef7781b5 >/dev/null
+    cd "$IG" || exit 1
+    if [ -n "${SC_ANALYZE:-}" ]; then
+      python3 scripts/t27_selfcheck.py --analyze \
+        v1=results/t27/masked_tc.jsonl:results/t27/check_masked/results.jsonl \
+        v2=results/t27/masked2_tc.jsonl:results/t27/check_masked2/results.jsonl \
+        v3=results/t27/masked3_tc.jsonl:results/t27/check_masked3/results.jsonl
+      return 0 2>/dev/null || exit 0
+    fi
+    # the mask gate first: this loop's masks come from t27_gen_masked
+    python3 scripts/t27_mask_check.py --t27 "$WT" \
+      --tokenizer results/data8k/tokenizer.json || exit 1
+    T27_TREE="$WT" python3 scripts/t27_splice_audit.py --gold || exit 1
+    python3 scripts/t27_selfcheck.py --t27 "$WT" \
+      --t27c /tmp/t27c-build/target/release/t27c \
+      --model c_infer/t27_tuned/model.bin --tokenizer results/data8k/tokenizer.json \
+      --items "${SC_ITEMS_FILE:-t27/items.jsonl}" --cands results/t27/cands_tc.jsonl \
+      --check results/t27/check_tc_partial/results.jsonl \
+      --out "${SC_OUT:-results/t27/selfcheck1}" \
+      --rounds "${SC_ROUNDS:-5}" --arms "${SC_ARMS:-m0.8,w0.8,m0.7,w0.7}" \
+      --n-items "${SC_ITEMS:-30}" $([ "${SC_POOL:-failed}" = "strict" ] && echo --pool strict) \
+      --gen-workers "${SC_WORKERS:-3}" \
+      --stop-at "${SC_STOP:-pass}" $([ "${SC_KV_I8:-0}" = "1" ] && echo --kv-i8) \
+      $([ "${SC_REPAIR:-0}" = "1" ] && echo --repair) \
+      $([ -n "${SC_SEED:-}" ] && echo --gen-seed "$SC_SEED") \
+      $([ "${SC_EARLY:-0}" = "1" ] && echo --early-abort) \
+      $([ "${SC_PROBE:-0}" = "1" ] && echo --probe --probe-k "${SC_PROBE_K:-16}") \
+      $([ -n "${SC_REDRAW:-}" ] && echo --redraw "$SC_REDRAW") \
+      $([ -n "$MASK_SRC" ] && echo --mask-src "$MASK_SRC") \
+      $([ "${SC_DIFF:-0}" = "1" ] && echo --diff results/t27/diff_c/items.jsonl)
+    ;;
+  tc-rounds)
+    # igla-coder-gpu: poll a selfcheck run WITHOUT touching it -- recompute
+    # the budget curves live from results.jsonl (summary.json only refreshes
+    # when the run ends) + show round progress from the log. Same curve
+    # semantics as scripts/t27_selfcheck.py: COMPILES=(pass,fail), samples
+    # sorted by in-round k so arms interleave -- file-order polling
+    # UNDERCOUNTS nothing but changes the x-axis meaning. Never a second
+    # heavy run while one is live; this is the correct alternative.
+    # Usage: tri tc-rounds [dir] [log]
+    IG=/Users/playra/igla-coder-gpu
+    D="${2:-results/t27/selfcheck1}"
+    cd "$IG" || exit 1
+    if [ -n "${3:-}" ] && [ -f "$3" ]; then grep '^round' "$3" | tail -3; fi
+    python3 - "$D" <<'PYEOF'
+import json, sys, collections
+res = sys.argv[1] + "/results.jsonl"
+try:
+    rows = [json.loads(l) for l in open(res)]
+except FileNotFoundError:
+    sys.exit("no results.jsonl in " + sys.argv[1])
+by = collections.defaultdict(list)
+for j in rows:
+    by[j["id"]].append((j["k"], j["status"]))
+for iid in by:
+    by[iid].sort()
+COMPILES = ("pass", "fail")
+for label, ok in (("compile", lambda s: s in COMPILES), ("pass", lambda s: s == "pass")):
+    budgets = [next((i + 1 for i, (_, st) in enumerate(seq) if ok(st)), None)
+               for seq in by.values()]
+    line = "  ".join(f"b{b}:{sum(1 for x in budgets if x and x <= b)}"
+                     for b in (1, 2, 3, 5, 10, 15, 20, 30))
+    print(f"{label:8s} of {len(by)} items, {len(rows)} samples: {line}")
+PYEOF
+    ;;
+  tc-draft)
+    # igla-coder-gpu: tern_tc as a DRAFT MODEL FOR A VERIFIER -- one spec,
+    # N masked samples through tc_fast --step-io (prefill paid once), each
+    # judged by t27c test-report; first PASS wins and is printed verified,
+    # else an honest typed refusal. The editing-time form of the selfcheck
+    # loop (scripts/tc_draft.py); its flags pass through after the spec.
+    shift
+    IG=/Users/playra/igla-coder-gpu
+    WT=/tmp/t27-bench
+    /Library/Developer/CommandLineTools/usr/bin/git -C "$HOME/t27" worktree list \
+      | grep -q "$WT" || /Library/Developer/CommandLineTools/usr/bin/git -C "$HOME/t27" \
+        worktree add --detach "$WT" ef7781b5 >/dev/null
+    cd "$IG" || exit 1
+    exec python3 scripts/tc_draft.py --t27 "$WT" \
+      --t27c /tmp/t27c-build/target/release/t27c \
+      --model c_infer/t27_tuned/model.bin \
+      --tokenizer results/data8k/tokenizer.json "$@"
+    ;;
+
+  tc-ask)
+    # manual CPU front door: print a tc completion for a prompt
+    shift; exec python3 scripts/tc_ask.py "$@"
+    ;;
   boundary)
     # What a bee was actually ALLOWED to touch, and what it touched anyway.
     # Prints the brief's heading, the paths the server reserved out of it, any
@@ -763,23 +1510,23 @@ console.log(\"parked dispatches: \"+r.rows.length+\"   paths they fence: \"+s.si
     node /Users/playra/BrowserOS/trios/.trinity/loop/brief-gate.mjs "$@"
     ;;
   deploy-wait|live-wait)
-    # «Зелёная сборка не доказывает» — ждём, пока правка ДОЕДЕТ до живого
-    # render после merge. Опрашиваем путь, пока в ответе не появится маркер.
-    # Ключ (для закрытых маршрутов) тянем из Railway сам; для публичных путей
-    # (/health, /mcp) он не нужен.
-    #   tri deploy-wait <путь> <маркер> [попыток]
+    # "A green build proves nothing" — wait until the edit REACHES the live
+    # render after merge. Poll the path until the marker shows up in the response.
+    # The key (for closed routes) is fetched from Railway here; public paths
+    # (/health, /mcp) do not need it.
+    #   tri deploy-wait <path> <marker> [attempts]
     RENDER="https://vibee-render-production.up.railway.app"
     PATHQ="${2:-/health}"; MARK="${3:-}"; TRIES="${4:-40}"
     K=$(railway variables list -s vibee-render -e production --kv 2>/dev/null | grep '^RENDER_API_KEY=' | cut -d= -f2-)
     for i in $(seq 1 "$TRIES"); do
       body=$(curl -s -m 15 -H "X-Api-Key: $K" "$RENDER$PATHQ" 2>/dev/null)
       if [ -z "$MARK" ] || printf '%s' "$body" | grep -qF "$MARK"; then
-        echo "✅ живой [$i]: $PATHQ → $(printf '%s' "$body" | head -c 140)"; exit 0
+        echo "✅ live [$i]: $PATHQ → $(printf '%s' "$body" | head -c 140)"; exit 0
       fi
-      echo "⏳ [$i/$TRIES] $PATHQ ещё без «$MARK»: $(printf '%s' "$body" | head -c 80)"
+      echo "⏳ [$i/$TRIES] $PATHQ still without «$MARK»: $(printf '%s' "$body" | head -c 80)"
       sleep 30
     done
-    echo "❌ ТАЙМАУТ: «$MARK» не появился на $PATHQ за $TRIES попыток"; exit 1
+    echo "❌ TIMEOUT: «$MARK» did not appear on $PATHQ in $TRIES attempts"; exit 1
     ;;
   # ---- job campaign (added 2026-08-28) -------------------------------------
   # Everything below reads the mailbox and the CRM derived from it. None of it
@@ -811,7 +1558,7 @@ console.log(\"parked dispatches: \"+r.rows.length+\"   paths they fence: \"+s.si
     exec python3 "$HOME/job-search/crm/jcrm.py" board
     ;;
   jobs-show)
-    [ -z "${2:-}" ] && { echo "tri jobs-show <кто>"; exit 1; }
+    [ -z "${2:-}" ] && { echo "tri jobs-show <who>"; exit 1; }
     exec python3 "$HOME/job-search/crm/jcrm.py" show "$2"
     ;;
   jobs-dash)
@@ -836,18 +1583,18 @@ console.log(\"parked dispatches: \"+r.rows.length+\"   paths they fence: \"+s.si
   jobs-lesson)
     # Append a lesson to the skill that will be loaded next time, not to a note
     # nobody opens. Two arguments: heading and body.
-    [ -z "${3:-}" ] && { echo 'tri jobs-lesson "заголовок" "текст"'; exit 1; }
+    [ -z "${3:-}" ] && { echo 'tri jobs-lesson "title" "text"'; exit 1; }
     f="$HOME/skills/correspondence-crm/LESSONS.md"
     { echo; echo "## $(date '+%Y-%m-%d %H:%M') — $2"; echo; echo "$3"; } >> "$f"
-    echo "записано в $f"
+    echo "written to $f"
     ;;
   jobs-drafts)
-    # Каждый черновик в один из: отправлен почтой, отправлен через hh,
-    # без адресата (портал), ждёт отправки. Actionable — только последний.
+    # Each draft goes into one of: sent by mail, sent via hh,
+    # no recipient (portal), waiting to be sent. Only the last is actionable.
     exec python3 "$HOME/job-search/crm/drafts.py" "${2:-report}"
     ;;
   jobs-leads)
-    # Потенциальные заказчики по теме, а не вакансии. Тиры по наличию связи.
+    # Potential clients on topic, not job ads. Tiers by whether there is a contact.
     exec python3 "$HOME/job-search/crm/leads.py" "${2:-all}"
     ;;
   # ---- telegram, read-only ---------------------------------------------
@@ -855,193 +1602,357 @@ console.log(\"parked dispatches: \"+r.rows.length+\"   paths they fence: \"+s.si
   tg-unread)    exec tg unread ;;
   tg-msg)       [ -z "${2:-}" ] && { echo "tri tg-msg <chat|@user> [N]"; exit 1; }
                 exec tg messages "$2" -n "${3:-25}" ;;
-  tg-search)    [ -z "${2:-}" ] && { echo "tri tg-search <текст> [N]"; exit 1; }
+  tg-search)    [ -z "${2:-}" ] && { echo "tri tg-search <text> [N]"; exit 1; }
                 exec tg search "$2" -n "${3:-25}" ;;
   tg-who)       exec tg whoami ;;
   help|-h|--help)
     cat <<'USAGE'
 tri — Trinity S³AI ops CLI
-  tri (или tri ssh) — railway ssh → claude (прежнее поведение)
-  tri status       — здоровье стека + лента + состояние лупа
-  tri regress      — регресс-чек лупа (15 проверок)
-  tri morning      — утренняя сводка loop/MORNING.md
-  tri loop         — хвост отчёта цикла
-  tri vibee-feed [N] — последние N постов ленты vibee со звёздами/просмотрами
-                     (ПЕРЕИМЕНОВАНА 2026-09-05: прежнее её имя носит теперь шаг
-                     заправки цикла — строка с `--act` ниже, это другая команда)
-  tri chat "текст" — вопрос агенту (ключ тянется из Railway сам)
-  tri selftest     — проверка зависимостей
-  tri anomalies (то же самое — tri anom) — шаг 0: что сломалось на проде (провайдеры, лента, маршруты)
-  tri verify       — не затёрта ли прошлая правка чужим мержем
-  tri providers (то же самое — tri prov) — живой статус провайдеров (чем агент может работать)
-  tri lesson "H" "B" — быстро записать урок в loop-opus/LESSONS.md
-  tri dash         — пересобрать продакшн-дашборд STATUS.md
-  tri board        — дашборд trios: последняя итерация + замеры STATUS.md
-  tri wave         — каркас следующей волны wave-loop-NNN.md
-  tri wave-plan [N] — план ТЕКУЩЕЙ волны целиком (самый свежий wave-loop-*.md) с возрастом
-  tri handover     — сводка владельцу из самой свежей волны: начало + варианты + возраст
-  tri handover-116-archived — замороженный брифинг волны 116 (архив, не текущее состояние)
-  tri locks        — кто держит локи кассет/e2e триоса сейчас
-  tri next         — хвост последней волны trios. МЕРА 2026-09-13: печатает его
-                     на 44 волнах из 78 — его образец ищет только английский
-                     заголовок, а 15 волн (включая последнюю) назвали хвост
-                     по-русски, и на них команда печатает одно имя файла.
-                     сам хвост оттуда сейчас печатает команда handover ниже
-  tri mutants-logic-refresh [DRY=1] — пересобрать .trinity/build/QueenCore дефолтным
-                     тулчейном и прогнать make mutants-logic (рассинхрон тулчейнов)
-  tri deploy-wait (то же самое — tri live-wait) <путь> <маркер> [N] — ждать, пока правка доедет до живого render
-  tri tb            — TurboBaby: сводка прода + разделения с woody-weed-bot
-  tri tb-deploy     — безопасный деплой turbobaby-bot (link→up→wait→verify)
-  tri tb-verify     — инварианты разделения: vars/миграции/чужой health
-  tri tb-lint       — оба clippy-гейта CI локально (+ --test для cargo test)
-  tri live-verify [issue] [crit] — живой отпечаток цепочкой за один запуск
-  tri regression [issue] [crit] — доска + локи + live-verify одной командой
-  tri spec-diag [log] — класс ошибки каждой несобирающейся спеки
-  tri jobs         — статус кампании одной строкой (guards/urgent/итерации)
-  tri jobs-run     — одна итерация цикла: preflight → sync → аномалии → дашборд
-  tri jobs-guards  — доказать guard'ы перед отправкой (exit 1 = не отправлять)
-  tri jobs-next    — что делать дальше, по убыванию отдачи
-  tri jobs-owed    — кто ждёт ответа, старейший долг первым
-  tri jobs-board   — воронка по стадиям
-  tri jobs-show X  — одна переписка целиком, обе стороны
-  tri jobs-dash [open] — пересобрать дашборд (и открыть)
-  tri jobs-check F — четыре guard'а: утечки, правда, дубль подписи, голос
-  tri jobs-anomalies / jobs-journal [N] — что не так / история итераций
-  tri jobs-drafts [report|actionable] — разбор черновиков: что ушло, что ждёт
-  tri jobs-leads [new|channels] — заказчики по теме: кому есть смысл писать
-  tri jobs-lesson "H" "B" — записать урок в correspondence-crm/LESSONS.md
-  tri tg-unread / tg-dialogs [N] — телеграм: непрочитанные / чаты (только чтение)
-  tri tg-msg <чат> [N] / tg-search <текст> [N] / tg-who
-  tri game            — луп игры t27.ai/#/queen: состояние (итерация, задачи, находки)
-  tri game-claim / game-release — замок цикла (exit 75 = другой прогон держит)
-  tri game-iterate    — новый цикл: счётчик + last_run
-  tri game-anomalies [--heal] — живые проверки: эндпоинты, апекс vs main, публикатор, чанк; --heal чинит
-  tri game-next       — верхняя открытая задача бэклога
+  tri (or tri ssh) — railway ssh → claude (the old behaviour)
+  tri status       — stack health + feed + loop state
+  tri regress      — loop regression check (15 checks)
+  tri morning      — morning summary loop/MORNING.md
+  tri loop         — tail of the loop report
+  tri vibee-feed [N] — last N posts of the vibee feed with stars/views
+                     (RENAMED 2026-09-05: its old name now belongs to the loop feeding step —
+                     the line with `--act` below, a different command)
+  tri chat "text"  — question to the agent (the key is fetched from Railway)
+  tri selftest     — dependency check
+  tri anomalies (alias: tri anom) — step 0: what broke in production (providers, feed, routes)
+  tri verify       — whether someone else's merge overwrote the last edit
+  tri providers (alias: tri prov) — live provider status (what the agent can work with)
+  tri lesson "H" "B" — quickly record a lesson in loop-opus/LESSONS.md
+  tri dash         — rebuild the production dashboard STATUS.md
+  tri board        — trios dashboard: latest iteration + STATUS.md measurements
+  tri wave         — skeleton of the next wave wave-loop-NNN.md
+  tri wave-plan [N] — the whole plan of the CURRENT wave (newest wave-loop-*.md) with its age
+  tri handover     — owner summary from the newest wave: start + options + age
+  tri handover-116-archived — frozen wave 116 briefing (archive, not the current state)
+  tri locks        — who holds the trios cassette/e2e locks now
+  tri next         — tail of the latest trios wave. MEASURED 2026-09-13: prints it
+                     for 44 waves of 78 — its pattern only looks for the English
+                     heading, and 15 waves (including the latest) named the tail
+                     in Russian, and for them the command prints only the file name.
+                     the tail itself is now printed by the handover command below
+  tri mutants-logic-refresh [DRY=1] — rebuild .trinity/build/QueenCore with the default
+                     toolchain and run make mutants-logic (toolchain mismatch)
+  tri deploy-wait (alias: tri live-wait) <path> <marker> [N] — wait until the edit reaches the live render
+  tri tb            — TurboBaby: production summary + separation from woody-weed-bot
+  tri tb-deploy     — safe deploy of turbobaby-bot (link→up→wait→verify)
+  tri tb-verify     — separation invariants: vars/migrations/foreign health
+  tri tb-lint       — both CI clippy gates locally (+ --test for cargo test)
+  tri live-verify [issue] [crit] — live fingerprint of the chain in one run
+  tri regression [issue] [crit] — board + locks + live-verify in one command
+  tri spec-diag [log] — error class of every spec that does not build
+  tri jobs         — campaign status in one line (guards/urgent/iterations)
+  tri jobs-run     — one loop iteration: preflight → sync → anomalies → dashboard
+  tri jobs-guards  — prove the guards before sending (exit 1 = do not send)
+  tri jobs-next    — what to do next, by descending payoff
+  tri jobs-owed    — who is waiting for a reply, oldest debt first
+  tri jobs-board   — funnel by stage
+  tri jobs-show X  — one whole conversation, both sides
+  tri jobs-dash [open] — rebuild the dashboard (and open it)
+  tri jobs-check F — four guards: leaks, truth, duplicate signature, voice
+  tri jobs-anomalies / jobs-journal [N] — what is wrong / iteration history
+  tri jobs-drafts [report|actionable] — draft triage: what went out, what waits
+  tri jobs-leads [new|channels] — clients on topic: who is worth writing to
+  tri jobs-lesson "H" "B" — record a lesson in correspondence-crm/LESSONS.md
+  tri tg-unread / tg-dialogs [N] — telegram: unread / chats (read only)
+  tri tg-msg <chat> [N] / tg-search <text> [N] / tg-who
+  tri game            — game loop for t27.ai/#/queen: state (iteration, tasks, findings)
+  tri game-claim / game-release — loop lock (exit 75 = another run holds it)
+  tri game-iterate    — new cycle: counter + last_run
+  tri game-verdicts — Queen's verdicts on the public board + every ARMED bee PR on t27 checked for her accept at its head (exit 1 = rule broken, 2 = could not check)
+  tri game-site [--force|--self-test] — can trinity main build t27.ai? runs the publisher's own prebuild:ci + check:silicon in a loop-owned worktree, cached per main SHA (exit 1 red, 2 could not check)
+  tri trinity-report BODY.md [--pr N] [--head SHA] — run trinity's OWN work-report validator on a PR body before pushing (from a trinity checkout; exit 1 = CI would fail)
+  tri game-writers [DAYS] — who wrote t27.ai (ghashtag.github.io) in the last DAYS (7): each commit named by its door (publisher, deploy-site, book-bot, hand, hand-gHashTag); exit 1 on an UNKNOWN door
+  tri game-served [--all] — do t27.ai's llms.txt/agents.t27 match the trinity commit the apex names as its source? --all lists every top-level public file; exit 1 on drift
+  tri game-vault [--check|--list|--accept PATH|--restore PATH [--from SNAP]|--self-test] — content-addressed snapshots of the loop's skill dir + tri itself (~/.cache/queen-loop/vault); save runs only when --check finds no loss
+  tri blog list|check [slug]|lint|preview <slug>|build|live <slug> [--repo DIR] — the t27.ai blog (trinity apps/website): receipt states, caveats, an HTML preview of a draft with its tables and figures, tsc+vite
+  tri blog gif record CAST -- "cmd"... | render CAST GIF [--max-idle S] [--colors N] — real commands in a pty to an asciicast, then a GIF (silences shortened and labelled in-frame)
+  tri game-blog [--self-test] — does every post in t27.ai's served Blog chunk have its /blog/<slug>/ page and og-blog card on the apex? (verify-site.sh's predicate, asked between publisher runs); exit 1 on drift
+  tri game-cadence [N] — the apex publisher's real cadence vs its */15 cron: fired-slot %, gap median/p99/max, run time, hand dispatches
+  tri game-selftest [-v] — run every queen-game-loop script's --self-test (found by grep, not a list); exit 1 if any fails
+  tri game-tick [--self-test] — one loop tick: run the anomaly scan and print only what changed since the last (NEW red / CLEARED / one standing line); exit 1 on a NEW red row
+  tri game-merged [N] — audit the PAST: every merged queen-* PR on t27 against her verdict; flags DELETES-MOST merges (a gutted file). Exit 1 = merges without her accept
+  tri t27-tri ARGS — run t27's own Rust tri (newest built target/*/tri), e.g. `tri t27-tri now add ...`; t27 hooks must not find this tri
+  tri game-anomalies [--heal] — live checks: endpoints, apex vs main, publisher, chunk; --heal repairs
+  tri game-next       — top open backlog task
   tri game-task ID [--title|--status|--note|--force] / game-finding "T" [--severity] / game-gate ID [--result]
-  tri game-dash [open] — DASHBOARD.md + dashboard.html (дизайн Claude Code); последним в цикле
-  tri game-report [N] — последний отчёт цикла (первые N строк)
-  tri game-ingest J [--cycle N] — влить план воркфлоу из journal.jsonl в бэклог (идемпотентно)
-  tri game-lesson "H" "B" — записать урок в queen-game-loop/LESSONS.md
-  tri game-wire [board|status|hardware|activity|research] — что реально несут публичные эндпоинты (поля на N карточках)
-  tri game-prove MARKER | --entry index-X.js | --apex [--after index-OLD.js] [--minutes 9] — ждать, пока t27.ai отдаст Queen-чанк с маркером / названный entry / entry из apex index.html (отличный от --after); exit 0 = доказано
-  tri game-gates [fast|full] [LOG] — цепочка гейтов Queen (full = + 5 headless-Chrome контрактов, ~8 мин); exit 0 = все зелёные
-  tri game-ship BRANCH TITLE MSGFILE BODYFILE -- PATHSPEC... — add по pathspec, commit, push, PR, squash-merge, dispatch паблишера (без watch и без prove)
-  tri game-close TASK_ID "msg" — закрытие цикла: task done, аномалии --heal, closed_at, iterate, dash, release, коммит скилла (отчёт и CONTEXT.md правятся руками ДО)
-  tri game-spike [--no-build] — замер движков на текущем checkout: canvas2D vs Babylon, rAF p50/p95/p99, пропуски vsync, brotli чанков (GPU через ANGLE/Metal)
-  tri game-local [--build|--stop] — «запусти локально»: vite preview собранного сайта на 127.0.0.1:4173 и открыть #/queen в браузере по умолчанию (не в панели приложения: там страница скрыта и движок стоит)
-  tri game-models [list|pull <slug>] — модели поля (public/queen/models) с размерами и лицензией; pull тянет пак Kenney по slug только после слова пользователя, печатая источник и размер
-  tri game-objects [--json] — учёт объектов поля: что нарисовано, на каком слое и какая сущность за этим стоит
-  tri game-foundation [--out PATH] [--repo R] [--limit N] — снимок GitHub для фундамента (закрытые задачи, эпики с детьми и кольцом, релизы, кольца) в public/queen/foundation.json; пишет только при изменении содержимого без generatedAt, иначе печатает unchanged
-  tri game-plan [путь] — план здания модуля из modules.json той же чистой функцией, что рисует поле (ядро, масштаб, высота, крылья, антенны, поворот, хеш)
-  tri game-verify     — самопроверка состояния лупа игры: дубли id, неизвестные статусы и severity, протухший замок (выход 1 = состояние противоречиво)
-  tri game-status [API] — что читают статус-пилюля и плитка VERDICTS: swarmState, планировщик, диспатчи (running/unreviewed), решение последнего тика
-  tri game-round [API] — тикает ли Королева: lastRoundAt и roundSeconds против ЧАСОВ СЕРВЕРА (заголовок Date), не против ноутбука
-  tri game-clock [API] — отдаёт ли статус-эндпоинт свои часы браузеру на t27.ai (Date, Access-Control-Expose-Headers) и каков сдвиг с этой машиной
-  tri game-bees [API] — живые пчёлы с public-board и возраст последнего слова каждой на проводе активности против длины раунда (warm/COLD)
-  tri game-events [KIND] [HOURS] [API] — свежие события одного вида на проводе активности с их состоянием, словами INTEL FEED (по умолчанию review)
-  tri game-feed [HOURS] [API] — что заголовок INTEL FEED должен сказать о свежем ответе провода: строк, размах между старейшей и новейшей, виды
-  tri game-activity [HOURS] [API] — выборка /queen/public-activity за N часов: виды, вердикты ревью по (issue, state) со всеми штампами, свежий тик
-  tri game-measure NAME [--build] — прогнать ОДИН headless-контракт qa/queen-NAME-contract.mjs на текущем dist (отказ, пока идёт цепочка гейтов: dist общий)
-  tri game-contract NAME "что доказывает" — завести qa/queen-NAME-contract.mjs из pick-харнесса, зарегистрировать check:queen-NAME и дописать в полный список гейтов (хвост падает НАРОЧНО)
-  tri game-bar        — ширины колонок ресурсной полосы на четырёх десктопных размерах в обоих языках (замер, нашедший бренд-надбровие на 200 px)
-  tri game-copy KEY [KEY...] — английское и русское значение COPY-ключа из Queen.tsx и сколько мест его используют
-  tri game-branch NAME — первое действие цикла: fetch origin и ветка NAME от origin/main в checkout trinity (отказ, если в дереве чужие правки)
+  tri game-dash [open] — DASHBOARD.md + dashboard.html (Claude Code design); last step of a cycle
+  tri game-report [N] — latest cycle report (first N lines)
+  tri game-ingest J [--cycle N] — merge the workflow plan from journal.jsonl into the backlog (idempotent)
+  tri game-lesson "H" "B" — record a lesson in queen-game-loop/LESSONS.md
+  tri game-lessons [WORD...] — index of queen-game-loop lessons (no words), or the lessons containing ALL the words; exit 1 on no match
+  tri game-wire [board|status|hardware|activity|research] — what the public endpoints actually carry (fields on N cards)
+  tri game-prove MARKER | --entry index-X.js | --apex [--after index-OLD.js] [--minutes 9] — wait until t27.ai serves the Queen chunk with the marker / the named entry / the entry from the apex index.html (different from --after); exit 0 = proven
+  tri game-gates [fast|full] [LOG] — the Queen gate chain (full = + 5 headless-Chrome contracts, ~8 min); exit 0 = all green
+  tri game-ship BRANCH TITLE MSGFILE BODYFILE -- PATHSPEC... — add by pathspec, commit, push, PR, squash-merge, publisher dispatch (no watch and no prove)
+  tri game-close TASK_ID "msg" — close a cycle: task done, anomalies --heal, closed_at, iterate, dash, release, skill commit (the report and CONTEXT.md are edited by hand BEFORE)
+  tri game-spike [--no-build] — engine measurement on the current checkout: canvas2D vs Babylon, rAF p50/p95/p99, vsync misses, chunk brotli (GPU via ANGLE/Metal)
+  tri game-local [--build|--stop] — "run it locally": vite preview of the built site on 127.0.0.1:4173 and open #/queen in the default browser (not in the app panel: the page is hidden there and the engine stalls)
+  tri game-models [list|pull <slug>] — field models (public/queen/models) with sizes and licence; pull fetches a Kenney pack by slug only after the user says so, printing source and size
+  tri game-objects [--json] — field object inventory: what is drawn, on which layer, and which entity stands behind it
+  tri game-foundation [--out PATH] [--repo R] [--limit N] — GitHub snapshot for the foundation (closed issues, epics with children and ring, releases, rings) into public/queen/foundation.json; writes only when the content without generatedAt changes, otherwise prints unchanged
+  tri game-plan [path] — module building plan from modules.json, by the same pure function that draws the field (core, scale, height, wings, antennas, rotation, hash)
+  tri game-verify     — self-check of the game loop state: duplicate ids, unknown statuses and severity, stale lock (exit 1 = the state contradicts itself)
+  tri game-status [API] — what the status pill and the VERDICTS tile read: swarmState, scheduler, dispatches (running/unreviewed), last tick decision
+  tri game-round [API] — whether the Queen ticks: lastRoundAt and roundSeconds against the SERVER CLOCK (Date header), not the laptop
+  tri game-clock [API] — whether the status endpoint exposes its clock to the browser on t27.ai (Date, Access-Control-Expose-Headers) and the skew against this machine
+  tri game-bees [API] — live bees from public-board and the age of each one's last word on the activity wire against the round length (warm/COLD)
+  tri game-events [KIND] [HOURS] [API] — recent events of one kind on the activity wire with their state, in INTEL FEED words (default: review)
+  tri game-feed [HOURS] [API] — what the INTEL FEED header should say about a fresh wire response: rows, span between oldest and newest, kinds
+  tri game-activity [HOURS] [API] — sample of /queen/public-activity over N hours: kinds, review verdicts by (issue, state) with all stamps, fresh tick
+  tri game-measure NAME [--build] — run ONE headless contract qa/queen-NAME-contract.mjs on the current dist (refuses while the gate chain runs: dist is shared)
+  tri game-contract NAME "what it proves" — create qa/queen-NAME-contract.mjs from the pick harness, register check:queen-NAME and append it to the full gate list (the tail fails ON PURPOSE)
+  tri game-bar        — column widths of the resource bar at four desktop sizes in both languages (the measurement that found the 200 px brand brow)
+  tri game-copy KEY [KEY...] — English and Russian value of a COPY key from Queen.tsx and how many places use it
+  tri game-branch NAME — first action of a cycle: fetch origin and branch NAME from origin/main in the trinity checkout (refuses if the tree has foreign edits)
   --- continuous loop (trios) ---
-  tri iter / iter-dash / iter-log [N] / iter-anchors — состояние цикла, дашборд, журнал
-  tri iter-render [--work f.json] — замерить рой, обновить опоры, перерисовать дашборд
-  tri iter-unlock — снять замок цикла (только если `tri iter` говорит stale)
-  tri swarm — живое состояние Королевы одной строкой
-  tri fence — какие пути держат застрявшие задания (границы, которых избегать)
-  tri brief-gate <draft.md ...> — проверить черновик задачи парсером самой Королевы
-  tri facts [--record|--facts]    — измеренные числа дашборда; неизмеримое показывается как '-'
-  tri failures [--since N|<step>] — какие шаги цепочки падают, как часто и с какими уликами
-  tri channel                     — жив ли единственный канал в контейнер
-  tri share-modules [--share]     — одна установка зависимостей, связанная ссылками во все деревья
-  tri reap-finished [--reap]      — убрать деревья, чья работа уже опубликована (по сроку жизни, не по давлению)
-  tri rescue [--rescue]           — спасти работу, которую пчела не закоммитила, пока её не стёрли
-  tri container                   — кто PID 1 и близко ли к исчерпанию процессов
-  tri two-views [--record|--report] — согласны ли /health и ssh-шлюз в один момент
-  tri salvage <N> [--brief]       — что уцелело от устаревшей ветки: имена, которых нет в базе; --brief пишет задание
-  tri proven [--by-source]        — доказывает ли свежая работа что-нибудь; --by-source: разрез по виду работы
-  tri coverage [--fresh]          — какую долю принятых вердиктов аудит может проверить (кэш: 10с против 217с)
-  tri verdict-audit <N ...> | --accepted — сверить заявленный вердикт пчелы с её диффом
-  tri boundary <N ...>            — что пчеле разрешили трогать и что она тронула; CREATED против edited
-  tri t27-gen                     — перегенерировать кольцо T27-00 из .t27 (артефакт не правят руками)
-  tri t27-parity                  — согласны ли сгенерированное кольцо и рукописный близнец из продакшена
-  tri forked-files                — файл, который лежит в двух местах, не должен начать говорить разное
-  tri ci-diff <run|--pr a b>      — какие падения в CI НОВЫЕ, а какие были красными до тебя
-  tri exposure                    — что живой сервис отдаёт origin'у, которого он не знает
-  tri flaky [N|<run-id>...]       — какие красные тесты падают ВСЕГДА, а какие через раз
-  tri accept-rate                 — принимают ли реже бриф, который МОЖНО провалить
-  tri unverdicted [--limit N]     — диспатчи без блока VERDICT: ревью их никогда не рассудит
-  tri silent-loop [--limit N]     — попытки, которые не тратят лимит повторов: у цикла нет потолка
-  tri rejudge [--state S]         — вердикт, который текущий код уже не повторит (согласие ≠ правота)
-  tri agree [--pair NAME]         — два кода одного правила на реальных строках: где расходятся и куда
-  tri idle [--hours N]            — сколько рой простоял и что помешало раундам (золотое правило)
-  tri unwired [--all]             — гейт, который написан, но его никто не запускает
-  tri reach [--since D] [--floor N] — какой шаг цепочки heal ДОХОДИТ до запуска, а какой всегда последний
-  tri reap [--reap] — сборка worktree по порогам 80/60, без --force
-  tri lease [--release] — аренда заявки с таймером простоя, потолок повторов 2
-  tri heal [--dry] — все ремонты роя одной цепочкой в верном порядке
-  tri author [--file] — завести задачу из измеренного дефицита, лимит 5 открытых
-  tri loop-selftest — поверка собственных приборов цикла (без сети; счётчик печатает сам прогон, а не эта строка)
-  tri judge-packet <N ...> | --unauditable — собрать пакет для судейского прочтения
-  tri needs-you [--all] — что ждёт человека и сколько уже ждёт
-  tri loop-coverage — у каких инструментов цикла боевая ветка ни разу не исполнялась
-  tri trend [часов] — скорость счётчиков, а не их уровень
-  tri clocks — на каких полях висят решения и не переписывает ли их кто-то
-  tri fields [файл] — читает ли код поля, которых запрос не выбирает
-  tri fp-check [N] — не обвиняют ли проверяльщики заведомо годное
-  tri push-work [--push] — отправить ветки пчёл, которых нет на удалённом
-  tri close-done [--close] — закрыть задачи с принятой работой (эпики не трогает)
-  tri unpark [--release] — снять потолок повторов, потраченный на молчание, а не на работу
-  tri stale-escalations [--release] — отпустить эскалацию, чья причина больше не воспроизводится
-  tri holds — что рой держит сейчас и не заявлены ли два диспатча на один файл
-  tri queue — глубина очереди (не число открытых): что ещё никто не начинал
-  tri latency — куда уходит время: ревью против работы пчелы, и сколько задач в час
-  tri reap-local [--reap] — убрать слитые и чистые рабочие деревья с диска ноутбука
-  tri verdicts [часов] — доля принятого, возвращённого и неосуждённого: здоровье, а не загрузка
-  tri why [--all] — почему рой стоит: причина, улика и что с этим делать
-  tri feed [--act] — только заправка: пуш, закрытие, заведение, без аудитов
-  tri mix — каким ВИДОМ работы занят рой: загрузка и приёмка этого не покажут
-  tri land [--land] — посадить принятую работу, что осталась на ветках вне базы
-  tri ab <a> <nA> <b> <nB> — отличается ли разница от шума, или это просто мало данных
-  --- cycle: измерить, перекрестно допросить, нарисовать, записать ---
-  tri cycle [--deep] — один проход: замер, аномалии, дашборд, запись в журнал (выход 2 = аномалии найдены, это ответ)
-  tri cycle-repair — то же плюс перечисленные безопасные ремонты (замок мёртвого хозяина, ЧИСТЫЕ деревья)
-  tri cycle-dash — показать последний дашборд, и первой строкой его возраст с файловой системы
-  tri cycle-html — тот же замер, но широкий: у каждой цифры видна команда, которой её измерили, и рядом с каждой аномалией её ремонт. Выход 2, если замеру больше одного цикла
-  tri cycle-anom [N] (то же самое — tri cycle-anomalies) — каждая аномалия целиком: заявление, правда, ремонт (на дашборде помещается семь)
-  tri cycle-sense [--deep] — только замер, без рисования
-  tri cycle-log [N] — журнал проходов: сколько аномалий, какие витали, что чинили
-  tri cycle-note did|next "текст" — проза пишется руками; дашборд рисует пустоту, если её не написали
-  tri cycle-doctor — на месте ли всё, что циклу нужно, и достижима ли каждая его команда
-  tri driver — крутит ли итерации хоть кто-нибудь. Выход 1 — водителя нет (измеренный ноль), 2 — прочитать не удалось (это НЕ ноль)
-  tri drift [--adopt] — тот ли это файл, что крутят таймеры, и лежит ли он в репозитории
-                     (выход 1 — измеренное расхождение, 2 — прочитать не удалось; --adopt только руками)
-  tri backlog — что бэклог СОДЕРЖИТ, прочитанный по задаче, а не выведенный из счётчиков пропусков
-  --- опыт и навыки ---
-  tri learn --audit — сколько указателей индекса памяти ведёт в файл, которого нет
-  tri learn <slug> --hook "..." --desc "..." --body-file F [--type feedback] — сохранить опыт: сперва файл, потом указатель
-  tri skills [фильтр] — какие навыки лежат на диске и у каких нет своего SKILL.md
-  tri proof <файл.md> ...  — существует ли то, на что документ ссылается (выход 2, если нет)
-  tri loop-lesson "текст" — записать урок ЦИКЛА в state.json и ledger.jsonl одной командой,
-                     в момент находки (не путать с командой `lesson` выше: та пишет в loop-opus/LESSONS.md)
-  tri lesson-orphans [--all] — какие уроки из state.json не дошли НИ ДО ОДНОГО навыка
-                     дерева trios (--all: плюс оба домашних каталога навыков; какие
-                     именно корни прочитаны, команда печатает сама); выход 2 = сироты
-  --- приборы цикла, у которых до 2026-09-13 не было точки входа ---
-  tri which-board [--json|--no-gh|--selftest] — какую доску GitHub читает каждый прибор цикла
-                     и движется ли она; выход 2 = набор приборов расколот (команда `board` выше — другое: дашборд trios)
-  tri judge-calibration --build [N] | --score FILE | --report — померить СУДЬЮ на вопросах,
-                     ответ на которые арифметика; выход 2 = судья подтвердил фантом
-  tri dash2 [--write] [--reading F] [--no-color] — дашборд цикла СВЕЖИМ замером: живость двумя
-                     сигналами, у каждого числа возраст, неизмеренное как '-' (уже нарисованный показывает `cycle-dash`)
-  tri help (то же самое — tri -h, tri --help) — эта справка
+  tri iter / iter-dash / iter-log [N] / iter-anchors — loop state, dashboard, log
+  tri iter-render [--work f.json] — measure the swarm, update the anchors, redraw the dashboard
+  tri iter-unlock — release the loop lock (only if `tri iter` says stale)
+  tri swarm — live Queen state in one line
+  tri fence — which paths stuck jobs hold (boundaries to avoid)
+  tri brief-gate <draft.md ...> — check a task draft with the Queen's own parser
+  tri facts [--record|--facts]    — measured dashboard numbers; what cannot be measured shows as '-'
+  tri failures [--since N|<step>] — which chain steps fail, how often, and with what evidence
+  tri channel                     — whether the single channel into the container is alive
+  tri share-modules [--share]     — one dependency install, linked into every tree
+  tri reap-finished [--reap]      — remove trees whose work is already published (by age, not by pressure)
+  tri rescue [--rescue]           — rescue work a bee did not commit before it gets wiped
+  tri container                   — who is PID 1 and how close to process exhaustion
+  tri two-views [--record|--report] — whether /health and the ssh gateway agree at the same moment
+  tri salvage <N> [--brief]       — what survived from a stale branch: names missing from the base; --brief writes a task
+  tri proven [--by-source]        — whether fresh work proves anything; --by-source: split by kind of work
+  tri coverage [--fresh]          — what share of accepted verdicts the audit can check (cache: 10s vs 217s)
+  tri verdict-audit <N ...> | --accepted — check a bee's claimed verdict against its diff
+  tri boundary <N ...>            — what a bee was allowed to touch and what it touched; CREATED vs edited
+  tri t27-gen                     — regenerate ring T27-00 from .t27 (the artifact is not edited by hand)
+  tri t27-parity                  — whether the generated ring and its handwritten production twin agree
+  tri forked-files                — a file that lives in two places must not start saying different things
+  tri ci-diff <run|--pr a b>      — which CI failures are NEW and which were red before you
+  tri exposure                    — what the live service serves to an origin it does not know
+  tri flaky [N|<run-id>...]       — which red tests fail ALWAYS and which only sometimes
+  tri accept-rate                 — whether a brief that CAN fail gets accepted less often
+  tri unverdicted [--limit N]     — dispatches with no VERDICT block: review will never judge them
+  tri silent-loop [--limit N]     — attempts that do not spend the retry limit: the loop has no ceiling
+  tri rejudge [--state S]         — a verdict the current code would no longer repeat (agreement ≠ correctness)
+  tri agree [--pair NAME]         — two implementations of one rule on real rows: where they diverge and which way
+  tri idle [--hours N]            — how long the swarm stood idle and what blocked the rounds (golden rule)
+  tri unwired [--all]             — a gate that is written but that nobody runs
+  tri reach [--since D] [--floor N] — which step of the heal chain GETS TO run and which is always last
+  tri reap [--reap] — worktree collection at 80/60 thresholds, no --force
+  tri lease [--release] — claim lease with an idle timer, retry cap 2
+  tri heal [--dry] — all swarm repairs in one chain, in the right order
+  tri author [--file] — open an issue from a measured shortfall, limit 5 open
+  tri loop-selftest — calibration of the loop's own instruments (no network; the run prints the count, not this line)
+  tri judge-packet <N ...> | --unauditable — build a packet for a judge to read
+  tri needs-you [--all] — what waits for a human and how long it has waited
+  tri loop-coverage — which loop tools have never run their live branch
+  tri trend [hours] — rate of the counters, not their level
+  tri clocks — which fields decisions hang on, and whether someone rewrites them
+  tri fields [file] — whether code reads fields the query does not select
+  tri fp-check [N] — whether the checkers accuse known-good work
+  tri push-work [--push] — push bee branches that are missing on the remote
+  tri close-done [--close] — close issues with accepted work (leaves epics alone)
+  tri unpark [--release] — lift a retry cap spent on silence rather than work
+  tri stale-escalations [--release] — release an escalation whose cause no longer reproduces
+  tri holds — what the swarm holds now and whether two dispatches claim one file
+  tri queue — queue depth (not the open count): what nobody has started yet
+  tri latency — where the time goes: review vs bee work, and how many tasks per hour
+  tri reap-local [--reap] — remove merged and clean worktrees from the laptop disk
+  tri verdicts [hours] — share accepted, returned and unjudged: health, not load
+  tri why [--all] — why the swarm is stalled: cause, evidence and what to do about it
+  tri feed [--act] — feeding only: push, close, open, no audits
+  tri mix — what KIND of work the swarm is doing: load and acceptance will not show it
+  tri land [--land] — land accepted work left on branches outside the base
+  tri ab <a> <nA> <b> <nB> — whether the difference stands out from noise, or there is just too little data
+  --- cycle: measure, cross-examine, draw, record ---
+  tri cycle [--deep] — one pass: measure, anomalies, dashboard, log entry (exit 2 = anomalies found; that is an answer)
+  tri cycle-repair — the same plus the listed safe repairs (a dead owner's lock, CLEAN trees)
+  tri cycle-dash — show the latest dashboard, with its filesystem age as the first line
+  tri cycle-html — the same measurement, but wide: every number shows the command that measured it, and every anomaly has its repair next to it. Exit 2 if the measurement is older than one cycle
+  tri cycle-anom [N] (alias: tri cycle-anomalies) — every anomaly in full: claim, truth, repair (the dashboard fits seven)
+  tri cycle-sense [--deep] — measure only, no drawing
+  tri cycle-log [N] — pass log: how many anomalies, which ones lingered, what was repaired
+  tri cycle-note did|next "text" — prose is written by hand; the dashboard draws a blank if nobody wrote it
+  tri cycle-doctor — whether everything the loop needs is in place, and whether every one of its commands is reachable
+  tri driver — whether anyone is driving iterations at all. Exit 1 — no driver (a measured zero), 2 — could not read (this is NOT zero)
+  tri drift [--adopt] — whether this is the file the timers run, and whether it is in the repository
+                     (exit 1 — measured drift, 2 — could not read; --adopt by hand only)
+  tri backlog — what the backlog CONTAINS, read issue by issue, not inferred from skip counters
+  --- xilinx7 MVP loop (bitstream back half as .t27, skill xilinx7-bitstream-loop) ---
+  tri x7-claim [who] / x7-release — fire lock (exit 75 = held by another fire)
+  tri x7-audit [--heal] — spec tests, generated .rs vs .t27 (content), bitwalk CRC 12/12 + frame ECC 32520/32520 on Vivado refs,
+                     FAR walk 32520 frames + 72 empty pads, pin sweep 82/82, segbits sweep 4224/4224, far.t27 part table drift,
+                     stale lock (exit 2 = anomalies; --heal regenerates .rs, rebuilds bitwalk, drops stale lock)
+  tri x7-mutate [SPEC] — mutation catalogue: every defect must fail the spec tests AND the Vivado sweep
+  tri x7-writer [--heal] — bitwalk --write byte-identical to xc7frames2bit on ~/.cache/x7/writer (16 entries) + wrong-part refusal
+  tri x7-fasm [--heal] — bitwalk --fasm byte-identical to fasm2frames on ~/.cache/x7/fasm (20 entries: 13 real, 5 synth, 2 refuse) + --strict
+  tri x7-board build|compare|load|receipts|all — bitwalk on a real 200T build: byte-compare + timing vs openXC7, SRAM load (--owner-yes), harness receipts
+  tri devkit flow|impact — the FPGA flow layer by layer: per-layer time, t27 replacements byte-compared, Amdahl ceilings, hours/yr
+  tri cast record|render|card|check|scrub|html|add|publish|gallery — terminal recordings: real commands → .cast → GIF, X/OG card, t27.ai/term/<id>/ share page (publish archives to ~/skills/_state/casts/)
+  tri x7-part [--print|--write] — far.t27 part table vs prjxray-db part.json (exit 1 = drift; --write regenerates it)
+  tri x7-status / x7-next / x7-task ID [--status S] [--note N] / x7-lesson "H" "B" / x7-bench [N] / x7-refs
+  --- AX7203 board (tern_tc: receipts, UART, formats) ---
+  tri fpga            — where the UART is (behind a hub or direct), openocd, latest runs, git, loop
+  tri fpga-status — USB (UART behind a hub?), openocd, lock, what is loaded (from the latest flash log), latest runs (verdict or exit), git
+  tri fpga-audit [--heal] — anomalies: key in logs, log > 1 MB, unfinished log, a "verified" count
+                     in a document with no log, uncommitted/unpushed records, two openocds,
+                     stale lock (exit 2 = anomalies; --heal only clears a stale lock)
+  tri fpga-claim [who] / fpga-release — loop iteration lock (exit 75 = held by another)
+  tri fpga-run NAME -- COMMAND... — one board run into board_runs/NAME.log with the standard wrapper;
+                     never overwrites an existing log (one attempt, both runs on record)
+  tri fpga-keycheck [FILE...] — how many times the key occurs in each file (prints counts, never the key); no FILE = every board_runs/ and rehearsal_runs/ log, also flags logs >= 1 MB
+  tri fpga-push trinity-fpga|igla-coder-gpu — fetch, rebase, key check of the outgoing patch,
+                     push with the gHashTag token (HANDOFF section 9), no force
+  tri fpga-usb / fpga-next / fpga-task ID [--status S --note N] / fpga-lesson "H" "B"
+  tri fpga-usb — CP2102N placement: DIRECT/HUB by the locationID rule, cross-checked by the hub-class walk of uart_loss_hubfree_ax7203.py --usb (exit 1 = HUB, 3 = the two rules disagree)
+  tri fpga-wire BAUD... — what the CP2102N actually sends (24 MHz / N) and which requested range
+                     gives the same wire rate; a sweep step finer than that range measures nothing
+  tri fpga-cost --top T --src F... [--param K=V1,V2] — LUT/FF/CARRY4/DSP/BRAM (B36+B18) under four synth_xilinx
+                     flag sets and the spread of the difference: a gap below the spread is the mapper, not the design;
+                     BRAM is how an inferred RAM is proven to have inferred (FF inflation means it did not)
+  tri fpga-rehearse NAME -- COMMAND... — a no-board rehearsal twice at once into rehearsal_runs/NAME_{1,2}.log; refuses --port, /dev/, the key file, openocd; exit 0 only if both pass with the same events (wall-clock times masked). --compare LOG1 LOG2 compares two logs
+  tri fpga-quiet [--per-cpu 2] [--wait S] [--hold 120] — wait until the 1-min load stays <= X per cpu for HOLD s; exit 0 quiet, 1 if WAIT passes first; starts nothing. Run it before a one-attempt board run
+  tri fpga-prcheck BODY.md --repo OWNER/REPO [--fork OWNER/REPO] — before a PR: bare #N refs, the Claude Code trailer, estimated stamps, and a fork behind with workflow changes the token cannot push; exit 0 ready, 2 not; posts nothing
+  tri fpga-hostnet IP — before a LAN run: the route to IP is direct on a local interface (no gateway, no VPN tunnel), IP is in its subnet and not this Mac, no ARP entry yet; exit 0 ok, 2 stop; sends nothing
+  tri fpga-steps KEY [--plan FILE] — where a pre-registered board sequence stands (default plan NODE_ETHERNET_PLAN.md, e.g. KEY=E3; FILE is looked up here, then in conformance/; KEY is the start of the heading, e.g. "The board run" --plan UART_LOSS_HUBFREE.md): each tri fpga-run/-flash line against its board_runs log, commands that differ from the plan, out-of-order logs, the next step; prints only, runs nothing, judges nothing; exit 2 on a problem
+  tri fpga-rxer — E3 RX_ER cases in simulation (conformance/eth_rxer_bench.py, about 4.5 min at nice 19): the pinned TB, model and RTL compiled unchanged plus formal/eth_rxer_inject.v as a second top that forces RX_CTL at one falling RXC edge; expectations fixed in NODE_ETHERNET_PLAN.md; exit 1 if any case disagrees. --gate also runs each case on the yosys netlist (the runner's gate_netlist) and requires every INJ/RXE/TXF/TB/UART| line of the gate log to equal the RTL log; each gate run took 28 to 30 min at nice 19 under load (15/15 at 22:35Z, 91b07fd86). Rerun after any E3 RTL change
+  tri fpga-txhold [--self-test] — E3 TX hold and setup at the TX output buffers in nextpnr-xilinx's own SDF of the routed e3z (conformance/e3_tx_hold_model.py; spec specs/trinet/e3_tx_hold_model_ax7203.t27): with no argument prints the one recorded run (conformance/model_runs/e3_tx_hold_model.log) if it exists, else runs it once (about 2.5 min, needs /tmp/trinet-node-build/e3z); exit 0 PASS, 1 FAIL, 2 NO VERDICT. PASS 23:23Z 2026-09-27: smallest hold 3445 ps on TXD1, bench 3000; the model has no clock skew. Another build or RTL needs its own spec
+  tri fpga-rxcap [--self-test] — E3 RX capture at the RX flip-flops in the same SDF (conformance/e3_rx_capture_model.py; spec specs/trinet/e3_rx_capture_model_ax7203.t27; reads /tmp/e3txhold, pinned by sha, runs no tool): with no argument prints the one recorded run (conformance/model_runs/e3_rx_capture_model.log) if it exists, else runs it once (seconds); exit 0 PASS, 1 FAIL, 2 NO VERDICT. PASS 00:21Z 2026-09-28: falling-edge hold 10900 ps on rxctl_n; RXC 2.4 ns behind its data through the BUFG, so rxd_p1 and an RX_ER nibble sample the new value over x -2.5..+0.5 ns (board ed should stay 0)
+  tri fpga-tmpcheck [--archive] [--restore] | --self-test — every file a .t27 spec pins by sha256 under /tmp (emptied at boot): ok / CHANGED / GONE and whether a kept copy exists in trinity-fpga/artifacts/model_inputs/blobs (gitignored; MANIFEST.tsv tracked). --archive keeps present files, --restore puts kept ones back where gone (never over a CHANGED file); fpga-audit flags lost and unkept inputs and --heal does both. Exit 0 all kept, 1 some unkept or unlocated, 2 a pin lost
+  tri fpga-decode LOG --tokenizer FILE [--model FILE] | --self-test — the board ids of a generation log as text; refuses unless every receipt verified, exit 0, board ids = CPU_INT_IDS, the model sha is the generation spec's and the tokenizer vocabulary equals the model's (the local results/step2 tokenizer is 32000, the model 8192: refused)
+  tri fpga-runlog [NAME] [--tail N] [--watch S] — one command for a run's progress: grammar-parsed status of a live (polls) or finished board_runs log; --self-test
+  tri fpga-budget [NAME] | --self-test — wire budget of a finished generation run: request and answer streams in bytes and seconds-alone, each share of the wall clock, in-run jobs/s against the link ceiling, request-bound or answer-bound verdict; REQ_LEN/RESP_LEN/BAUD come from the spec the log cites (the decode chain, stopped at the first spec pinning them), retransmit frames counted into the request stream and labelled approximate; refuses a live, short-verified, elapsed-less or constant-less log
+  tri fpga-watch-clients NAME [--every 30] [--max 5400] — sample IOKit user clients on the CP2102N into board_runs/NAME.clients.log while board_runs/NAME.log is open; passive (ioreg only, never the UART lock); start it just before tri fpga-run NAME
+  tri fpga-hole LOG... — UART hole size from nonce arithmetic (expected = 0x10000 + verified; every hex header must give the same number), not by eye
+  tri fpga-ioclients — who holds IOKit user clients on the CP2102N (pid, count, alive) and which driver is bound (AppleUSBSLCOM or a vendor one); every fpga-run header gets "# usb clients" and "# usb driver" lines
+  tri fpga-tristate FASM... — pads whose output enable comes out inverted (OLOGIC pad pip or routed T1 input without ZINV_T1; exit 1); the archived nextpnr-xilinx drops that bit under router1
+  tri fpga-batch — the batched wire protocol design gate: conformance/tern_tc_batch_model.py --self-test (BatchCell reference model of specs/trinet/tern_tc_batch_ax7203.t27 — SETX/DOT6 frames, the RAM-read preimage rule, negative controls incl. RAM drift after SETX); exit 0 PASS
+  tri fpga-batch-rehearsal — the batched protocol's job stream: conformance/tern_tc_batch_runner.py --self-test (26 checks — whole passes pipelined through one window, mixed 19/24-byte answers shaped by issued nonces and settled by tag — natural y-nonce collisions hit ~1% of DOT6 frames and resolve without a false stop, loss recovery over RxLoss/TxLoss/the hunting parser, zero-plane skip, per-row recombination vs the int8 oracle, the honest/corrupt rehearsal pair); exit 0 PASS
+  tri fpga-batch-cosim [--passes wq|both] [--keep DIR] — conformance/tern_tc_batch_rtl_cosim.py: the rehearsal's
+                     recorded request stream replayed through formal/tern_tc_layer_rtl_tb.v under iverilog
+                     vs a fresh HuntingBatchCell (byte-for-byte; negative control = blind 24-byte framing).
+                     Pre-built red: FAILs on the current core at the first SETX tag (no SETX/DOT6 ops yet);
+                     PASS is the TERN_TC_BATCH_RTL_PLAN.md core edit's gate. The walk_answers precondition
+                     refuses non-adjudicable streams (out-of-range phantom frames: model drops, RTL will
+                     answer) loudly instead of reporting a mystery diff; needs iverilog+vvp
+  tri fpga-specs — every conformance/*_from_spec.mjs --check: .t27 specs compile, test blocks pass, generated files have not drifted (exit 2 = drift)
+  tri fpga-loopcheck — the standing per-fire sweep in one call: git status (informational), specs, keycheck, audit, one greppable verdict line; exit is the OR of the three real components
+  tri fpga-repin FILE... [--check] — propagate a sha256 change of FILE through the pin graph to a fixpoint: leaf pins, cross-spec pins, params regeneration, params pins. Never guesses: a missing pinned file is skipped with a note, an ambiguous *_SHA256 is refused, a generator PROBLEM stops the walk. Exit 0 = converged, 1 = changes made/pending, 2 = refused/PROBLEM
+  tri fpga-pins FILE — the blast radius of editing FILE, before the edit: every spec pinning it by sha256 transitively (L1 direct, L2 pinners of pinners, ...) plus the params generators inside the radius — the exact set fpga-repin will then walk. Reports pin cycles (exit 1); read-only
+  tri fpga-tools — every board-tool's own --self-test in one call (runlog, budget, tmpcheck, decode, repin, pins, fire, firelog), one verdict line; loopcheck runs it as its fourth component, so each fire re-verifies the whole tool layer after any edit
+  tri fpga-loopstate — lint .claude/loop-state.md (read-only): sections, UART lock paragraph, exactly one fresh IN-PROGRESS row, every table fire in the fire log (live file or the firelog archive); loopcheck runs it as its fifth component, so a broken coordination file fails the sweep instead of being inherited by the next cron fire
+  tri fpga-fire start "<description>" — open the NEXT fire: lock row + fire-log stub built in memory, linted, written as ONE atomic edit (the fire-18 protocol made mechanical); refuses if a fire is IN-PROGRESS or the file does not lint; numbers above the archive max too; the DONE flip and full log entry stay hand-written
+  tri fpga-firelog archive — move fire-log entries whose fires lost their LOCKS rows to .claude/loop/firelog-archive.md (verbatim, never dropped; archive written first so a crash duplicates rather than loses); the linter counts a fire's entry in either home
+  tri fpga-stamps | --self-test — the audit's stamp check alone: HH:MM stamps that postdate the commit that wrote them, over the claim docs, plus its calibration probe (stamp_probe steps the probe commit back across midnight so it stays inside the check's same-date scope at every instant — the fire-27 bug); in the tools self-test sweep
+  tri fpga-keep PATH TAG | --self-test — keep a volatile /tmp tree durably: every file -> artifacts/model_inputs/blobs/<sha256> (gitignored) + a MANIFEST.tsv row (tracked), pins tag keep:TAG; after that tmpcheck watches the tree and --restore rebuilds it after a reboot (fire 28: the round-1 corpus had no builder, only /tmp and a stopped pod); in the tools self-test sweep
+  tri fpga-derive ft_t27_8k [--out DIR] — rebuild the kept corpus from its chain (~/t27 at the pinned commit via git archive, the sibling's t27_bench.py + data.py with the held-copy patch, items/tokenizer from the keep blobs) and sha256-verify every MANIFEST.tsv row tagged keep:ft_t27_8k; 91/92 rows byte-identical, manifest.json checked on content, proven fire 29
+  tri fpga-genscore CANDS.jsonl [...] [--min-lines N --pass-frac F] | --self-test — score t27_bench gen candidates for a behavioral criterion: literal >=N-line count AND degeneracy-filtered count (unique stripped lines < half the body = repetition loop, fire 35); the verdict rides the FILTERED count at --pass-frac of rows; in the tools self-test sweep
+  tri fpga-jtag [--load] [--expect XC7A100T] | --decode HEX | --self-test — JTAG chain behind a Xilinx Platform Cable USB II (DLC10, 03fd): fxload only on --load (no sudo), xc3sprog -c xpc -j, each IDCODE named; no chain -> raw TDO shift classified (all ones = nothing drives TDO: VREF/ribbon/orientation; all zeros = TDO held low: cable). Never programs. Exit 0 chain, 1 none, 2 no cable
+  tri fpga-seeds --parse LOG... [--csv OUT] | --run --chipdb F --xdc F --json F --seeds 1-20 --out DIR | --self-test — Fmax as a distribution over nextpnr-xilinx seeds: CSV row per seed (LUT/FF/CARRY4, post-route Fmax, logic/routing ns) + min/median/max; warns when cell counts differ; --run keeps one log per seed, refuses overwrite, writes input sha256s + nextpnr version
+  tri fpga-selftest — off-board --self-test of every conformance/*.py a .t27 spec names (RUNNER or *_FILE); refuses a self_test that opens a port (exit 2 = fail/missing/refused)
+  tri fpga-build --out DIR [--node N --rev REV] — build a node bitstream locally (openXC7, prjxray-db ab1fc60);
+                     never touches the board, only prints the flash command (conformance/NODE_TOOLCHAIN_RESTORE.md)
+  tri fpga-flash NAME BIT --owner-yes "QUOTE" [--expect SHA_PREFIX] — load a bitstream into SRAM (sudo openocd,
+                     the owner types the password); refuses without the owner's quoted yes, with openocd running,
+                     with an existing log or a foreign payload, or while a board run holds the UART lock (exit 75); records everything in board_runs/NAME.log; the key is wiped after a load
+  tri fpga-restore NAME BIT --owner-yes "QUOTE" [--expect SHA_PREFIX] [--task ID] — the post-power-event chain
+                     in one command: probe the JTAG chain (no sudo; idcode 0x13636093 = the XC7A200T answers,
+                     all-ones = board power, no device = the FTDI half-enumeration wedge), then the fpga-flash
+                     load, then discover_port.py for the UART (status 0x04 after a fresh load is normal: no key
+                     yet), then the whole chain as one note on the task
+  --- experience and skills ---
+  tri learn --audit — how many memory index pointers lead to a file that does not exist
+  tri learn <slug> --hook "..." --desc "..." --body-file F [--type feedback] — save experience: the file first, then the pointer
+  tri skills [filter] — which skills are on disk and which have no SKILL.md of their own
+  tri proof <file.md> ...  — whether what a document refers to exists (exit 2 if not)
+  tri loop-lesson "text" — record a LOOP lesson in state.json and ledger.jsonl in one command,
+                     at the moment of the finding (not the `lesson` command above: that one writes to loop-opus/LESSONS.md)
+  tri lesson-orphans [--all] — which lessons from state.json reached NOT A SINGLE skill
+                     of the trios tree (--all: plus both home skill directories; the command
+                     prints which roots it read); exit 2 = orphans
+  --- loop instruments that had no entry point before 2026-09-13 ---
+  tri which-board [--json|--no-gh|--selftest] — which GitHub board each loop instrument reads
+                     and whether it moves; exit 2 = the instruments are split (the `board` command above is different: the trios dashboard)
+  tri judge-calibration --build [N] | --score FILE | --report — measure the JUDGE on questions
+                     whose answer is arithmetic; exit 2 = the judge confirmed a phantom
+  tri dash2 [--write] [--reading F] [--no-color] — loop dashboard from a FRESH measurement: liveness from two
+                     signals, every number has an age, unmeasured shows as '-' (`cycle-dash` shows the one already drawn)
+  tri help (alias: tri -h, tri --help) — this help
 USAGE
     ;;
   # ---- queen game loop (t27.ai/#/queen) ----------------------------------
   game)         exec python3 "$HOME/skills/queen-game-loop/_state/loop.py" status ;;
+  fpga)          shift; exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" status "$@" ;;
+  fpga-status)   exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" status ;;
+  fpga-audit)    shift; exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" audit "$@" ;;
+  x7-claim)  shift; exec python3 "$HOME/skills/xilinx7-bitstream-loop/scripts/x7.py" claim "$@" ;;
+  x7-release)  shift; exec python3 "$HOME/skills/xilinx7-bitstream-loop/scripts/x7.py" release "$@" ;;
+  x7-status)  shift; exec python3 "$HOME/skills/xilinx7-bitstream-loop/scripts/x7.py" status "$@" ;;
+  x7-audit)  shift; exec python3 "$HOME/skills/xilinx7-bitstream-loop/scripts/x7.py" audit "$@" ;;
+  x7-next)  shift; exec python3 "$HOME/skills/xilinx7-bitstream-loop/scripts/x7.py" next "$@" ;;
+  x7-task)  shift; exec python3 "$HOME/skills/xilinx7-bitstream-loop/scripts/x7.py" task "$@" ;;
+  x7-lesson)  shift; exec python3 "$HOME/skills/xilinx7-bitstream-loop/scripts/x7.py" lesson "$@" ;;
+  x7-bench)  shift; exec python3 "$HOME/skills/xilinx7-bitstream-loop/scripts/x7.py" bench "$@" ;;
+  x7-mutate)  shift; exec python3 "$HOME/skills/xilinx7-bitstream-loop/scripts/x7.py" mutate "$@" ;;
+  x7-part)  shift; exec python3 "$HOME/skills/xilinx7-bitstream-loop/scripts/x7.py" part "$@" ;;
+  x7-refs)  shift; exec python3 "$HOME/skills/xilinx7-bitstream-loop/scripts/x7.py" refs "$@" ;;
+  x7-writer)  shift; exec python3 "$HOME/skills/xilinx7-bitstream-loop/scripts/x7.py" writer "$@" ;;
+  x7-board)  shift; exec python3 "$HOME/skills/xilinx7-bitstream-loop/scripts/x7board.py" "$@" ;;
+  devkit)  shift; exec python3 "$HOME/skills/xilinx7-bitstream-loop/scripts/devkit.py" "$@" ;;
+  cast)  shift; exec python3 "$HOME/skills/trinity-blog/scripts/termgif.py" "$@" ;;
+  x7-fasm)    shift; exec python3 "$HOME/skills/xilinx7-bitstream-loop/scripts/x7.py" fasm "$@" ;;
+  fpga-claim)    shift; exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" claim "$@" ;;
+  fpga-release)  exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" release ;;
+  fpga-run)      shift; exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" run "$@" ;;
+  fpga-runlog)   shift; exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" runlog "$@" ;;
+  fpga-budget)   shift; exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" budget "$@" ;;
+  fpga-keycheck) shift; exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" keycheck "$@" ;;
+  fpga-push)     shift; exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" push "$@" ;;
+  fpga-usb)      exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" usb ;;
+  fpga-next)     exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" next ;;
+  fpga-task)     shift; exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" task "$@" ;;
+  fpga-lesson)   shift; exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" lesson "$@" ;;
+  fpga-wire)     shift; exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" wire "$@" ;;
+  fpga-cost)     shift; exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" cost "$@" ;;
+  fpga-specs)    exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" specs ;;
+  fpga-loopcheck) exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" loopcheck ;;
+  fpga-repin)    shift; exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" repin "$@" ;;
+  fpga-pins)     shift; exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" pins "$@" ;;
+  fpga-tools)    shift; exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" tools "$@" ;;
+  fpga-loopstate) shift; exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" loopstate "$@" ;;
+  fpga-fire)     shift; exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" fire "$@" ;;
+  fpga-firelog)  shift; exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" firelog "$@" ;;
+  fpga-stamps)   shift; exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" stamps "$@" ;;
+  fpga-keep)     shift; exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" keep "$@" ;;
+  fpga-derive)   shift; exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" derive "$@" ;;
+  fpga-genscore) shift; exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" genscore "$@" ;;
+  fpga-jtag)     shift; exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" jtag "$@" ;;
+  fpga-seeds)    shift; exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" seeds "$@" ;;
+  fpga-batch)    exec python3 "$(git rev-parse --show-toplevel 2>/dev/null || echo .)/conformance/tern_tc_batch_model.py" --self-test ;;
+  fpga-batch-rehearsal) exec python3 "$(git rev-parse --show-toplevel 2>/dev/null || echo .)/conformance/tern_tc_batch_runner.py" --self-test ;;
+  fpga-batch-cosim)   shift; exec python3 "$(git rev-parse --show-toplevel 2>/dev/null || echo .)/conformance/tern_tc_batch_rtl_cosim.py" "$@" ;;
+  fpga-selftest) exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" selftest ;;
+  fpga-rehearse) shift; exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" rehearse "$@" ;;
+  fpga-quiet) shift; exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" quiet "$@" ;;
+  fpga-prcheck) shift; exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" prcheck "$@" ;;
+  fpga-hostnet) shift; exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" hostnet "$@" ;;
+  fpga-steps)   shift; exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" steps "$@" ;;
+  fpga-rxer)    shift; cd "$HOME/trinity-fpga" && exec nice -n 19 python3 conformance/eth_rxer_bench.py "$@" ;;
+  fpga-txhold)  shift; cd "$HOME/trinity-fpga" && { if [ $# -eq 0 ] && [ -f conformance/model_runs/e3_tx_hold_model.log ]; then exec cat conformance/model_runs/e3_tx_hold_model.log; fi; exec nice -n 19 python3 conformance/e3_tx_hold_model.py "$@"; } ;;
+  fpga-rxcap)    shift; cd "$HOME/trinity-fpga" && { if [ $# -eq 0 ] && [ -f conformance/model_runs/e3_rx_capture_model.log ]; then exec cat conformance/model_runs/e3_rx_capture_model.log; fi; exec nice -n 19 python3 conformance/e3_rx_capture_model.py "$@"; } ;;
+  fpga-tmpcheck) shift; exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" tmpcheck "$@" ;;
+  fpga-decode) shift; exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" decode "$@" ;;
+  fpga-watch-clients) shift; exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" watch-clients "$@" ;;
+  fpga-hole)     shift; exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" hole "$@" ;;
+  fpga-ioclients) exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" ioclients ;;
+  fpga-tristate) shift; exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" tristate "$@" ;;
+  fpga-flash)    shift; cd "$HOME/trinity-fpga" && exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" flash "$@" ;;
+  fpga-restore)  shift; cd "$HOME/trinity-fpga" && exec python3 "$HOME/skills/ax7203-board-loop/scripts/board.py" restore "$@" ;;
+  fpga-build)    shift; cd "$HOME/trinity-fpga" && exec python3 fpga/openxc7-synth/build_trinet_node.py "$@" ;;
   game-claim)   exec python3 "$HOME/skills/queen-game-loop/_state/loop.py" claim ;;
   game-release) exec python3 "$HOME/skills/queen-game-loop/_state/loop.py" release ;;
   game-iterate) exec python3 "$HOME/skills/queen-game-loop/_state/loop.py" iterate --subject "Queen game — t27.ai/#/queen" ;;
@@ -1092,11 +2003,25 @@ USAGE
   game-ship)    shift; exec bash "$HOME/skills/queen-game-loop/scripts/ship.sh" "$@" ;;
   game-gates)   shift; exec bash "$HOME/skills/queen-game-loop/scripts/gates.sh" "$@" ;;
   game-prove)   shift; exec python3 "$HOME/skills/queen-game-loop/scripts/prove.py" "$@" ;;
+  game-verdicts) shift; exec python3 "$HOME/skills/queen-game-loop/scripts/verdicts.py" "$@" ;;
+  game-site) shift; exec python3 "$HOME/skills/queen-game-loop/scripts/site_gate.py" "$@" ;;
+  trinity-report) shift; exec python3 "$HOME/skills/queen-game-loop/scripts/trinity_report.py" "$@" ;;
+  game-writers) shift; exec python3 "$HOME/skills/queen-game-loop/scripts/apex_writers.py" "$@" ;;
+  game-served) shift; exec python3 "$HOME/skills/queen-game-loop/scripts/served_drift.py" "$@" ;;
+  game-vault) shift; exec python3 "$HOME/skills/queen-game-loop/scripts/vault.py" "$@" ;;
+  game-blog) shift; exec python3 "$HOME/skills/queen-game-loop/scripts/blog_drift.py" "$@" ;;
+  blog) shift; exec python3 "$HOME/skills/trinity-blog/scripts/blog.py" "$@" ;;
+  game-cadence) shift; exec python3 "$HOME/skills/queen-game-loop/scripts/cadence.py" "$@" ;;
+  game-selftest) shift; exec python3 "$HOME/skills/queen-game-loop/scripts/selftest.py" "$@" ;;
+  game-tick) shift; exec python3 "$HOME/skills/queen-game-loop/scripts/tick.py" "$@" ;;
+  game-merged) shift; exec python3 "$HOME/skills/queen-game-loop/scripts/merged_audit.py" "$@" ;;
+  t27-tri)      shift; exec bash "$HOME/skills/queen-game-loop/scripts/t27tri.sh" "$@" ;;
+  game-lessons) shift; exec python3 "$HOME/skills/queen-game-loop/scripts/lessons.py" "$@" ;;
   game-lesson)
-    [ -z "${3:-}" ] && { echo 'tri game-lesson "заголовок" "текст"'; exit 1; }
+    [ -z "${3:-}" ] && { echo 'tri game-lesson "title" "text"'; exit 1; }
     f="$HOME/skills/queen-game-loop/LESSONS.md"
     { echo; echo "## $(date '+%Y-%m-%d %H:%M') — $2"; echo; echo "$3"; } >> "$f"
-    echo "записано в $f"
+    echo "written to $f"
     ;;
 
   # --- the continuous cycle -------------------------------------------------
@@ -1251,13 +2176,13 @@ PYNOTE
     ;;
 
   learn)
-    # Опыт сохраняется ФАЙЛОМ, и строка индекса пишется только после того, как
-    # файл лёг на диск. 2026-09-12 в MEMORY.md нашлось 183 указателя, из них 101
-    # (55%) вёл в файл, которого нет: указатель и файл были двумя отдельными
-    # ручными правками, и происходила регулярно только одна. Здесь этот порядок
-    # сделан структурным - написать указатель без файла отсюда невозможно.
-    #   tri learn --audit                     — что в индексе висит в пустоту
-    #   tri learn <slug> --hook "строка" --desc "..." --body-file F [--type T]
+    # Experience is saved as a FILE, and the index line is written only after
+    # the file is on disk. On 2026-09-12 MEMORY.md had 183 pointers, and 101 of them
+    # (55%) led to a file that did not exist: the pointer and the file were two separate
+    # manual edits, and only one of them happened reliably. Here that order
+    # is structural - this command cannot write a pointer without the file.
+    #   tri learn --audit                     — which index entries point at nothing
+    #   tri learn <slug> --hook "line" --desc "..." --body-file F [--type T]
     shift 2>/dev/null || true
     python3 - "$@" << 'PYLEARN'
 import os, re, sys
@@ -1315,7 +2240,7 @@ def audit():
 args = sys.argv[1:]
 if not args or args[0] in ("-h", "--help"):
     print('tri learn --audit')
-    print('tri learn <slug> --hook "строка индекса" --desc "..." --body-file F [--type feedback]')
+    print('tri learn <slug> --hook "index line" --desc "..." --body-file F [--type feedback]')
     sys.exit(1)
 if args[0] == "--audit":
     sys.exit(audit())
@@ -1328,24 +2253,24 @@ while i < len(args):
         opt[args[i][2:]] = args[i + 1]
         i += 2
     else:
-        sys.exit("не понял аргумент: %s" % args[i])
+        sys.exit("unknown argument: %s" % args[i])
 
 if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", slug):
-    sys.exit("slug должен быть kebab-case ascii: %s" % slug)
+    sys.exit("slug must be kebab-case ascii: %s" % slug)
 kind = opt.get("type", "project")
 if kind not in KINDS:
-    sys.exit("--type должен быть одним из: %s" % ", ".join(KINDS))
+    sys.exit("--type must be one of: %s" % ", ".join(KINDS))
 for need in ("hook", "desc"):
     if not opt.get(need):
-        sys.exit("--%s обязателен: индекс без него нечитаем" % need)
+        sys.exit("--%s is required: the index is unreadable without it" % need)
 bf = opt.get("body-file")
 if not bf:
-    sys.exit("--body-file обязателен: тело памяти пишется, а не генерируется")
+    sys.exit("--body-file is required: a memory body is written, not generated")
 if not os.path.exists(bf):
-    sys.exit("нет такого файла: %s" % bf)
+    sys.exit("no such file: %s" % bf)
 body = open(bf, encoding="utf-8").read().strip()
 if not body:
-    sys.exit("тело пустое: %s" % bf)
+    sys.exit("empty body: %s" % bf)
 
 path = os.path.join(MEM, slug + ".md")
 existed = os.path.exists(path)
@@ -1354,42 +2279,42 @@ with open(path, "w", encoding="utf-8") as fh:
     fh.write("---\nname: %s\ndescription: \"%s\"\nmetadata:\n  type: %s\n---\n\n%s\n"
              % (slug, desc, kind, body))
 
-# Только теперь - указатель. И только если его ещё нет.
+# Only now - the pointer. And only if it is not there yet.
 line = "- [%s](%s.md) — %s" % (opt.get("title", slug), slug, opt["hook"])
 have = [t for _, t, _ in pointers()]
 if slug + ".md" in have:
-    print("%s: %s" % ("переписан" if existed else "создан", path))
-    print("указатель уже был в MEMORY.md, не дублирую")
+    print("%s: %s" % ("rewritten" if existed else "created", path))
+    print("pointer already in MEMORY.md, not duplicating")
 else:
     with open(IDX, "a", encoding="utf-8") as fh:
         fh.write(line + "\n")
-    print("создан: %s" % path)
-    print("в индекс: %s" % line)
+    print("created: %s" % path)
+    print("added to index: %s" % line)
 PYLEARN
     ;;
   skills)
-    # Что лежит на диске как навык - и у каких навыков нет собственного
-    # SKILL.md, то есть имя каталога есть, а инструкции нет. Это НЕ ответ на
-    # вопрос "какие навыки видит Королева": её доступность меряется на проводе,
-    # а не в файловой системе (WAVE-066: она доставала 4 из 26).
+    # What is on disk as a skill - and which skills have no SKILL.md of their
+    # own, i.e. the directory name exists but the instructions do not. This is NOT the answer to
+    # "which skills does the Queen see": her access is measured on the wire,
+    # not in the filesystem (WAVE-066: she reached 4 of 26).
     python3 - "${2:-}" << 'PYSKILLS'
 import os, sys
 
 ROOTS = [
-    ("проект  ", "/Users/playra/BrowserOS/trios/.claude/skills"),
-    ("личные  ", os.path.expanduser("~/.claude/skills")),
-    ("библиотека", os.path.expanduser("~/skills")),
+    ("project ", "/Users/playra/BrowserOS/trios/.claude/skills"),
+    ("personal", os.path.expanduser("~/.claude/skills")),
+    ("library ", os.path.expanduser("~/skills")),
 ]
 want = (sys.argv[1] if len(sys.argv) > 1 else "").strip()
 total = broken = 0
 for label, root in ROOTS:
     if not os.path.isdir(root):
-        print("%s  %s  — нет каталога" % (label, root))
+        print("%s  %s  — no directory" % (label, root))
         continue
-    # `.git`, `_state`, `_archive` и прочая обвязка каталогом навыка не является.
-    # Без этой строки команда в первом же запуске выдала 8 находок, из которых
-    # настоящей была одна: инструмент, считающий шум находками, - тот самый
-    # дефект, ради которого этот цикл и заведён.
+    # `.git`, `_state`, `_archive` and other scaffolding are not skill directories.
+    # Without this line the first run of the command reported 8 findings, of which
+    # only one was real: a tool that counts noise as findings is the very
+    # defect this loop exists to fix.
     names = sorted(
         d
         for d in os.listdir(root)
@@ -1411,17 +2336,17 @@ for label, root in ROOTS:
             print("  %-34s %6d b  %s" % (n, size, head))
         else:
             broken += 1
-            print("  %-34s      -  НЕТ SKILL.md" % n)
-print("\nвсего каталогов: %d, без SKILL.md: %d" % (total, broken))
+            print("  %-34s      -  NO SKILL.md" % n)
+print("\ndirectories total: %d, without SKILL.md: %d" % (total, broken))
 sys.exit(2 if broken else 0)
 PYSKILLS
     ;;
   proof)
-    # Ссылается ли документ на то, что существует. claim-guard когда-то дал
-    # зелёный свет на опечатку в имени файла: путь был процитирован, файла не
-    # было, и никто не спросил диск. Здесь спрашивают диск.
-    #   tri proof <файл.md> [...]      — выход 2, если хоть один путь не найден
-    [ -z "${2:-}" ] && { echo 'tri proof <файл.md> [...]'; exit 1; }
+    # Does a document refer to things that exist. claim-guard once gave
+    # a green light to a typo in a file name: the path was quoted, the file did not
+    # exist, and nobody asked the disk. Here the disk is asked.
+    #   tri proof <file.md> [...]      — exit 2 if any path is not found
+    [ -z "${2:-}" ] && { echo 'tri proof <file.md> [...]'; exit 1; }
     shift 2>/dev/null || true
     python3 - "$@" << 'PYPROOF'
 import os, re, subprocess, sys
@@ -1429,19 +2354,19 @@ import os, re, subprocess, sys
 REPO = "/Users/playra/BrowserOS"
 CODE = re.compile(r"`([^`\n]{2,160})`")
 LOOKS_PATH = re.compile(r"^[~./A-Za-z0-9_-][A-Za-z0-9_./~*-]*$")
-# Расширение, которое действительно бывает у файла этого дерева. Без этого
-# списка `ProjectPaths.trinity` (обращение к свойству в Swift) читается как путь
-# и попадает в отчёт ненайденным - обвинение, которого никто не делал.
+# Extensions that files in this tree really have. Without this
+# list `ProjectPaths.trinity` (a property access in Swift) reads as a path
+# and lands in the report as not found - an accusation nobody made.
 EXTS = {
     ".md", ".mjs", ".js", ".ts", ".tsx", ".json", ".jsonl", ".swift", ".sh",
     ".py", ".rs", ".toml", ".yml", ".yaml", ".t27", ".zig", ".c", ".h", ".v",
     ".plist", ".txt", ".ansi", ".lock", ".app", ".png", ".svg", ".log", ".env",
 }
 
-# Путь в документе относителен не текущему каталогу, а чаще всего каталогу
-# самого документа или корню дерева. 2026-07 отчёт объявил 15 мёртвых ссылок,
-# и все 15 были живыми - их просто мерили не от того корня. Здесь спрашивают
-# git: он знает настоящий набор путей.
+# A path in a document is relative not to the current directory but, most often, to the
+# document's own directory or the tree root. In 2026-07 a report declared 15 dead links,
+# and all 15 were alive - they were just measured from the wrong root. Here we ask
+# git: it knows the real set of paths.
 try:
     tracked = set(
         subprocess.run(
@@ -1450,7 +2375,7 @@ try:
         ).stdout.split("\n")
     ) - {""}
 except Exception as e:
-    print("git ls-files не ответил (%s) - проверяю только файловой системой" % e)
+    print("git ls-files did not answer (%s) - checking the filesystem only" % e)
     tracked = set()
 by_base = {}
 for t in tracked:
@@ -1462,7 +2387,7 @@ def resolves(cand, docdir):
     if os.path.isabs(exp):
         return os.path.exists(exp)
     roots = [docdir, REPO, os.getcwd()]
-    # ...и каждый каталог между документом и корнем дерева.
+    # ...and every directory between the document and the tree root.
     d = docdir
     while d.startswith(REPO) and d != REPO:
         d = os.path.dirname(d)
@@ -1473,7 +2398,7 @@ def resolves(cand, docdir):
         return True
     if "/" not in cand and cand in by_base:
         return True
-    if "*" in cand:                      # `.worktrees/*/trios` - проверяем ствол
+    if "*" in cand:                      # `.worktrees/*/trios` - check the trunk
         stem = cand.split("*")[0].rstrip("/")
         return bool(stem) and any(os.path.exists(os.path.join(r, stem)) for r in roots)
     return False
@@ -1482,7 +2407,7 @@ def resolves(cand, docdir):
 bad = checked = 0
 for doc in sys.argv[1:]:
     if not os.path.exists(doc):
-        print("НЕТ ДОКУМЕНТА  %s" % doc)
+        print("NO DOCUMENT  %s" % doc)
         bad += 1
         continue
     docdir = os.path.dirname(os.path.abspath(doc))
@@ -1494,79 +2419,79 @@ for doc in sys.argv[1:]:
             continue
         ext = os.path.splitext(cand)[1].lower()
         if "/" not in cand and ext not in EXTS:
-            continue                     # одиночное слово - это не путь
+            continue                     # a single word is not a path
         if "/" in cand and ext and ext not in EXTS and not cand.endswith("/"):
-            pass                         # каталог с точкой в имени - всё же путь
+            pass                         # a dotted directory name is still a path
         seen.add(cand)
         checked += 1
         if not resolves(cand, docdir):
             misses.append(cand)
-    print("\n%s — путей %d, не найдено %d" % (doc, len(seen), len(misses)))
+    print("\n%s — paths %d, not found %d" % (doc, len(seen), len(misses)))
     for m in misses:
-        print("  НЕ НАЙДЕН  %s" % m)
+        print("  NOT FOUND  %s" % m)
     bad += len(misses)
-print("\nпроверено путей: %d, не найдено: %d" % (checked, bad))
-print("(корни: каталог документа, каждый каталог до корня дерева, и git ls-files)")
+print("\npaths checked: %d, not found: %d" % (checked, bad))
+print("(roots: the document directory, every directory up to the tree root, and git ls-files)")
 sys.exit(2 if bad else 0)
 PYPROOF
     ;;
 
-  # --- инструменты цикла, у которых не было точки входа (2026-09-13) --------
+  # --- loop tools that had no entry point (2026-09-13) --------------------
   #
-  # Аудит 2026-09-13 нашёл здесь два класса: инструмент, написанный и не
-  # подключённый ни к одной руке (judge-calibration.mjs и dash2.mjs, 27 КБ на
-  # двоих, ноль импортёров), и руку без строки в `tri help` (23 из 146). Обе
-  # руки ниже добавлены ВМЕСТЕ со своими строками справки одним прогоном:
-  # недокументированная рука — это и есть второй из этих двух дефектов.
+  # The 2026-09-13 audit found two classes here: a tool written but not
+  # wired to any arm (judge-calibration.mjs and dash2.mjs, 27 KB between
+  # them, zero importers), and an arm with no line in `tri help` (23 of 146). Both
+  # arms below were added TOGETHER with their help lines in one pass:
+  # an undocumented arm is exactly the second of these two defects.
   #
-  # Имена сверены со всеми метками выше перед вставкой: `case` берёт ПЕРВОЕ
-  # совпадение, и именно так `tri feed --act` всю свою жизнь попадал в чужую
-  # руку. `board`, `lesson`, `status`, `wave` уже заняты и означают другое —
-  # поэтому здесь `which-board`, `loop-lesson`, `wave-plan`.
+  # The names were checked against every label above before insertion: `case` takes the FIRST
+  # match, and that is exactly how `tri feed --act` landed in someone else's
+  # arm all its life. `board`, `lesson`, `status`, `wave` are taken and mean something else —
+  # hence `which-board`, `loop-lesson`, `wave-plan` here.
 
   which-board)
-    # КАКУЮ доску на GitHub читает каждый прибор цикла и движется ли она.
-    # Имя не `board`: `tri board` (выше) рисует дашборд trios из
-    # iterations.jsonl и STATUS.md — другой вопрос и другой источник.
-    # Выход 2 = набор приборов расколот или читает доску, которая стоит,
-    # пока работает другая. Это ответ, а не сбой.
+    # WHICH GitHub board each loop instrument reads, and whether it moves.
+    # The name is not `board`: `tri board` (above) draws the trios dashboard from
+    # iterations.jsonl and STATUS.md — a different question and a different source.
+    # Exit 2 = the instruments are split, or one reads a board that stands still
+    # while another one moves. That is an answer, not a failure.
     #   tri which-board [--json] [--no-gh] [--selftest]
     shift 2>/dev/null || true
     exec node /Users/playra/BrowserOS/trios/.trinity/loop/board.mjs "$@"
     ;;
   judge-calibration)
-    # Померить СУДЬЮ до того, как доверить ему работу, которую не достаёт ни
-    # один механический чек. Вопросы строятся из кэша verdict-audit, ответ на
-    # каждый — арифметика, а не мнение; ключ пишется в state/, а не в
-    # packets/, чтобы судья не прочитал ответы. Выход 2 = судья подтвердил
-    # фантом (находка о судье, не поломка прибора).
+    # Measure the JUDGE before trusting it with work that no mechanical check
+    # can reach. Questions are built from the verdict-audit cache; the answer to
+    # each is arithmetic, not opinion; the key is written to state/, not to
+    # packets/, so the judge cannot read the answers. Exit 2 = the judge confirmed
+    # a phantom (a finding about the judge, not a broken instrument).
     #   tri judge-calibration --build [N] | --score FILE | --report
     shift 2>/dev/null || true
     exec node /Users/playra/BrowserOS/trios/.trinity/loop/judge-calibration.mjs "$@"
     ;;
   dash2)
-    # Дашборд цикла, нарисованный так, чтобы ОСТАНОВЛЕННЫЙ цикл не выглядел
-    # работающим: живость — два независимых сигнала, у каждого числа есть
-    # возраст, неизмеренное печатается как '-', а проза читается из
-    # cycle-notes.json и никогда не генерируется.
+    # A loop dashboard drawn so that a STOPPED loop does not look
+    # like it is running: liveness is two independent signals, every number has
+    # an age, unmeasured prints as '-', and the prose is read from
+    # cycle-notes.json and never generated.
     #   tri dash2 [--write] [--reading FILE] [--no-color]
-    # `tri cycle-dash` показывает УЖЕ нарисованный DASHBOARD2.ansi с его
-    # возрастом; здесь берётся свежий замер.
+    # `tri cycle-dash` shows the ALREADY drawn DASHBOARD2.ansi with its
+    # age; this one takes a fresh measurement.
     shift 2>/dev/null || true
     exec node /Users/playra/BrowserOS/trios/.trinity/loop/dash2.mjs "$@"
     ;;
   loop-lesson)
-    # Урок записывается В МОМЕНТ НАХОДКИ, одной командой, а не в конце сессии.
-    # Пишет ровно туда, куда пишет сам цикл: state.json -> lessons[] плюс
-    # строка в ledger.jsonl — через lesson() из loop.mjs, чтобы здесь не
-    # завелась вторая реализация того же формата (две копии одного правила —
-    # самый дорогой дефект этого дерева, см. `tri agree`).
-    # ИМЯ НЕ `lesson`: `tri lesson` (выше) пишет в ДРУГОЕ дерево —
+    # A lesson is recorded AT THE MOMENT OF THE FINDING, in one command, not at the end of a session.
+    # It writes exactly where the loop itself writes: state.json -> lessons[] plus
+    # a line in ledger.jsonl — through lesson() from loop.mjs, so that no second
+    # implementation of the same format appears here (two copies of one rule are
+    # the most expensive defect in this tree, see `tri agree`).
+    # THE NAME IS NOT `lesson`: `tri lesson` (above) writes to a DIFFERENT tree —
     # 999-multibots-telegraf/.claude/loop-opus/LESSONS.md.
-    #   tri loop-lesson "что выяснилось — одним абзацем"
+    #   tri loop-lesson "what was found — in one paragraph"
     shift 2>/dev/null || true
     TEXT="$*"
-    [ -z "$TEXT" ] && { echo 'tri loop-lesson "что выяснилось — одним абзацем"'; exit 1; }
+    [ -z "$TEXT" ] && { echo 'tri loop-lesson "what was found — in one paragraph"'; exit 1; }
     TRI_LESSON_TEXT="$TEXT" node --input-type=module -e '
       const m = await import("/Users/playra/BrowserOS/trios/.trinity/loop/loop.mjs")
       const text = process.env.TRI_LESSON_TEXT
@@ -1579,19 +2504,19 @@ PYPROOF
     '
     ;;
   lesson-orphans)
-    # Какие уроки цикла не дошли НИ ДО ОДНОГО навыка. Урок живёт в
-    # state.json и читается только тем, кто откроет state.json; навык
-    # загружается сам. 2026-09-13 замер нашёл семь таких уроков.
+    # Which loop lessons reached NOT A SINGLE skill. A lesson lives in
+    # state.json and is read only by whoever opens state.json; a skill
+    # loads itself. On 2026-09-13 a measurement found seven such lessons.
     #
-    # ЧТО ИМЕННО ИЗМЕРЯЕТСЯ, и почему это ВЕРХНЯЯ ГРАНИЦА, а не вердикт:
-    # совпадением считается дословное окно из шести слов (шаг 3, нормировка —
-    # нижний регистр, всё кроме букв и цифр в пробел). Урок, пересказанный в
-    # навыке ДРУГИМИ словами, здесь будет выглядеть сиротой. При ручной
-    # проверке 2026-09-13 из одиннадцати нулей четыре оказались изложены в
-    # queen-swarm-unblock другими словами — то есть список надо дочитывать
-    # глазами, а не считать приговором.
-    #   tri lesson-orphans [--all]   (--all: + ~/skills и ~/.claude/skills)
-    # Выход 2 = найдены сироты. Это ответ, а не сбой.
+    # WHAT EXACTLY IS MEASURED, and why it is an UPPER BOUND, not a verdict:
+    # a match is a verbatim six-word window (step 3; normalisation is
+    # lower case, everything except letters and digits becomes a space). A lesson retold in
+    # a skill in OTHER words will look like an orphan here. In a manual
+    # check on 2026-09-13, four of eleven zeros turned out to be stated in
+    # queen-swarm-unblock in other words — so the list must be read through
+    # by eye, not taken as a verdict.
+    #   tri lesson-orphans [--all]   (--all: + ~/skills and ~/.claude/skills)
+    # Exit 2 = orphans found. That is an answer, not a failure.
     shift 2>/dev/null || true
     python3 - "$@" << 'PYORPHAN'
 import json, os, re, sys
@@ -1613,17 +2538,17 @@ def shingles(text, step=STEP):
 try:
     state = json.load(open(STATE, encoding="utf-8"))
 except Exception as e:
-    sys.exit("state.json не читается: %s" % e)
+    sys.exit("state.json unreadable: %s" % e)
 lessons = state.get("lessons") or []
 if not lessons:
-    sys.exit("в state.json нет уроков — тогда и сирот быть не может")
+    sys.exit("state.json has no lessons — so there can be no orphans")
 
-# Корпус навыков: КАЖДОЕ окно из шести слов, шагом 1, иначе выравнивание окон
-# решало бы за содержание.
+# Skill corpus: EVERY six-word window, step 1, otherwise window alignment
+# would decide instead of the content.
 corpus, files = {}, []
 for root in ROOTS:
     if not os.path.isdir(root):
-        print("нет каталога: %s" % root)
+        print("no directory: %s" % root)
         continue
     for dirpath, _dirs, names in os.walk(root):
         for n in names:
@@ -1652,56 +2577,56 @@ for i, les in enumerate(lessons, 1):
     if not hits:
         orphans.append((i, les.get("iteration"), text))
 
-print("уроков в state.json     : %d" % len(lessons))
-print("файлов навыков прочитано: %d" % len(files))
+print("lessons in state.json   : %d" % len(lessons))
+print("skill files read        : %d" % len(files))
 for r in ROOTS:
-    print("  корень: %s" % r)
-print("ни одного общего окна   : %d" % len(orphans))
+    print("  root: %s" % r)
+print("with no shared window   : %d" % len(orphans))
 print()
 for i, it, text in orphans:
-    print("  L%-3d итерация %-4s %s" % (i, it, text[:96].replace("\n", " ")))
+    print("  L%-3d iteration %-4s %s" % (i, it, text[:96].replace("\n", " ")))
 if rows:
     rows.sort(key=lambda r: r[2])
-    print("\nближайшие к нулю, но не нулевые (для калибровки порога):")
+    print("\nclosest to zero but not zero (for calibrating the threshold):")
     for i, it, score, best, text in [r for r in rows if r[2] > 0][:5]:
         print("  L%-3d %.2f  %s" % (i, score, os.path.basename(os.path.dirname(best or "")) or "?"))
 print(
-    "\nЭто ВЕРХНЯЯ ГРАНИЦА: совпадение здесь дословное (окно из шести слов),"
-    "\nа урок можно изложить в навыке другими словами. Список дочитывают глазами."
+    "\nThis is an UPPER BOUND: a match here is verbatim (a six-word window),"
+    "\nand a skill can state a lesson in other words. Read the list through by eye."
 )
 sys.exit(2 if orphans else 0)
 PYORPHAN
     ;;
   wave-plan)
-    # План ТЕКУЩЕЙ волны целиком — самый свежий trios/.trinity/wave-loop-*.md.
-    # `tri wave` заводит СЛЕДУЮЩУЮ пустую волну, `tri next` печатает только
-    # хвост с вариантами, `tri handover` — сводку владельцу из той же волны.
-    # Здесь файл целиком, и первой строкой его возраст с файловой системы.
-    #   tri wave-plan [N]   (N — только первые N строк)
+    # The whole plan of the CURRENT wave — the newest trios/.trinity/wave-loop-*.md.
+    # `tri wave` creates the NEXT empty wave, `tri next` prints only
+    # the tail with the options, `tri handover` — the owner summary from the same wave.
+    # Here: the whole file, with its filesystem age as the first line.
+    #   tri wave-plan [N]   (N — only the first N lines)
     T=/Users/playra/BrowserOS/trios
     w=$(ls "$T/.trinity"/wave-loop-*.md 2>/dev/null | sort | tail -1)
-    [ -z "$w" ] && { echo "нет ни одной волны в $T/.trinity/wave-loop-*.md"; exit 1; }
+    [ -z "$w" ] && { echo "no wave found in $T/.trinity/wave-loop-*.md"; exit 1; }
     total=$(ls "$T/.trinity"/wave-loop-*.md 2>/dev/null | wc -l | tr -d ' ')
     age=$(( ( $(date +%s) - $(stat -f %m "$w") ) / 3600 ))
-    echo "$w  (записан ${age} ч назад; волн на диске: $total, строк: $(wc -l < "$w" | tr -d ' '))"
+    echo "$w  (written ${age} h ago; waves on disk: $total, lines: $(wc -l < "$w" | tr -d ' '))"
     echo
-    # Без вложенного `case`: его метки попадали бы в любой перебор меток этого
-    # файла (`grep '^\s*[a-z0-9-]*)'`) и завели бы команду `0`, которой нет.
+    # No nested `case`: its labels would show up in any scan of this file's labels
+    # (`grep '^\s*[a-z0-9-]*)'`) and create a command `0` that does not exist.
     N="${2:-}"
     if [ -z "$N" ]; then
       cat "$w"
     elif [ "$N" -ge 1 ] 2>/dev/null; then
       sed -n "1,${N}p" "$w"
     else
-      echo "tri wave-plan [N] — N это число строк"; exit 1
+      echo "tri wave-plan [N] — N is a line count"; exit 1
     fi
     ;;
 
 
   tb)
-    # TurboBaby (репо ~/turbobaby-user-bot, Railway-проект woody, сервис turbobaby-bot).
-    # Сводка разделения двух клиентов + живость прода. ЧУЖОЙ woody-weed-bot —
-    # только curl /health, никаких railway-команд на него (инцидент 2026-09-13).
+    # TurboBaby (repo ~/turbobaby-user-bot, Railway project woody, service turbobaby-bot).
+    # Summary of how the two clients are separated + production liveness. The FOREIGN woody-weed-bot —
+    # curl /health only, no railway commands against it (incident 2026-09-13).
     TB=https://turbobaby-bot-production.up.railway.app
     WB=https://woody-weed-bot-production-370f.up.railway.app
     echo "== turbobaby-bot =="
@@ -1710,17 +2635,17 @@ PYORPHAN
 try:
     d=json.load(sys.stdin)["bikes"]; print(sum(1 for b in d if b.get("image_url")), "/", len(d))
 except Exception as e: print("ERR", e)'
-    echo -n "InvalidToken (50 строк лога): "; railway logs -s turbobaby-bot --lines 50 2>/dev/null | grep -ci InvalidToken
-    echo "-- последний деплой --"; railway deployment list -s turbobaby-bot 2>/dev/null | sed -n '2p'
-    echo; echo "== woody-weed-bot (чужой, только замер) =="
+    echo -n "InvalidToken (last 50 log lines): "; railway logs -s turbobaby-bot --lines 50 2>/dev/null | grep -ci InvalidToken
+    echo "-- latest deploy --"; railway deployment list -s turbobaby-bot 2>/dev/null | sed -n '2p'
+    echo; echo "== woody-weed-bot (foreign, measure only) =="
     echo -n "health: "; curl -s -m 8 -o /dev/null -w "%{http_code}\n" "$WB/health" || echo DOWN
-    echo; echo "== луп-состояние (хвост) =="; tail -14 ~/turbobaby-user-bot/loop/LOOP_STATE.md 2>/dev/null
+    echo; echo "== loop state (tail) =="; tail -14 ~/turbobaby-user-bot/loop/LOOP_STATE.md 2>/dev/null
     ;;
 
   tb-deploy)
-    # Безопасный деплой turbobaby-bot: link -> up -> ждать SUCCESS/FAILED -> verify.
-    # Уроки ночи 2026-09-13 зашиты сюда: деплой только через link на НАШ сервис;
-    # после up проверять ЧТО доехало, а не только статус.
+    # Safe deploy of turbobaby-bot: link -> up -> wait for SUCCESS/FAILED -> verify.
+    # Lessons of the night of 2026-09-13 are built in: deploy only via link to OUR service;
+    # after up, check WHAT arrived, not just the status.
     set -e
     cd ~/turbobaby-user-bot || exit 1
     railway link -p woody -e production -s turbobaby-bot >/dev/null 2>&1
@@ -1735,7 +2660,7 @@ except Exception as e: print("ERR", e)'
     done
     case "$s" in
       *SUCCESS*) ;;
-      *) echo "ДЕПЛОЙ НЕ УСПЕЛ/УПАЛ: $s"; exit 1 ;;
+      *) echo "DEPLOY TIMED OUT/FAILED: $s"; exit 1 ;;
     esac
     sleep 15
     TB=https://turbobaby-bot-production.up.railway.app
@@ -1745,12 +2670,12 @@ try:
     d=json.load(sys.stdin)["bikes"]; print(sum(1 for b in d if b.get("image_url")), "/", len(d))
 except Exception as e: print("ERR", e)'
     echo -n "InvalidToken: "; railway logs -s turbobaby-bot --lines 50 2>/dev/null | grep -ci InvalidToken
-    echo "tb-deploy: готово"
+    echo "tb-deploy: done"
     ;;
 
   tb-lint)
-    # Оба clippy-гейта CI локально, до пуша: wasm и backend, -D warnings.
-    # Вызов: tri tb-lint [--test]  (--test добавляет cargo test --features backend)
+    # Both CI clippy gates locally, before the push: wasm and backend, -D warnings.
+    # Usage: tri tb-lint [--test]  (--test adds cargo test --features backend)
     cd "$HOME/turbobaby-user-bot" || exit 1
     rc=0
     echo "== wasm gate: cargo clippy --target wasm32-unknown-unknown =="
@@ -1766,11 +2691,11 @@ except Exception as e: print("ERR", e)'
     ;;
 
   tb-verify)
-    # Инварианты разделения: vars на месте, базы не перепутаны, чужой сервис жив.
+    # Separation invariants: vars in place, databases not mixed up, the foreign service alive.
     echo "== vars turbobaby-bot (mask) =="
     railway link -p woody -e production -s turbobaby-bot >/dev/null 2>&1
     railway variables --kv 2>/dev/null | grep -E "^(BOT_TOKEN|DATABASE_URL)=" | sed -E "s/^(BOT_TOKEN=.{8}).*/\1…/; s#(postgresql://[^:]+:)[^@]+@#\1***@#"
-    echo "== миграции (woody=84 ours, woody_client=76 theirs) =="
+    echo "== migrations (woody=84 ours, woody_client=76 theirs) =="
     PGURL=$(railway variables -s postgres --kv 2>/dev/null | grep "^DATABASE_PUBLIC_URL=" | cut -d= -f2-)
     if [ -n "$PGURL" ]; then
       for db in woody woody_client; do
@@ -1778,13 +2703,13 @@ except Exception as e: print("ERR", e)'
         psql "${PGURL%/*}/$db" -t -A -c "SELECT count(*) FROM _schema_migrations" 2>/dev/null || echo "ERR"
       done
     else
-      echo "нет DATABASE_PUBLIC_URL у postgres — пропуск"
+      echo "postgres has no DATABASE_PUBLIC_URL — skipping"
     fi
-    echo "== чужой сервис (только /health) =="
+    echo "== foreign service (/health only) =="
     echo -n "woody-weed-bot: "; curl -s -m 8 -o /dev/null -w "%{http_code}\n" https://woody-weed-bot-production-370f.up.railway.app/health
     ;;
 
   *)
-    echo "неизвестная команда: $1 (tri help)"; exit 1
+    echo "unknown command: $1 (tri help)"; exit 1
     ;;
 esac
