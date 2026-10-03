@@ -1,17 +1,17 @@
 import { describe, expect, it } from 'bun:test'
 import {
-  type AcceptedTurn,
   creditIssues,
+  type IssueTurn,
   parseOwnersSince,
 } from '../../src/api/services/queen-lane-credits'
 
-const turn = (issue: number, keyIndex: number, day: string): AcceptedTurn => ({
+const turn = (issue: number, keyIndex: number, day: string): IssueTurn => ({
   issue,
   keyIndex,
   dispatchedAt: new Date(`${day}T12:00:00Z`),
 })
 
-describe('whose lane carried an accepted issue', () => {
+describe("whose lane carried an issue's branch", () => {
   const owners = {
     0: '@dmitrii-f-t27',
     1: '@dmitrii-f-t27',
@@ -19,7 +19,7 @@ describe('whose lane carried an accepted issue', () => {
     10000: '@alex',
   }
 
-  it('credits the GitHub login that claimed the lane of the latest accepted turn', () => {
+  it('credits the GitHub login that claimed the lane of the latest turn, whatever its verdict', () => {
     expect(
       creditIssues(
         [
