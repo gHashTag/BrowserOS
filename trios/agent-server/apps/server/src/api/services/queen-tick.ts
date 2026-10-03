@@ -41,6 +41,7 @@ import type { Pool } from 'pg'
 import { createQueenPool } from '../../lib/db/queen-pool'
 import { logger } from '../../lib/logger'
 import { startModelProbes, workerModelRanking } from '../../lib/model-ranking'
+import { importRunnerBranch } from '../routes/queen-export'
 import { outstandingEscalations } from '../routes/queen-needs-you'
 import { githubCiDeps, takeBackRefusedAcceptances } from './queen-ci-verdict'
 import { contributorRuntime } from './queen-contributor-keys'
@@ -2649,6 +2650,7 @@ export async function reviewFinishedDispatches(
         taken,
         await contributorRuntime(pool, environmentContributorKeys()),
       ),
+    importRunnerBranch: (issue) => importRunnerBranch(pool, issue),
     ...overrides,
   }
   // TWO THINGS ABOUT THIS QUERY, BOTH MEASURED ON 2026-09-03.
@@ -2702,6 +2704,7 @@ export async function reviewFinishedDispatches(
             -- work was salvaged rather than written; it changes NOTHING about
             -- how the work is judged.
             d.salvaged_at, d.salvaged_sha, d.salvaged_files, d.salvage_left,
+            d.claimed_by,
             (SELECT string_agg(t.text, '' ORDER BY t.seq)
                FROM queen_transcript t
               WHERE t.conversation_id = d.conversation_id AND t.kind = 'say')
@@ -2784,6 +2787,18 @@ export async function reviewFinishedDispatches(
     const conversation =
       row.conversation_id == null ? null : String(row.conversation_id)
 
+    // A bee a runner claimed ran in another container; its branch is in
+    // `queen_bundle` until it is brought here. Failing that is a wait, the
+    // same as a diff that could not be read: nothing is counted against it.
+    if (row.claimed_by && deps.importRunnerBranch) {
+      const imported = await deps.importRunnerBranch(issue)
+      if (!imported.ok) {
+        logger.warn('Queen could not bring a runner branch into her checkout', {
+          issue,
+          error: imported.error,
+        })
+      }
+    }
     // ONE git diff, asked once and used twice. The count is what the review
     // policy weighs; the names are what the boundary rule compares.
     const diff = await deps.committedFilesResult(issue)

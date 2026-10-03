@@ -31,13 +31,15 @@
 
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { readFile, rm } from 'node:fs/promises'
+import { readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Hono } from 'hono'
+import type { Pool } from 'pg'
+import { createQueenPool } from '../../lib/db/queen-pool'
 import { logger } from '../../lib/logger'
 import { baseRef, workspaceRoot } from '../services/queen-dispatch'
-
+import { queenLeaseDatabaseUrl } from '../services/queen-lease'
 
 /**
  * Git, run so that nothing in the checkout can steer it.
@@ -128,6 +130,232 @@ function git(
   })
 }
 
+export interface BundledBranch {
+  ok: true
+  branch: string
+  base: string
+  commits: Array<{ sha: string; author: string; date: string; subject: string }>
+  files: string[]
+  bytes: Buffer
+}
+
+/**
+ * One branch as a git bundle, made from the checkout this process can see.
+ *
+ * A bundle rather than a patch because it carries the commits themselves -
+ * their shas, authors and dates survive, so what lands upstream is what the bee
+ * actually wrote rather than a replay of it. It is emitted relative to the
+ * base, so it holds only this branch's work.
+ *
+ * Exported because the container that MAKES a bundle is no longer always the
+ * one that serves it: a runner bundles its own work before its worktree and its
+ * container go away.
+ */
+export async function bundleOfBranch(
+  issue: number,
+): Promise<BundledBranch | { ok: false; status: number; error: string }> {
+  const root = workspaceRoot()
+  const base = baseRef()
+  const branch = `queen-${issue}`
+
+  const exists = await git(['-C', root, 'rev-parse', '--verify', branch])
+  if (exists.code !== 0) {
+    return {
+      ok: false,
+      status: 404,
+      error: `no branch ${branch} in this checkout`,
+    }
+  }
+  const ahead = await git([
+    '-C',
+    root,
+    'rev-list',
+    '--count',
+    `${base}..${branch}`,
+  ])
+  if (Number(ahead.out.trim()) <= 0) {
+    return {
+      ok: false,
+      status: 409,
+      error: `${branch} has no commits beyond ${base}`,
+    }
+  }
+  // Written to a path OUTSIDE the checkout: a bundle created inside a tree the
+  // agents can write is a file they can replace between creation and read.
+  // Written by the BEE (git drops to it), then read by this process as root.
+  const path = join(tmpdir(), `queen-export-${issue}-${randomUUID()}.bundle`)
+  try {
+    const made = await git(
+      ['-C', root, 'bundle', 'create', path, `${base}..${branch}`],
+      120_000,
+    )
+    if (made.code !== 0) {
+      return {
+        ok: false,
+        status: 500,
+        error: `bundle failed: ${made.err.slice(0, 400)}`,
+      }
+    }
+    const log = await git([
+      '-C',
+      root,
+      'log',
+      '--format=%H%x1f%an%x1f%aI%x1f%s',
+      `${base}..${branch}`,
+    ])
+    const commits = log.out
+      .split('\n')
+      .filter((l) => l.trim())
+      .map((l) => {
+        const [sha, author, date, subject] = l.split('\x1f')
+        return { sha, author, date, subject }
+      })
+    const files = await git([
+      '-C',
+      root,
+      'diff',
+      '--name-only',
+      `${base}...${branch}`,
+    ])
+    return {
+      ok: true,
+      branch,
+      base,
+      commits,
+      files: files.out.split('\n').filter((l) => l.trim()),
+      bytes: await readFile(path),
+    }
+  } finally {
+    await rm(path, { force: true }).catch(() => {})
+  }
+}
+
+/**
+ * A runner's branch, brought into this checkout before the Queen judges it.
+ *
+ * The review reads `queen-N` here - its diff, its head, the specs at that
+ * commit, the criteria in a worktree cut from it - and a bee that ran in a
+ * runner's container left that branch only in `queen_bundle`. Without this the
+ * diff of every runner bee would fail to read and the row would wait forever.
+ * The bundle is `base..queen-N`, so a base newer than this checkout has seen is
+ * fetched from origin first; a leftover worktree of an earlier attempt on this
+ * disk holds the branch name and is removed (the bee there has finished).
+ */
+export async function importRunnerBranch(
+  pool: Pick<Pool, 'query'>,
+  issue: number,
+): Promise<{ ok: true; imported: boolean } | { ok: false; error: string }> {
+  const rows = await pool.query(
+    'SELECT bytes FROM queen_bundle WHERE issue = $1',
+    [issue],
+  )
+  const bytes = rows.rows?.[0]?.bytes as Buffer | undefined
+  if (!bytes?.length) return { ok: true, imported: false }
+  const root = workspaceRoot()
+  const branch = `queen-${issue}`
+  const path = join(tmpdir(), `queen-import-${issue}-${randomUUID()}.bundle`)
+  await writeFile(path, bytes, { mode: 0o644 })
+  try {
+    const heads = await git([
+      '-C',
+      root,
+      'bundle',
+      'list-heads',
+      path,
+      `refs/heads/${branch}`,
+    ])
+    const head = heads.out.trim().split(/\s+/)[0] ?? ''
+    if (heads.code !== 0 || !/^[0-9a-f]{40}$/.test(head)) {
+      return { ok: false, error: `the stored bundle names no ${branch}` }
+    }
+    const local = await git([
+      '-C',
+      root,
+      'rev-parse',
+      '--verify',
+      '--quiet',
+      branch,
+    ])
+    if (local.code === 0 && local.out.trim() === head) {
+      return { ok: true, imported: false }
+    }
+    const fetch = () =>
+      git(
+        [
+          '-C',
+          root,
+          'fetch',
+          '--no-tags',
+          '--quiet',
+          path,
+          `+refs/heads/${branch}:refs/heads/${branch}`,
+        ],
+        120_000,
+      )
+    let fetched = await fetch()
+    if (fetched.code !== 0 && /checked out/i.test(fetched.err)) {
+      const listed = await git(['-C', root, 'worktree', 'list', '--porcelain'])
+      const holder = listed.out
+        .split('\n\n')
+        .find((entry) => entry.includes(`branch refs/heads/${branch}`))
+        ?.match(/^worktree (.+)$/m)?.[1]
+      if (holder && holder !== root) {
+        await git(['-C', root, 'worktree', 'remove', '--force', holder])
+        fetched = await fetch()
+      }
+    }
+    if (fetched.code !== 0) {
+      await git(['-C', root, 'fetch', '--quiet', 'origin'], 120_000)
+      fetched = await fetch()
+    }
+    if (fetched.code !== 0) {
+      return { ok: false, error: fetched.err.trim().slice(0, 300) }
+    }
+    logger.info('Queen brought a runner branch into her checkout', {
+      issue,
+      head: head.slice(0, 12),
+    })
+    return { ok: true, imported: true }
+  } finally {
+    await rm(path, { force: true }).catch(() => {})
+  }
+}
+
+/** The bundle a runner left behind, or null. Never a reason to fail a request. */
+async function storedBundle(
+  issue: number,
+): Promise<Record<string, unknown> | null> {
+  const url = queenLeaseDatabaseUrl()
+  if (!url) return null
+  const pool = createQueenPool(url)
+  try {
+    const rows = await pool.query(
+      'SELECT branch, base, runner, created_at, bytes FROM queen_bundle WHERE issue = $1',
+      [issue],
+    )
+    const row = rows.rows?.[0]
+    if (!row) return null
+    return {
+      issue,
+      branch: String(row.branch),
+      base: String(row.base),
+      runner: String(row.runner),
+      at: row.created_at,
+      // The commit list is not stored: it is in queen_transcript and on the
+      // board, and a second copy is a second thing that can disagree.
+      bundleBase64: Buffer.from(row.bytes as Buffer).toString('base64'),
+    }
+  } catch (error) {
+    logger.warn('Queen export could not read a stored bundle', {
+      issue,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return null
+  } finally {
+    await pool.end().catch(() => undefined)
+  }
+}
+
 /** `queen-1234` -> 1234, and nothing else. */
 function issueOf(branch: string): number | null {
   const m = /^queen-(\d+)$/.exec(branch.trim())
@@ -135,159 +363,109 @@ function issueOf(branch: string): number | null {
 }
 
 export function createQueenExportRoute() {
-  return new Hono()
-    /**
-     * What is waiting to be published.
-     *
-     * Only branches that are AHEAD of the base: a branch level with it carries
-     * no work, and listing it would send a publisher to fetch an empty bundle.
-     */
-    .get('/', async (c) => {
-      const root = workspaceRoot()
-      const base = baseRef()
-      const listed = await git(['-C', root, 'branch', '--list', 'queen-*'])
-      if (listed.code !== 0) {
-        return c.json(
-          { error: `could not list branches: ${listed.err.slice(0, 300)}` },
-          500,
-        )
-      }
-      const branches = listed.out
-        .split('\n')
-        .map((l) => l.replace(/^[*+]?\s*/, '').trim())
-        .filter((l) => l.length > 0)
-
-      const waiting: Array<{
-        issue: number
-        branch: string
-        commits: number
-        files: number
-        head: string
-      }> = []
-      for (const branch of branches) {
-        const issue = issueOf(branch)
-        if (issue === null) continue
-        const count = await git([
-          '-C',
-          root,
-          'rev-list',
-          '--count',
-          `${base}..${branch}`,
-        ])
-        const ahead = Number(count.out.trim())
-        if (!Number.isInteger(ahead) || ahead <= 0) continue
-        const names = await git([
-          '-C',
-          root,
-          'diff',
-          '--name-only',
-          `${base}...${branch}`,
-        ])
-        const head = await git(['-C', root, 'rev-parse', branch])
-        waiting.push({
-          issue,
-          branch,
-          commits: ahead,
-          files: names.out.split('\n').filter((l) => l.trim()).length,
-          head: head.out.trim(),
-        })
-      }
-      waiting.sort((a, b) => a.issue - b.issue)
-      return c.json({ base, count: waiting.length, branches: waiting })
-    })
-
-    /**
-     * One branch, as a git bundle.
-     *
-     * A bundle rather than a patch because it carries the commits themselves -
-     * their shas, authors and dates survive, so what lands upstream is what the
-     * bee actually wrote rather than a replay of it. It is emitted relative to
-     * the base, so it holds only this branch's work and stays small enough to
-     * pass through JSON.
-     */
-    .get('/:issue', async (c) => {
-      const issue = Number(c.req.param('issue'))
-      if (!Number.isInteger(issue) || issue <= 0) {
-        return c.json({ error: 'issue must be a positive integer' }, 400)
-      }
-      const root = workspaceRoot()
-      const base = baseRef()
-      const branch = `queen-${issue}`
-
-      const exists = await git(['-C', root, 'rev-parse', '--verify', branch])
-      if (exists.code !== 0) {
-        return c.json({ error: `no branch ${branch} in this checkout` }, 404)
-      }
-      const ahead = await git([
-        '-C',
-        root,
-        'rev-list',
-        '--count',
-        `${base}..${branch}`,
-      ])
-      if (Number(ahead.out.trim()) <= 0) {
-        return c.json(
-          { error: `${branch} has no commits beyond ${base}` },
-          409,
-        )
-      }
-
-      // Written to a path OUTSIDE the checkout: a bundle created inside a tree
-      // the agents can write is a file they can replace between creation and
-      // read.
-      // Written by the BEE (git drops to it), then read by this process as root:
-      // a path both can reach, and outside the checkout so the agents cannot
-      // swap the file between its creation and its read.
-      const path = join(tmpdir(), `queen-export-${issue}-${randomUUID()}.bundle`)
-      try {
-        const made = await git(
-          ['-C', root, 'bundle', 'create', path, `${base}..${branch}`],
-          120_000,
-        )
-        if (made.code !== 0) {
+  return (
+    new Hono()
+      /**
+       * What is waiting to be published.
+       *
+       * Only branches that are AHEAD of the base: a branch level with it carries
+       * no work, and listing it would send a publisher to fetch an empty bundle.
+       */
+      .get('/', async (c) => {
+        const root = workspaceRoot()
+        const base = baseRef()
+        const listed = await git(['-C', root, 'branch', '--list', 'queen-*'])
+        if (listed.code !== 0) {
           return c.json(
-            { error: `bundle failed: ${made.err.slice(0, 400)}` },
+            { error: `could not list branches: ${listed.err.slice(0, 300)}` },
             500,
           )
         }
-        const log = await git([
-          '-C',
-          root,
-          'log',
-          '--format=%H%x1f%an%x1f%aI%x1f%s',
-          `${base}..${branch}`,
-        ])
-        const commits = log.out
+        const branches = listed.out
           .split('\n')
-          .filter((l) => l.trim())
-          .map((l) => {
-            const [sha, author, date, subject] = l.split('\x1f')
-            return { sha, author, date, subject }
+          .map((l) => l.replace(/^[*+]?\s*/, '').trim())
+          .filter((l) => l.length > 0)
+
+        const waiting: Array<{
+          issue: number
+          branch: string
+          commits: number
+          files: number
+          head: string
+        }> = []
+        for (const branch of branches) {
+          const issue = issueOf(branch)
+          if (issue === null) continue
+          const count = await git([
+            '-C',
+            root,
+            'rev-list',
+            '--count',
+            `${base}..${branch}`,
+          ])
+          const ahead = Number(count.out.trim())
+          if (!Number.isInteger(ahead) || ahead <= 0) continue
+          const names = await git([
+            '-C',
+            root,
+            'diff',
+            '--name-only',
+            `${base}...${branch}`,
+          ])
+          const head = await git(['-C', root, 'rev-parse', branch])
+          waiting.push({
+            issue,
+            branch,
+            commits: ahead,
+            files: names.out.split('\n').filter((l) => l.trim()).length,
+            head: head.out.trim(),
           })
-        const files = await git([
-          '-C',
-          root,
-          'diff',
-          '--name-only',
-          `${base}...${branch}`,
-        ])
-        const bytes = await readFile(path)
-        logger.info('Queen export served', {
-          issue,
-          branch,
-          commits: commits.length,
-          bundleBytes: bytes.length,
-        })
-        return c.json({
-          issue,
-          branch,
-          base,
-          commits,
-          files: files.out.split('\n').filter((l) => l.trim()),
-          bundleBase64: bytes.toString('base64'),
-        })
-      } finally {
-        await rm(path, { force: true }).catch(() => {})
-      }
-    })
+        }
+        waiting.sort((a, b) => a.issue - b.issue)
+        return c.json({ base, count: waiting.length, branches: waiting })
+      })
+
+      /**
+       * One branch, as a git bundle.
+       *
+       * A bundle rather than a patch because it carries the commits themselves -
+       * their shas, authors and dates survive, so what lands upstream is what the
+       * bee actually wrote rather than a replay of it. It is emitted relative to
+       * the base, so it holds only this branch's work and stays small enough to
+       * pass through JSON.
+       */
+      .get('/:issue', async (c) => {
+        const issue = Number(c.req.param('issue'))
+        if (!Number.isInteger(issue) || issue <= 0) {
+          return c.json({ error: 'issue must be a positive integer' }, 400)
+        }
+        const made = await bundleOfBranch(issue)
+        if (made.ok) {
+          logger.info('Queen export served', {
+            issue,
+            branch: made.branch,
+            commits: made.commits.length,
+            bundleBytes: made.bytes.length,
+          })
+          return c.json({
+            issue,
+            branch: made.branch,
+            base: made.base,
+            commits: made.commits,
+            files: made.files,
+            bundleBase64: made.bytes.toString('base64'),
+          })
+        }
+        // Not in THIS checkout - which is the normal case once bees run in their
+        // own containers. A runner has no volume anyone can fetch from, so it
+        // leaves the bundle in the database on its way out; here is where it is
+        // collected. Looked at only after the local branch was not found, so a
+        // container that still runs its own bees behaves exactly as it did.
+        if (made.status === 404) {
+          const stored = await storedBundle(issue)
+          if (stored) return c.json(stored)
+        }
+        return c.json({ error: made.error }, made.status as 404 | 409 | 500)
+      })
+  )
 }

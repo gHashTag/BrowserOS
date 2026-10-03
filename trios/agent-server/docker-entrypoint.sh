@@ -267,6 +267,29 @@ derive_worker_cap() {
   [ "$lanes" -le 4 ] || lanes=4
 
   from_keys=$((credentials * lanes))
+
+  # BEES RUN ELSEWHERE: the Queen only writes orders and runners in their own
+  # containers run them, so this container's memory says nothing about how
+  # wide the swarm is. The width is what the runners hold, which only the
+  # operator knows: the named ceiling, else the lanes counted here. (Only the
+  # first pool is counted above; the TypeScript side bounds by every lane.)
+  case "${TRIOS_QUEEN_BEES_RUN_ELSEWHERE:-}" in
+    on|true|1)
+      ceiling=${TRIOS_QUEEN_MAX_WORKERS_CEILING:-}
+      case "$ceiling" in
+        ''|*[!0-9]*) ceiling="" ;;
+      esac
+      if [ -n "$ceiling" ] && [ "$ceiling" -ge 1 ]; then
+        echo "[entrypoint] bees run elsewhere: width is the operator ceiling $ceiling" >&2
+        echo "$ceiling"
+      else
+        echo "[entrypoint] bees run elsewhere: width is the lane count $from_keys" >&2
+        echo "$from_keys"
+      fi
+      return
+      ;;
+  esac
+
   bee_mb=${TRIOS_QUEEN_BEE_MEMORY_MB:-1024}
   case "$bee_mb" in
     ''|*[!0-9]*) bee_mb=1024 ;;
