@@ -336,6 +336,43 @@ CREATE TABLE IF NOT EXISTS queen_report (
 
 CREATE INDEX IF NOT EXISTS idx_queen_report_at ON queen_report (at DESC);
 
+-- Runners: lanes that run on the lender's own machine with the lender's own
+-- key, so the key never moves (queen-runners.ts). A row is a runner token the
+-- person minted in their cabinet; only its SHA-256 and last four characters
+-- are kept. Its lane is 100000000 + id, a block no operator pool can reach.
+CREATE TABLE IF NOT EXISTS queen_runner (
+  id bigserial PRIMARY KEY,
+  telegram_id text NOT NULL,
+  owner_name text NOT NULL,
+  label text NOT NULL,
+  token_hash text NOT NULL UNIQUE,
+  token_hint text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  last_seen_at timestamptz,
+  revoked_at timestamptz
+);
+
+CREATE INDEX IF NOT EXISTS idx_queen_runner_owner
+  ON queen_runner (telegram_id) WHERE revoked_at IS NULL;
+
+-- A dispatch OFFERED to a runner instead of started here (queen-runner-work.ts).
+-- The brief and the identity are stored with the row because the runner asks
+-- for them later, over HTTP, and must be handed exactly what the round wrote.
+-- runner_start_* names the commit the runner must start from: the base, or the
+-- runner's own previous attempt when the review sent it back. runner_remote and
+-- runner_head are what came back, and runner_lease_at is renewed by every
+-- heartbeat - a lease that goes stale releases the issue (reapSilentRunners).
+ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS runner_brief text;
+ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS runner_system_prompt text;
+ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS runner_start_sha text;
+ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS runner_start_remote text;
+ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS runner_start_branch text;
+ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS runner_claimed_at timestamptz;
+ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS runner_lease_at timestamptz;
+ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS runner_remote text;
+ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS runner_branch text;
+ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS runner_head text;
+
 -- What an accepted spec has earned, written down once (queen-tri-earnings.ts).
 --
 -- Append-only: a row is inserted, and later perhaps revoked, never deleted.

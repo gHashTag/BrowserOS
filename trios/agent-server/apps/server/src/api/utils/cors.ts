@@ -132,6 +132,41 @@ export function publicReadCorsMiddleware(): MiddlewareHandler {
   }
 }
 
+/** The origin that serves the board with a signed-in person's session. */
+export const APP_CABINET_ORIGIN = 'https://app.t27.ai'
+
+/**
+ * CORS for the runner cabinet (/queen/me/*), which the board at
+ * https://app.t27.ai/queen/ calls with the person's own bearer token.
+ *
+ * Exactly one origin, no credentials. The credential is the Authorization
+ * header the page chose to send, not a cookie the browser attaches on its own,
+ * so a page on any other origin cannot borrow a session it does not hold - and
+ * this grants nothing to any other route: it is mounted on the cabinet's path
+ * alone, rather than added to TRUSTED_ORIGINS, which would hand the origin the
+ * credentialed allowlist everywhere.
+ */
+export function appCabinetCorsMiddleware(): MiddlewareHandler {
+  return async (c, next) => {
+    const origin = c.req.header('origin')
+    if (origin !== APP_CABINET_ORIGIN || isAllowedCorsOrigin(origin)) {
+      await next()
+      return
+    }
+
+    c.header('Access-Control-Allow-Origin', origin)
+    c.header('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS')
+    c.header('Access-Control-Allow-Headers', 'Authorization,Content-Type')
+    c.header('Access-Control-Max-Age', '600')
+    c.header('Vary', 'Origin', { append: true })
+
+    if (c.req.method === 'OPTIONS') return c.body(null, 204)
+
+    await next()
+    return
+  }
+}
+
 /**
  * Hono CORS middleware that only emits `Access-Control-Allow-Credentials` when the
  * request origin is on the allowlist. Hono's bundled `cors()` cannot express a
