@@ -932,6 +932,9 @@ describe('the container is asked before a worktree is cut', () => {
       [],
       'none',
       {
+        // The container's own refusal: no runner is asked here (the runner's
+        // first look is queen-runner-work.test.ts).
+        offer: null,
         memory: full,
         volume: roomy,
         reap: async () => {

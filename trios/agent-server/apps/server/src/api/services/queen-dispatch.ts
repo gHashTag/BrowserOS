@@ -47,6 +47,8 @@ import {
   volumeSpace,
   youngBeeCount,
 } from './queen-resources'
+import { offerToRunner } from './queen-runner-work'
+import { RUNNER_KEY_BASE } from './queen-runners'
 import { workerSystemPrompt } from './queen-tick'
 
 /**
@@ -117,6 +119,14 @@ export const DISPATCH_OUTCOME_LABELS = {
    * Must keep the `reaped` prefix - queen-tick and queen-kanban match on it.
    */
   reapedStalled: 'reaped',
+  /**
+   * A runner took no offer, or stopped renewing its lease (reapSilentRunners).
+   * Keeps the `reaped` prefix, so the issue is released exactly as a stalled
+   * container bee's is.
+   */
+  reapedRunnerSilent: 'reaped: runner went silent',
+  /** The runner said it could not do the work, and handed the issue back. */
+  reapedRunnerGaveUp: 'reaped: runner gave up',
 } as const
 
 /** One label from the set, as a type. */
@@ -1629,6 +1639,19 @@ export async function branchHeadSha(issue: number): Promise<string | null> {
   )
 }
 
+/**
+ * One git command in a directory of this container, through the same `run`
+ * every other git call here uses (uid drop, group kill, timeout). Exported for
+ * queen-runner-work.ts, which moves a runner's branch into the workspace.
+ */
+export function gitAt(
+  cwd: string,
+  args: string[],
+  timeoutMs = 120_000,
+): Promise<{ code: number; out: string }> {
+  return run('git', args, cwd, timeoutMs)
+}
+
 /** The commit the base ref points at - the other half of the cache key. */
 export async function baseHeadSha(): Promise<string | null> {
   return shaFrom(
@@ -1737,7 +1760,7 @@ export async function committedFileCount(issue: number): Promise<number> {
  * boundary spelling below. Empty string for a repository whose project IS its
  * root.
  */
-function repoSubdir(): string {
+export function repoSubdir(): string {
   return (process.env.TRIOS_REPO_SUBDIR ?? 'trios').replace(/^\/+|\/+$/g, '')
 }
 
@@ -4111,6 +4134,25 @@ export function setDurableCloseListener(
 }
 
 /**
+ * Say that a row closed durably, for a writer that is not `closeDispatch`.
+ *
+ * A runner's work comes back over HTTP rather than down a stream, so the
+ * ending is written by queen-runner-work.ts - and the slot it frees is as real
+ * as a container bee's. Same contract: call it only after the UPDATE matched.
+ */
+export function announceDurableClose(issue: number): void {
+  if (!durableCloseListener) return
+  try {
+    durableCloseListener(issue)
+  } catch (error) {
+    logger.warn('Queen refill signal failed', {
+      issue,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+}
+
+/**
  * Write the ending, and if it cannot be written, say so out loud.
  *
  * This was `finishDispatch(...).catch(() => {})` - an empty catch on the ONLY
@@ -4401,6 +4443,13 @@ async function salvageBeforeRelease(
   return due
 }
 
+/**
+ * The rows the container's reapers own: everything but a runner's lane. A
+ * runner is reaped by its lease, in queen-runner-work.ts, and never by a
+ * container restart or the two-hour stall clock - its turn is not here.
+ */
+export const NOT_A_RUNNER = `(key_index IS NULL OR key_index <= ${RUNNER_KEY_BASE})`
+
 export async function reapDispatchesFromPreviousBoot(
   pool: Pool,
   deps: { salvage?: typeof salvageDispatch; budgetMs?: number } = {},
@@ -4411,8 +4460,11 @@ export async function reapDispatchesFromPreviousBoot(
     // and a runner does not die when the Queen restarts: releasing its row
     // would free the boundary and the key of a bee that is still writing, and
     // the next round would dispatch the same issue into a second container.
+    // The same holds for a volunteer runner's lane (NOT_A_RUNNER): its turn
+    // runs on its owner's machine, and its lease decides (reapSilentRunners).
     `SELECT issue, queued_at FROM queen_dispatch
-      WHERE started = true AND finished_at IS NULL AND queued_at IS NULL`,
+      WHERE started = true AND finished_at IS NULL AND queued_at IS NULL
+        AND ${NOT_A_RUNNER}`,
     [],
     deps,
   )
@@ -4434,6 +4486,7 @@ export async function reapDispatchesFromPreviousBoot(
         SET finished_at = now(),
             outcome = '${DISPATCH_OUTCOME_LABELS.reapedAtBoot}: the container running this turn was replaced'
       WHERE started = true AND finished_at IS NULL AND queued_at IS NULL
+        AND ${NOT_A_RUNNER}
         AND issue = ANY($1::int[])
       RETURNING issue`,
     [due],
@@ -4463,6 +4516,7 @@ export async function reapStalledDispatches(
     `SELECT issue, queued_at FROM queen_dispatch
       WHERE started = true
         AND finished_at IS NULL
+        AND ${NOT_A_RUNNER}
         AND (dispatched_at < now() - make_interval(mins => $1)
              OR (claimed_by IS NOT NULL
                  AND claimed_at < now() - make_interval(mins => $2)))`,
@@ -4484,6 +4538,7 @@ export async function reapStalledDispatches(
             outcome = '${DISPATCH_OUTCOME_LABELS.reapedStalled}: no completion within ' || $1 || ' minutes'
       WHERE started = true
         AND finished_at IS NULL
+        AND ${NOT_A_RUNNER}
         AND (dispatched_at < now() - make_interval(mins => $1)
              OR (claimed_by IS NOT NULL
                  AND claimed_at < now() - make_interval(mins => $3)))
@@ -4535,6 +4590,34 @@ export async function dispatchBee(
   deps: BeeRoomDeps = {},
 ): Promise<DispatchOutcome> {
   const branch = `queen-${issue}`
+
+  // A RUNNER FIRST. A runner's lane costs this container no key, no memory and
+  // no disk, so an idle one takes the task before any of those is measured -
+  // and a deployment with no provider key at all can still be served by the
+  // people who lent theirs. `null` means no runner can take THIS issue (none
+  // idle, or its branch holds work only this container can continue).
+  const offer = deps.offer === undefined ? offerToRunner : deps.offer
+  const offered = offer
+    ? await offer(pool, {
+        issue,
+        branch,
+        brief,
+        ownedPaths,
+        criteria,
+        criteriaSource,
+      })
+    : null
+  if (offered) return offered
+  if (deps.runnerOnly) {
+    // The round's runner-only pass: the container is full, so a task no runner
+    // takes is not started and not booked against the issue either.
+    return {
+      started: false,
+      issue,
+      branch,
+      detail: 'no runner is free to take it',
+    }
+  }
 
   const runtime = await contributorRuntime(pool, environmentContributorKeys())
   const chosen = resolveWorkerProvider(takenKeyIndices, afterKeyIndex, runtime)
@@ -4880,6 +4963,13 @@ export async function runClaimedBee(
 }
 
 export interface BeeRoomDeps {
+  /**
+   * Offers the task to an idle runner before the container is asked. `null`
+   * turns runners off for this call; omitted, the real registry is asked.
+   */
+  offer?: typeof offerToRunner | null
+  /** Only a runner may take it: the container is already at its limit. */
+  runnerOnly?: boolean
   memory?: () => MemoryReading
   volume?: (dir: string) => VolumeSpace | null
   reap?: typeof reapWorktrees
