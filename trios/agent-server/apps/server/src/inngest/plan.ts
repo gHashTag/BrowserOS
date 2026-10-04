@@ -14,7 +14,7 @@ import type {
   SpecCatalog,
 } from './spec-catalog'
 
-/** `DISPATCH_GITHUB_ACTIONS = "workflow-dispatch"`, everything else `"tick-only"`. */
+/** `DISPATCH_GITHUB_ACTIONS = "workflow-dispatch"`, everything else (launchd included) `"tick-only"`. */
 export type Dispatch = 'workflow-dispatch' | 'tick-only'
 
 export interface CronPlan {
@@ -96,7 +96,9 @@ export function planCron(card: CronCard, s: SchedulerSpec): CronPlan {
         ? 'HOST inngest: the 999 app owns the schedule (no double fire); DISPATCH_INNGEST = tick-only'
         : card.host === 'timer'
           ? 'HOST timer: setInterval inside a 999 process, no remote handle; DISPATCH_TIMER = tick-only'
-          : `HOST ${card.host}: DISPATCH_RAILWAY_CRON = tick-only`
+          : card.host === 'launchd'
+            ? "HOST launchd: a job on the owner's Mac, launchd owns the schedule and nothing outside the Mac can start it; reported, never dispatched; DISPATCH_LAUNCHD = tick-only"
+            : `HOST ${card.host}: DISPATCH_RAILWAY_CRON = tick-only`
   } else if (card.schedule === '') {
     reason = 'SCHEDULE is empty: DISABLED_CARD = tick-only'
   } else if (!fiveFieldCron(card.schedule)) {

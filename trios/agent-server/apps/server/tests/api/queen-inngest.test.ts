@@ -155,6 +155,23 @@ describe('the plan follows the constants', () => {
     expect(plan.danglingRuns).toEqual([])
   })
 
+  it("serves a launchd card (the owner's Mac) tick-only and reported, never dispatched, even with a five-field SCHEDULE", async () => {
+    const root = specsWith({
+      'crons/zz-mac.t27': cronCard('launchd/trios/doctor', {
+        HOST: 'pub const HOST : str = "launchd";',
+        SCHEDULE: 'pub const SCHEDULE : str = "11,41 * * * *";',
+        RUNS: 'pub const RUNS : [0]str = [];',
+      }),
+    })
+    const c = await loadSpecCatalog(root)
+    const p = planCatalog(c).crons.find(
+      (x) => x.cardId === 'launchd/trios/doctor',
+    )!
+    expect(p.dispatch).toBe('tick-only')
+    expect(p.cron).toBeNull()
+    expect(p.reason).toContain('DISPATCH_LAUNCHD = tick-only')
+  })
+
   it('derives ids and events from the templates and keeps them unique across 59 functions', async () => {
     const c = await catalogPromise
     const plan = planCatalog(c)
