@@ -93,9 +93,9 @@ describe('the vendored catalog, read by the compiler', () => {
     ])
     expect(c.scheduler.tokenEnv).toBe('TRIOS_GITHUB_API_TOKEN')
     expect(c.crons.length).toBe(33)
-    expect(c.skills.length).toBe(26)
+    expect(c.skills.length).toBe(27)
     expect(c.refused).toEqual([])
-    expect(c.pin).toContain('26294613')
+    expect(c.pin).toContain('885189dd')
     expect(new Set(c.crons.map((x) => x.host))).toEqual(
       new Set(['github-actions', 'inngest', 'timer', 'railway-cron']),
     )
@@ -115,7 +115,7 @@ describe('the vendored catalog, read by the compiler', () => {
     })
     const c = await loadSpecCatalog(root)
     expect(c.crons.length).toBe(33)
-    expect(c.skills.length).toBe(26)
+    expect(c.skills.length).toBe(27)
     const reasons = Object.fromEntries(c.refused.map((r) => [r.file, r.reason]))
     expect(reasons['specs/crons/zz-broken.t27']).toBe('missing ID')
     expect(reasons['specs/crons/zz-garbled.t27']).toMatch(/^compiler: /)
@@ -155,12 +155,12 @@ describe('the plan follows the constants', () => {
     expect(plan.danglingRuns).toEqual([])
   })
 
-  it('derives ids and events from the templates and keeps them unique across 59 functions', async () => {
+  it('derives ids and events from the templates and keeps them unique across 60 functions', async () => {
     const c = await catalogPromise
     const plan = planCatalog(c)
     const ids = [...plan.crons, ...plan.skills].map((f) => f.functionId)
-    expect(ids.length).toBe(59)
-    expect(new Set(ids).size).toBe(59)
+    expect(ids.length).toBe(60)
+    expect(new Set(ids).size).toBe(60)
     for (const p of plan.crons) {
       expect(p.functionId).toBe(`cron-${slug(p.cardId)}`)
       expect(p.tickEvent).toBe(`cron/${p.cardId}.tick`)
@@ -327,21 +327,21 @@ describe('dispatch, against a fake GitHub', () => {
 })
 
 describe('the app and its routes', () => {
-  it('builds 59 functions and a projection with counts, reasons and env presence (never values)', async () => {
+  it('builds 60 functions and a projection with counts, reasons and env presence (never values)', async () => {
     const c = await catalogPromise
     const env = {
       INNGEST_SIGNING_KEY: 'signkey-test-secret',
       TRIOS_GITHUB_API_TOKEN: 'ghp_secret',
     }
     const app = buildQueenApp(c, { env })
-    expect(app.functions.length).toBe(59)
+    expect(app.functions.length).toBe(60)
     const p = schedulerProjection(app, env)
     expect(p.app).toBe('t27-queen')
     expect(p.counts).toEqual({
       crons: 33,
       cronsScheduled: 12,
       cronsTickOnly: 21,
-      skills: 26,
+      skills: 27,
       refused: 0,
       danglingRuns: 0,
     })
@@ -369,7 +369,7 @@ describe('the app and its routes', () => {
     expect(status.status).toBe(200)
     expect(
       ((await status.json()) as { counts: { skills: number } }).counts.skills,
-    ).toBe(26)
+    ).toBe(27)
 
     const run = await server.request(
       '/api/inngest?fnId=t27-queen-skill-t27-measure-corpus&stepId=step',
