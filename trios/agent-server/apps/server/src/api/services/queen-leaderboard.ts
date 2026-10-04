@@ -40,6 +40,7 @@
  */
 import type { Pool } from 'pg'
 import { contributorOwnerNames } from './queen-contributor-keys'
+import { runnerOwners } from './queen-runners'
 
 /** An issue the Queen accepted, on this key. */
 export const ACCEPTED_XP = 100
@@ -73,8 +74,10 @@ export interface Contributor {
   specs?: number
   /** The operator's name for the lender, or `key #N` when nobody claimed it. */
   name: string
-  /** Whether a person claimed this lane in TRIOS_KEY_OWNERS. */
+  /** Whether a person claimed this lane in TRIOS_KEY_OWNERS, or runs it. */
   claimed: boolean
+  /** The lanes ran on the lender's own machine (queen-runners.ts). */
+  runner?: boolean
   /** Their GitHub login, when the name was written as `@login`. */
   github?: string
   keys: number[]
@@ -132,20 +135,36 @@ export function githubLoginOf(name: string): string | undefined {
 /**
  * The work of each lane, gathered by lender and ranked. Pure: the rows are the
  * database's, the ranking is this function's, and the test drives it directly.
+ *
+ * `runners` names the lanes that ran on somebody's own machine. They are
+ * gathered by PERSON, never by name: a runner's name is whatever its owner is
+ * called on Telegram, and gathering by name would let anyone called "Dmitrii"
+ * fold their lanes into the operator's row, or the operator's into theirs. And
+ * a runner never gets a GitHub link - a login nobody has verified is not one.
  */
 export function rank(
   work: KeyWork[],
   owners: Record<number, string>,
+  runners: Record<number, { name: string; person: string }> = {},
 ): Contributor[] {
   const byName = new Map<string, Contributor>()
   for (const lane of work) {
-    const claimed = Object.hasOwn(owners, lane.keyIndex)
-    const name = claimed ? owners[lane.keyIndex] : `key #${lane.keyIndex}`
-    const seen = byName.get(name)
+    const runner = Object.hasOwn(runners, lane.keyIndex)
+      ? runners[lane.keyIndex]
+      : undefined
+    const claimed = !!runner || Object.hasOwn(owners, lane.keyIndex)
+    const name = runner
+      ? runner.name
+      : claimed
+        ? owners[lane.keyIndex]
+        : `key #${lane.keyIndex}`
+    const group = runner ? `runner\u0000${runner.person}` : name
+    const seen = byName.get(group)
     const into: Contributor = seen ?? {
       name,
       claimed,
-      ...(claimed ? { github: githubLoginOf(name) } : {}),
+      ...(runner ? { runner: true } : {}),
+      ...(claimed && !runner ? { github: githubLoginOf(name) } : {}),
       keys: [],
       accepted: 0,
       specs: 0,
@@ -158,7 +177,7 @@ export function rank(
     into.specs = (into.specs ?? 0) + (lane.specs ?? 0)
     into.finished += lane.finished
     into.hours = Math.round((into.hours + lane.hours) * 10) / 10
-    byName.set(name, into)
+    byName.set(group, into)
   }
   const ranked = [...byName.values()].map((c) => ({ ...c, xp: xpFor(c) }))
   // XP first; then the one who finished more turns; then by name, so two equal
@@ -256,13 +275,20 @@ export async function leaderboard(
   days: number | null = null,
 ): Promise<Leaderboard> {
   const work = await keyWork(pool, days)
+  // A database migrated before runners existed has no queen_runner table yet;
+  // that is "no runners", not "no leaderboard".
+  const runners = await runnerOwners(pool).catch(() => ({}))
   return {
     days,
     measuredAt: new Date().toISOString(),
     scoring: { acceptedXp: ACCEPTED_XP, specXp: SPEC_XP, hourXp: HOUR_XP },
-    contributors: rank(work, {
-      ...parseOwners(process.env.TRIOS_KEY_OWNERS),
-      ...(await contributorOwnerNames(pool)),
-    }),
+    contributors: rank(
+      work,
+      {
+        ...parseOwners(process.env.TRIOS_KEY_OWNERS),
+        ...(await contributorOwnerNames(pool)),
+      },
+      runners,
+    ),
   }
 }

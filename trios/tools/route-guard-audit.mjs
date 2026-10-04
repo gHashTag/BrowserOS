@@ -106,6 +106,16 @@ export const DEFAULT_ALLOWLIST = [
       'shell only — the operator page holds no state and no token; its numbers come from /queen/lease and its one action POSTs there with a bearer the reader supplies, so both stay guarded (comment at the mount)',
   },
   {
+    path: '/queen/me/runners',
+    reason:
+      'own bearer — every request is refused 401 unless its Authorization bearer is a session the app.t27.ai issuer (vibee-render whoami) confirms, and it only lists, mints or revokes runner tokens of the person that session names; the trusted-origin check would refuse the one page that calls it, and its CORS is exactly https://app.t27.ai with no credentials (src/api/routes/queen-runners.ts, tests/api/queen-runners.test.ts)',
+  },
+  {
+    path: '/queen/runner',
+    reason:
+      'own bearer — a runner process on the lender machine, with no browser Origin; every request is refused 401 unless its bearer hashes to a live runner token, and the answer is only that runner own lane (src/api/routes/queen-runners.ts, tests/api/queen-runners.test.ts)',
+  },
+  {
     path: '/queen/contributor-keys',
     reason:
       'own capability - a server-to-server route for the app render proxy, with no browser Origin; every request is refused unless its bearer equals QUEEN_CONTRIBUTOR_PROXY_TOKEN (at least 32 bytes, compared with timingSafeEqual) and it carries a verified x-queen-contributor-id, and the route is off while that token is unset (src/api/routes/queen-contributor-keys.ts, tests/api/queen-contributor-keys.test.ts)',
