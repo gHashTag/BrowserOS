@@ -75,6 +75,7 @@ import {
   queenLeaseDatabaseUrl,
   releaseQueenLease,
 } from './queen-lease'
+import { rankIssues, topPickLine } from './queen-priority'
 import {
   containerRefusal,
   type DispatchReportOutcome,
@@ -331,11 +332,26 @@ export function oracleOutcome(witness: Witness | null): string {
   return failing.every((s) => s.oraclePreBroken) ? 'pre-broken' : 'fail'
 }
 
+/**
+ * One open issue as the round reads it. `labels`, `createdAt` and `blockedBy`
+ * are what the priority rule needs (queen-priority.ts, gHashTag/t27
+ * specs/queen/priority.t27); they come in the same response, so ranking costs
+ * no extra request.
+ */
+export interface OpenIssue {
+  number: number
+  body: string
+  title: string
+  labels: string[]
+  createdAt: string
+  blockedBy: number
+}
+
 export async function openIssues(repo: string): Promise<{
-  issues: Array<{ number: number; body: string; title: string }>
+  issues: OpenIssue[]
   complete: boolean
 }> {
-  const collected: Array<{ number: number; body: string; title: string }> = []
+  const collected: OpenIssue[] = []
   let complete = false
   const cap = issuePageCap()
   for (let page = 1; page <= cap; page++) {
@@ -350,6 +366,9 @@ export async function openIssues(repo: string): Promise<{
       title?: string
       body?: string | null
       pull_request?: unknown
+      labels?: Array<{ name?: string } | string>
+      created_at?: string
+      issue_dependencies_summary?: { blocked_by?: number } | null
     }>
     // The issues endpoint returns pull requests too, and a PR is not work to
     // delegate - it is work already done waiting for a verdict.
@@ -363,6 +382,11 @@ export async function openIssues(repo: string): Promise<{
         number: i.number,
         body: i.body ?? '',
         title: i.title ?? `#${i.number}`,
+        labels: (i.labels ?? [])
+          .map((l) => (typeof l === 'string' ? l : (l.name ?? '')))
+          .filter((name) => name !== ''),
+        createdAt: i.created_at ?? '',
+        blockedBy: Number(i.issue_dependencies_summary?.blocked_by ?? 0) || 0,
       })
     }
     // The RAW page length decides, not the filtered one: a page that was all
@@ -1531,7 +1555,16 @@ export async function runRound(
         ?.verdicts ?? {}
   } else {
     const { issues: open, complete } = await openIssues(repo)
-    candidates = open.map((i) => i.number)
+    // Priority order, gHashTag/t27 specs/queen/priority.t27: an issue with an
+    // open blocker is not a candidate, and the rest are taken by label level
+    // (aged, critical-capped), ties in GitHub's listing order. `queend choose`
+    // still takes the first eligible candidate in the order it is handed, so
+    // ordering its input is the whole change. With no priority labels and no
+    // blockers this is exactly the listing order the round used before.
+    // `open` itself stays whole: the board below remembers blocked issues too.
+    const ranked = rankIssues(open, new Date())
+    candidates = ranked.filter((r) => r.eligible).map((r) => r.issue.number)
+    logger.info(topPickLine(ranked))
     candidateBodies = Object.fromEntries(
       open.map((i) => [String(i.number), i.body]),
     )

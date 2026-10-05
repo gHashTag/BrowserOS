@@ -631,6 +631,72 @@ describe('the brief promises only what the system does', () => {
  * Unset is a configuration error. It must stop the round rather than pick a
  * repository, because reading the wrong one looks exactly like working.
  */
+/**
+ * The round takes open issues in the order gHashTag/t27
+ * specs/queen/priority.t27 gives them, and `queend choose` takes the first
+ * eligible one it is handed - so the order the round hands it IS the policy.
+ * Before this the round handed GitHub's listing order and read no label: a P0
+ * listed after a newer unlabelled issue waited behind it.
+ */
+describe('queen round, priority order', () => {
+  const issueBody = (n: number) =>
+    [
+      '## Success Criteria',
+      '- make check exits 0.',
+      '',
+      '## Boundary',
+      `\`docs/only-${n}.md\``,
+    ].join('\n')
+  const listed = (number: number, labels: string[] = [], blockedBy = 0) => ({
+    number,
+    title: `#${number}`,
+    body: issueBody(number),
+    labels: labels.map((name) => ({ name })),
+    created_at: '2026-10-01T00:00:00Z',
+    issue_dependencies_summary: { blocked_by: blockedBy },
+  })
+  function serveListing(items: Array<ReturnType<typeof listed>>) {
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = new URL(String(input))
+      if (
+        url.pathname.endsWith('/issues') &&
+        url.searchParams.get('page') === '1'
+      ) {
+        return new Response(JSON.stringify(items), { status: 200 })
+      }
+      return new Response('[]', { status: 200 })
+    }) as typeof fetch
+  }
+
+  it.if(present)('chooses the P0 over newer unlabelled work', async () => {
+    serveListing([listed(30), listed(20), listed(10, ['P0'])])
+    const { pool } = roundPool()
+    const result = await runRound(pool, 'me', 7, { held: false })
+    expect(result.choice?.chosen).toBe(10)
+  })
+
+  it.if(present)(
+    'moves past a blocked P0 rather than waiting on it',
+    async () => {
+      serveListing([listed(10, ['P0'], 1), listed(30)])
+      const { pool } = roundPool()
+      const result = await runRound(pool, 'me', 7, { held: false })
+      expect(result.choice?.chosen).toBe(30)
+    },
+  )
+
+  /** The control: no labels, no blockers, and the round is what it was. */
+  it.if(present)(
+    'keeps the listing order when nothing is labelled',
+    async () => {
+      serveListing([listed(30), listed(20), listed(10)])
+      const { pool } = roundPool()
+      const result = await runRound(pool, 'me', 7, { held: false })
+      expect(result.choice?.chosen).toBe(30)
+    },
+  )
+})
+
 describe('queen round, repository named', () => {
   it('refuses to run rather than guess a repository', async () => {
     const before = process.env.TRIOS_GITHUB_REPO
