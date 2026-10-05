@@ -33,8 +33,6 @@ regexes = ['''\+\s+"minidump/\?sentry_key=[0-9a-f]{32}";''']
 
 [[allowlists]]
 description = "Chrome extension manifest public key (pins the extension ID; not a secret)"
-condition = "AND"
-paths = ['''packages/browseros-agent/apps/agent/wxt\.config\.ts''']
 regexTarget = "line"
 regexes = ['''key: '[A-Za-z0-9+/=]{200,}',''']
 
