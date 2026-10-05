@@ -1,3 +1,8 @@
+# Secret gate for BrowserOS (pre-commit + pre-push secret-gate commands below).
+# Requires gitleaks (`brew install gitleaks`). A missing gitleaks fails the
+# hook on purpose: the secret gate must not silently turn itself off.
+# Rules live in .gitleaks.toml; the CI twin is .github/workflows/secret-scan.yml.
+
 commit-msg:
   commands:
     conventional:
@@ -16,6 +21,9 @@ commit-msg:
 
 pre-commit:
   commands:
+    secret-gate:
+      run: gitleaks git --staged --no-banner --redact --config .gitleaks.toml .
+
     biome-check:
       root: "packages/browseros-agent/"
       glob: "*.{js,ts,cjs,mjs,d.cts,d.mts,jsx,tsx,json,jsonc}"
@@ -39,6 +47,9 @@ pre-commit:
 
 pre-push:
   commands:
+    secret-gate:
+      run: gitleaks git --no-banner --redact --config .gitleaks.toml --log-opts="HEAD --not --remotes" .
+
     branch-name:
       run: |
         branch=$(git rev-parse --abbrev-ref HEAD)
