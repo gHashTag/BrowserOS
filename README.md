@@ -189,6 +189,20 @@ We'd love your help making BrowserOS better! See our [Contributing Guide](CONTRI
 
 **Browser development** (C++/Python) — requires ~100GB disk space. See [`packages/browseros`](packages/browseros/) for build instructions.
 
+## Secrets never enter the repository
+
+No password, API key, token or credentials file is committed, not even in docs or examples. Read secrets from the environment or from a gitignored file.
+
+The gate has three layers, all driven by [`.gitleaks.toml`](.gitleaks.toml):
+
+1. **pre-commit** (lefthook) scans staged changes with gitleaks.
+2. **pre-push** (lefthook) scans every commit that is not yet on a remote.
+3. **CI** ([`secret-scan`](.github/workflows/secret-scan.yml)) scans the PR range, so `--no-verify` does not get a secret past it.
+
+Set up once per clone: `brew install gitleaks lefthook && lefthook install`.
+
+A secret that was ever pushed is compromised. Removing it from the tree does not unpublish it, so rotate it at the provider.
+
 ## Credits
 
 - [ungoogled-chromium](https://github.com/ungoogled-software/ungoogled-chromium) — BrowserOS uses some patches for enhanced privacy. Thanks to everyone behind this project!
