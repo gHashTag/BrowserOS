@@ -28,17 +28,26 @@
  *   - take anything back when the required list cannot be read - a gate it
  *     cannot see is not a gate it may enforce;
  *   - touch a closed or merged pull request;
- *   - loop for ever: the second refusal escalates to a person, the same
- *     ceiling the review uses (QueenReviewDecision.maximumSendBacks = 2).
+ *   - loop for ever: the second refusal escalates, the same ceiling the
+ *     review uses (QueenReviewDecision.maximumSendBacks = 2), and the review
+ *     valve (specs/queen/review_valve.t27) releases or closes it from there.
+ *
+ * THE REVIEWER BEE IS A REFUSAL TOO. On gHashTag/t27 a pull request merges
+ * only once the reviewer bee (REVIEWER_LOGIN) approves it, and it judged most
+ * heads REQUEST_CHANGES and then skipped them for ever - nothing sent the
+ * review to anyone who could act on it. Its CHANGES_REQUESTED on the current
+ * head is now taken back exactly like a red required check, with the review's
+ * own words as the note, at most PR_FIX_ATTEMPTS times.
  */
 import type { Pool } from 'pg'
 import { logger } from '../../lib/logger'
+import { PR_FIX_ATTEMPTS, REVIEWER_LOGIN } from './queen-review-valve'
 
 /** Accepted issues asked about per round. Two GitHub reads each, plus a log per red check. */
 export const CI_CHECKS_PER_ROUND = 8
 
 /** The review's own ceiling: the send-back that reaches it escalates instead. */
-export const CI_MAXIMUM_SEND_BACKS = 2
+export const CI_MAXIMUM_SEND_BACKS = PR_FIX_ATTEMPTS
 
 /** What the next bee's brief shows of a note (`PREVIOUS_REVIEW_MAX_CHARS`). */
 const NOTE_MAX = 1500
@@ -128,6 +137,22 @@ export function ciRefusalNote(
     .slice(0, NOTE_MAX)
 }
 
+/** The note the next bee reads when the reviewer bee asked for changes. */
+export function reviewRefusalNote(
+  pull: number,
+  branch: string,
+  review: string,
+): string {
+  return [
+    `The reviewer bee (${REVIEWER_LOGIN}) requested changes on pull request ` +
+      `#${pull} for ${branch}:`,
+    review.trim() || '(the review had no body)',
+    'Fix it on the same branch; the reviewer judges the next head again.',
+  ]
+    .join('\n')
+    .slice(0, NOTE_MAX)
+}
+
 export interface CiDeps {
   /** Names of the required checks on the base branch, or null when unreadable. */
   requiredChecks(): Promise<string[] | null>
@@ -135,6 +160,11 @@ export interface CiDeps {
   pullsForBranch(branch: string): Promise<PullRequest[] | null>
   checkRuns(sha: string): Promise<CheckRun[] | null>
   jobLog(jobId: number): Promise<string | null>
+  /**
+   * The body of REVIEWER_LOGIN's newest review on this head when it is
+   * CHANGES_REQUESTED, else null. Optional: a deps without it asks CI only.
+   */
+  changesRequested?(pull: number, headSha: string): Promise<string | null>
 }
 
 export interface TakenBack {
@@ -187,9 +217,12 @@ export async function takeBackRefusedAcceptances(
     const open = pulls?.find((p) => p.state === 'open' && !p.merged)
     if (!open) continue
     const runs = await deps.checkRuns(open.headSha)
-    if (!runs) continue
-    const red = refusedRequired(runs, required)
-    if (red.length === 0) continue
+    const red = runs ? refusedRequired(runs, required) : []
+    const review =
+      red.length === 0 && deps.changesRequested
+        ? await deps.changesRequested(open.number, open.headSha)
+        : null
+    if (red.length === 0 && review === null) continue
 
     const refused: Array<{ name: string; error: string; url: string | null }> =
       []
@@ -201,7 +234,10 @@ export async function takeBackRefusedAcceptances(
         url: run.url,
       })
     }
-    const note = ciRefusalNote(open.number, branch, refused)
+    const note =
+      review !== null
+        ? reviewRefusalNote(open.number, branch, review)
+        : ciRefusalNote(open.number, branch, refused)
     const sendBacks = Number(row.send_backs ?? 0) + 1
     const state: 'sendBack' | 'escalate' =
       sendBacks >= CI_MAXIMUM_SEND_BACKS ? 'escalate' : 'sendBack'
@@ -216,7 +252,7 @@ export async function takeBackRefusedAcceptances(
       [issue, state, note, sendBacks],
     )
     if (!updated.rowCount) continue
-    const checks = red.map((r) => r.name)
+    const checks = review !== null ? [REVIEWER_LOGIN] : red.map((r) => r.name)
     taken.push({ issue, pull: open.number, state, checks })
     logger.info('Queen took back an acceptance a required check refused', {
       issue,
@@ -299,6 +335,24 @@ export function githubCiDeps(
         conclusion: run.conclusion,
         url: run.html_url,
       }))
+    },
+    async changesRequested(pull, headSha) {
+      const reviews = (await json(
+        `${api}/pulls/${pull}/reviews?per_page=100`,
+      )) as Array<{
+        id: number
+        state: string
+        body: string | null
+        commit_id: string
+        user: { login: string } | null
+      }> | null
+      if (!Array.isArray(reviews)) return null
+      const newest = reviews
+        .filter(
+          (r) => r.user?.login === REVIEWER_LOGIN && r.commit_id === headSha,
+        )
+        .sort((a, b) => b.id - a.id)[0]
+      return newest?.state === 'CHANGES_REQUESTED' ? (newest.body ?? '') : null
     },
     async jobLog(jobId) {
       try {

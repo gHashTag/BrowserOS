@@ -56,7 +56,7 @@ describe('a row judged against criteria that have changed', () => {
     expect(stateOfDispatch(true, 'empty', { idleMs: 0 })).toBe('rejected')
     expect(stateOfDispatch(true, 'sendBack', { idleMs: 0 })).toBe('rejected')
     expect(stateOfDispatch(true, 'wait', { idleMs: 0 })).toBe('awaitingReview')
-    expect(stateOfDispatch(true, 'escalate', { idleMs: 9e9 })).toBe(
+    expect(stateOfDispatch(true, 'escalate', { idleMs: 0 })).toBe(
       'awaitingReview',
     )
   })
@@ -127,10 +127,11 @@ describe('an attempt that spent the retry ceiling', () => {
     ).toBe('failed')
   })
 
-  it('does not release an escalation, whatever the clock says', () => {
-    // An escalation asks for a person, and a timer is not a person.
-    expect(stateOfDispatch(true, 'escalate', { idleMs: 9e9 })).toBe(
-      'awaitingReview',
-    )
+  it('releases an escalation once by the review valve, then closes it', () => {
+    // No outcome waits for a person (specs/queen/review_valve.t27).
+    expect(stateOfDispatch(true, 'escalate', { idleMs: 9e9 })).toBe('failed')
+    expect(
+      stateOfDispatch(true, 'escalate', { idleMs: 9e9, releases: 1 }),
+    ).toBe('cancelled')
   })
 })

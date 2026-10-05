@@ -517,10 +517,15 @@ describe('an empty attempt', () => {
     const [update] = verdictUpdates()
     expect(String(update.params[2])).toContain('3 consecutive attempts')
     expect(update.params[5]).toBe(3)
-    // And escalate is never released by a timer.
+    // And the review valve releases the dead letter once its retry floor
+    // has passed (specs/queen/review_valve.t27): no person is waited for.
     expect(
-      stateOfDispatch(true, 'escalate', { idleMs: 1e12, sendBacks: 0 }),
-    ).toBe('awaitingReview')
+      stateOfDispatch(true, 'escalate', {
+        idleMs: 1e12,
+        sendBacks: 0,
+        freeAttempts: 3,
+      }),
+    ).toBe('failed')
   })
 
   it('is never confused with a diff that failed', async () => {
@@ -759,8 +764,9 @@ describe('the board draws what the Queen decided', () => {
   })
 
   it('puts a finished dispatch of a closed issue in done', () => {
+    // Inside the review valve's retry floor, so the escalation still holds.
     const closed = dispatch(7, {
-      finished_at: ago(30),
+      finished_at: ago(0.2),
       review_state: 'escalate',
     })
     expect(columnOf(closed, [issue(99)])).toBe('done')
@@ -1544,7 +1550,7 @@ describe('a redispatch after a person released an escalation', () => {
       /send_backs = CASE\s+WHEN EXCLUDED\.started AND queen_dispatch\.send_backs >= 2\s+THEN 0 ELSE queen_dispatch\.send_backs END/,
     )
     expect(upsert?.sql).toMatch(
-      /ceiling_releases = CASE\s+WHEN EXCLUDED\.started AND queen_dispatch\.send_backs >= 2\s+THEN queen_dispatch\.ceiling_releases \+ 1/,
+      /ceiling_releases = CASE\s+WHEN EXCLUDED\.started\s+AND \(queen_dispatch\.send_backs >= 2\s+OR queen_dispatch\.review_state = 'escalate'\)\s+THEN queen_dispatch\.ceiling_releases \+ 1/,
     )
   })
 })

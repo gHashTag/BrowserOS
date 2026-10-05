@@ -222,3 +222,51 @@ describe('taking an acceptance back', () => {
     expect(String(write.params[2])).toContain('its log held no error line')
   })
 })
+
+// The reviewer bee's REQUEST_CHANGES is a refusal like a red required check
+// (specs/queen/review_valve.t27, pr_step): it goes back to the Queen for the
+// same branch, bounded by PR_FIX_ATTEMPTS, instead of waiting for a person.
+describe('taking back an acceptance the reviewer bee refused', () => {
+  const green = async () => [run(7, 'parse-ratchet', 'success')]
+
+  it('sends the review back to the Queen when every check is green', async () => {
+    const { pool, statements } = fakePool([
+      { issue: 4385, branch: 'queen-4385', send_backs: 0 },
+    ])
+    const taken = await takeBackRefusedAcceptances(
+      pool,
+      deps({
+        checkRuns: green,
+        changesRequested: async () => 'Criterion 2 is not met: no test.',
+      }),
+    )
+    expect(taken).toEqual([
+      { issue: 4385, pull: 4578, state: 'sendBack', checks: ['t27-bees[bot]'] },
+    ])
+    const [write] = verdictWrites(statements)
+    expect(String(write.params[2])).toContain('Criterion 2 is not met')
+    expect(String(write.params[2])).toContain('requested changes')
+  })
+
+  it('takes nothing back when the reviewer did not ask for changes', async () => {
+    const { pool } = fakePool([
+      { issue: 4385, branch: 'queen-4385', send_backs: 0 },
+    ])
+    const taken = await takeBackRefusedAcceptances(
+      pool,
+      deps({ checkRuns: green, changesRequested: async () => null }),
+    )
+    expect(taken).toEqual([])
+  })
+
+  it('escalates at PR_FIX_ATTEMPTS, where the review valve takes over', async () => {
+    const { pool } = fakePool([
+      { issue: 4385, branch: 'queen-4385', send_backs: 1 },
+    ])
+    const [taken] = await takeBackRefusedAcceptances(
+      pool,
+      deps({ checkRuns: green, changesRequested: async () => 'no' }),
+    )
+    expect(taken.state).toBe('escalate')
+  })
+})
