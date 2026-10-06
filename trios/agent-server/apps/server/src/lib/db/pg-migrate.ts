@@ -19,6 +19,40 @@ function createPool(databaseUrl: string): Pool {
   return createQueenPool(databaseUrl)
 }
 
+// The control plane of specs/queen/control.t27 (vendored at
+// trios/agent-server/specs/queen/control.t27, gHashTag/t27#6657): one fenced
+// lease per TASK, and the event log every reaction reads. Kept in its own
+// exported const - not inlined into MIGRATION_SQL - because queen-control.ts
+// runs the same statements at ROUND time (a deploy that predates the table
+// must not make the round wait for the next boot), and two copies of DDL are
+// how the boot path and the round path come to disagree.
+//
+// NO BACKTICKS here either; same reason as below.
+export const QUEEN_CONTROL_SQL = `
+CREATE TABLE IF NOT EXISTS queen_task_lease (
+  issue int PRIMARY KEY,
+  holder text NOT NULL,
+  acquired_at timestamptz NOT NULL DEFAULT now(),
+  renewed_at timestamptz NOT NULL DEFAULT now(),
+  expires_at timestamptz NOT NULL,
+  -- Same fence contract as queen_lease: monotonic per issue, never reset, so a
+  -- write from a superseded term loses to the current holder without needing
+  -- the superseded writer to cooperate.
+  fence bigint NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS queen_event_log (
+  stream text NOT NULL,
+  seq bigint NOT NULL,
+  -- A kind index into EVENT_NAMES of the control card; the publisher checks it
+  -- against the card before writing, which is where the constant lives.
+  kind int NOT NULL,
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  recorded_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (stream, seq)
+);
+`
+
 // Exported so a test can read the exact string the container executes at boot,
 // rather than a transcription of it. This block runs once per deploy and its
 // only reader is a database: a missing comma or a bad type here is a broken
@@ -167,6 +201,7 @@ CREATE TABLE IF NOT EXISTS queen_tick (
   decision jsonb NOT NULL
 );
 
+${QUEEN_CONTROL_SQL}
 ALTER TABLE queen_dispatch
   ADD COLUMN IF NOT EXISTS owned_paths jsonb NOT NULL DEFAULT '[]'::jsonb;
 

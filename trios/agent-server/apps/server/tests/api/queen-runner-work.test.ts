@@ -192,6 +192,21 @@ describe('which tasks a runner may take', () => {
 })
 
 describe('the offer', () => {
+  /**
+   * A landed claim stub (#6657): these tests measure the offer itself, and the
+   * lease's statements are queen-control.test.ts's to hold. `null` release and
+   * publish keep `pool.asked` down to the tables each test pins.
+   */
+  const LEASE_LANDED = {
+    claimTaskLease: async () => ({
+      landed: true,
+      holder: 'test',
+      fence: 1,
+      expiresAt: '2026-10-06T12:03:00.000Z',
+    }),
+    releaseTaskLease: null,
+    publishEvent: null,
+  } as const
   const input = {
     issue: 42,
     branch: 'queen-42',
@@ -243,6 +258,8 @@ describe('the offer', () => {
 
   it('comes before the container: an offered task cuts no worktree and asks for no key', async () => {
     const pool = recordingPool(() => undefined)
+    const published: Array<{ name: string; payload: Record<string, unknown> }> =
+      []
     const outcome = await dispatchBee(
       pool,
       42,
@@ -253,6 +270,7 @@ describe('the offer', () => {
       [],
       'none',
       {
+        ...LEASE_LANDED,
         offer: async () => ({
           started: true,
           issue: 42,
@@ -264,10 +282,19 @@ describe('the offer', () => {
         memory: () => {
           throw new Error('the container must not be measured')
         },
+        publishEvent: async (_pool, name, payload) => {
+          published.push({ name, payload })
+          return published.length
+        },
       },
     )
     expect(outcome.started).toBe(true)
     expect(outcome.keyIndex).toBe(laneOf(7))
+    // The offer is a task CREATED like any other lane (#6657): the log says
+    // the task began and which lane took it.
+    expect(published).toHaveLength(1)
+    expect(published[0]?.name).toBe('queen/task.created')
+    expect(published[0]?.payload.lane).toBe('runner')
   })
 
   it('in the runner-only pass, a task no runner takes is neither started nor booked', async () => {
@@ -281,10 +308,11 @@ describe('the offer', () => {
       undefined,
       [],
       'none',
-      { offer: async () => null, runnerOnly: true },
+      { ...LEASE_LANDED, offer: async () => null, runnerOnly: true },
     )
     expect(outcome.started).toBe(false)
     expect(outcome.detail).toBe('no runner is free to take it')
+    // Nothing booked - and the stubbed claim was never the pool's to answer.
     expect(pool.asked).toEqual([])
   })
 })
