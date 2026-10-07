@@ -10,7 +10,8 @@
     "includes": [
       "**",
       "!**/apps/eval/src/dashboard/index.html",
-      "!**/apps/server/src/api/services/queen-contributor-policy.gen.ts"
+      "!**/apps/server/src/api/services/queen-contributor-policy.gen.ts",
+      "!**/apps/server/src/api/services/queen-review-valve.gen.js"
     ]
   },
   "formatter": {

@@ -91,6 +91,16 @@ import {
   startedLine,
 } from './queen-report-lines'
 import {
+  CEILING_FLOOR_MINUTES,
+  escalationKind,
+  KIND_SEND_BACK_CEILING,
+  MAX_RELEASES,
+  nextStep,
+  OBSOLETE_STATE,
+  RETRY_FLOOR_MINUTES,
+  stateOfStep,
+} from './queen-review-valve'
+import {
   chooseReviewerLane,
   criterionText,
   defaultReviewDeps,
@@ -631,7 +641,8 @@ const isoSeconds = (value: unknown): string =>
  *
  *   accept    -> accepted, which is terminal and holds nothing at all
  *   sendBack  -> rejected: the same bee is expected back on those files
- *   escalate  -> awaitingReview: a person is needed, and the 48-hour clock runs
+ *   escalate  -> the review valve (specs/queen/review_valve.t27): held for its
+ *                floor, then released as failed or closed as obsolete
  *   wait/none -> awaitingReview: not judged yet, so the hold stands
  */
 /**
@@ -686,8 +697,12 @@ export const SEND_BACK_IDLE_FLOOR_MS = 60 * 60 * 1000
  */
 export const WAIT_FROZEN_FLOOR_MS = 6 * 60 * 60 * 1000
 
-/** The floor on an empty attempt; see `stateOfDispatch`. */
-export const EMPTY_ATTEMPT_FLOOR_MS = 30 * 60 * 1000
+/**
+ * The floor on an empty attempt; see `stateOfDispatch`. From
+ * specs/queen/review_valve.t27 (RETRY_FLOOR_MINUTES), which also releases an
+ * escalation after it.
+ */
+export const EMPTY_ATTEMPT_FLOOR_MS = RETRY_FLOOR_MINUTES * 60 * 1000
 
 /**
  * How long an attempt that spent the retry ceiling keeps holding its files.
@@ -695,7 +710,7 @@ export const EMPTY_ATTEMPT_FLOOR_MS = 30 * 60 * 1000
  * The same hour a single send-back waits out. Longer would be a lease nobody
  * asked for: the work is a person's problem now, and the paths are not.
  */
-export const CEILING_RELEASE_MS = 60 * 60 * 1000
+export const CEILING_RELEASE_MS = CEILING_FLOOR_MINUTES * 60 * 1000
 
 /**
  * How many times a spent ceiling may be handed back to the swarm.
@@ -705,7 +720,7 @@ export const CEILING_RELEASE_MS = 60 * 60 * 1000
  * committed already on the branch. After that the row stays rejected: a third
  * identical failure is evidence about the issue, not about the attempt.
  */
-export const MAX_CEILING_RELEASES = 1
+export const MAX_CEILING_RELEASES = MAX_RELEASES
 
 export function stateOfDispatch(
   finished: boolean,
@@ -716,8 +731,18 @@ export function stateOfDispatch(
     ceiling?: number
     /** How many times this issue's ceiling has already been handed back. */
     releases?: number
+    /** The escalation's kind is read from these (specs/queen/review_valve.t27). */
+    criteria?: number
+    freeAttempts?: number
+    reviewerMisses?: number
   } = {},
-): 'running' | 'accepted' | 'rejected' | 'awaitingReview' | 'failed' {
+):
+  | 'running'
+  | 'accepted'
+  | 'rejected'
+  | 'awaitingReview'
+  | 'failed'
+  | 'cancelled' {
   if (!finished) return 'running'
   const verdict = String(reviewState ?? '')
   if (verdict === 'accept') return 'accepted'
@@ -769,6 +794,11 @@ export function stateOfDispatch(
   // once, with no floor: there is nothing to wait for.
   if (verdict === 'stale-contract') return 'failed'
 
+  // CLOSED BY THE REVIEW VALVE: the reason is in judged_note, the files are
+  // free, and the round does not take the issue again while the row stands.
+  if (verdict === OBSOLETE_STATE) return 'cancelled'
+  const idleMinutes = Math.floor(idleMs / 60_000)
+
   if (verdict === 'sendBack') {
     if (idleMs >= SEND_BACK_IDLE_FLOOR_MS && sendBacks < ceiling)
       return 'failed'
@@ -790,16 +820,73 @@ export function stateOfDispatch(
     // hour a single send-back waits out - and the count of those releases is
     // itself bounded: past `MAX_CEILING_RELEASES` the row stays `rejected` and
     // the issue really is a person's.
-    if (releases >= MAX_CEILING_RELEASES) return 'rejected'
-    return idleMs >= CEILING_RELEASE_MS ? 'failed' : 'rejected'
+    // The review valve (specs/queen/review_valve.t27) decides from here: once
+    // after the ceiling floor, then closed rather than held for a person.
+    return stateOfStep(
+      nextStep(KIND_SEND_BACK_CEILING, idleMinutes, releases),
+      'rejected',
+    )
+  }
+  // AN ESCALATION HAS A NEXT STEP AND A CLOCK. It used to fall through to
+  // `awaitingReview` - "a timer is not a person" - and measured 2026-10-05 that
+  // was 144 of 219 review cards, each holding its files (fileConflict 108,
+  // 25 of 70 workers active). The owner's rule is that no person is needed, so
+  // specs/queen/review_valve.t27 decides: release, criteria backfill, or close.
+  if (verdict === 'escalate') {
+    const kind = escalationKind(
+      lease.criteria ?? 1,
+      sendBacks >= ceiling,
+      (lease.freeAttempts ?? 0) >= FREE_ATTEMPT_CEILING,
+      (lease.reviewerMisses ?? 0) >= REVIEWER_MISS_CEILING,
+    )
+    return stateOfStep(nextStep(kind, idleMinutes, releases), 'awaitingReview')
   }
   // A wait that has outlasted the frozen floor was never judged and never will
-  // be, because nothing about its input can change. `escalate` is deliberately
-  // excluded: it asks for a person, and a timer is not a person.
+  // be, because nothing about its input can change. (`escalate` is handled
+  // above, by the review valve.)
   if (verdict === '' || verdict === 'wait') {
     if (idleMs >= WAIT_FROZEN_FLOOR_MS && sendBacks < ceiling) return 'failed'
   }
   return 'awaitingReview'
+}
+
+/**
+ * Write down each close the review valve decided this round, and name the
+ * issues it closed. The reason goes first in `judged_note`, the note a
+ * person or the next bee reads; the update is guarded on the state it read.
+ */
+export async function closeObsolete(
+  pool: Pool,
+  rows: Array<Record<string, unknown>>,
+  tasks: Array<{ state: string }>,
+): Promise<Set<number>> {
+  const closed = new Set<number>()
+  for (const [i, row] of rows.entries()) {
+    if (tasks[i]?.state !== 'cancelled') continue
+    const issue = Number(row.issue)
+    closed.add(issue)
+    const was = String(row.review_state ?? '')
+    if (was === OBSOLETE_STATE) continue
+    const counters = valveCounters(row)
+    const reason =
+      `Closed as obsolete by the review valve (gHashTag/t27 ` +
+      `specs/queen/review_valve.t27), from '${was}': ` +
+      `send_backs=${Number(row.send_backs ?? 0)}, ` +
+      `releases=${Number(row.ceiling_releases ?? 0)}, ` +
+      `free_attempts=${counters.freeAttempts}, ` +
+      `reviewer_misses=${counters.reviewerMisses}, ` +
+      `criteria=${counters.criteria ?? 'unread'}. Its files are free; the ` +
+      'issue is not taken again while this dispatch is in the 7-day window.'
+    await pool.query(
+      `UPDATE queen_dispatch
+          SET review_state = $3,
+              judged_note = $4 || coalesce(E'\n' || judged_note, '')
+        WHERE issue = $1 AND review_state = $2`,
+      [issue, was, OBSOLETE_STATE, reason],
+    )
+    logger.info('Queen review valve closed a dispatch', { issue, was })
+  }
+  return closed
 }
 
 /**
@@ -818,6 +905,9 @@ export function dispatchRowState(
     review_state?: unknown
     send_backs?: unknown
     ceiling_releases?: unknown
+    criteria?: unknown
+    free_attempts?: unknown
+    reviewer_misses?: unknown
   },
   now: number = Date.now(),
 ): ReturnType<typeof stateOfDispatch> {
@@ -829,7 +919,24 @@ export function dispatchRowState(
     idleMs: Number.isFinite(at) ? Math.max(0, now - at) : 0,
     sendBacks: Number(row.send_backs ?? 0) || 0,
     releases: Number(row.ceiling_releases ?? 0) || 0,
+    ...valveCounters(row),
   })
+}
+
+/**
+ * The columns the review valve reads an escalation's kind from. A row that did
+ * not select `criteria` is not read as having none: that would close it.
+ */
+export function valveCounters(row: {
+  criteria?: unknown
+  free_attempts?: unknown
+  reviewer_misses?: unknown
+}): { criteria?: number; freeAttempts: number; reviewerMisses: number } {
+  return {
+    criteria: Array.isArray(row.criteria) ? row.criteria.length : undefined,
+    freeAttempts: Number(row.free_attempts ?? 0) || 0,
+    reviewerMisses: Number(row.reviewer_misses ?? 0) || 0,
+  }
 }
 
 /**
@@ -960,6 +1067,7 @@ export function boardTask(
       | 'rejected'
       | 'awaitingReview'
       | 'failed'
+      | 'cancelled'
     provider?: string
     model?: string
     inputTokens?: number
@@ -1689,7 +1797,11 @@ export async function runRound(
     // exists to prevent.
     `SELECT issue, branch, owned_paths, conversation_id, dispatched_at,
             key_index, finished_at, review_state, reviewed_at, send_backs,
-            provider, model, input_tokens, output_tokens
+            provider, model, input_tokens, output_tokens,
+            -- dispatch.t27 f53: ceiling_releases was read below and never
+            -- selected, so the one-release bound never applied. The other
+            -- three are the review valve's inputs.
+            ceiling_releases, criteria, free_attempts, reviewer_misses
        FROM queen_dispatch
       WHERE started = true
         -- A reaped dispatch releases its issue: its container died, so nothing
@@ -1759,6 +1871,7 @@ export async function runRound(
               : 0,
             sendBacks: Number(row.send_backs ?? 0),
             releases: Number(row.ceiling_releases ?? 0),
+            ...valveCounters(row),
           }),
       // The price, so the daily cap can see the work it exists to govern.
       // `estimatedCostUSD` returns nil unless BOTH provider and model are
@@ -1772,6 +1885,19 @@ export async function runRound(
         row.output_tokens == null ? undefined : Number(row.output_tokens),
     })
   })
+
+  // CLOSED BY THE REVIEW VALVE IS NOT CHOSEN AGAIN. `cancelled` frees the
+  // files, and claimOnIssue would read it as a free issue too - so the round
+  // skips it while the row stands in the 7-day window, and writes the reason.
+  const closed = await closeObsolete(pool, inFlight.rows, containerTasks).catch(
+    (error) => {
+      logger.warn('Queen could not record review-valve closes', {
+        error: error instanceof Error ? error.message : String(error),
+      })
+      return new Set<number>()
+    },
+  )
+  if (closed.size > 0) candidates = candidates.filter((n) => !closed.has(n))
 
   // Named, because RING-00 is asked about this exact array a few lines below
   // and "the same number" has to be the same number, not a second reading of

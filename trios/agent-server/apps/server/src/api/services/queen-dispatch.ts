@@ -5448,8 +5448,13 @@ export async function recordDispatch(
            -- counted here and bounded by MAX_CEILING_RELEASES, so the swarm
            -- cannot spend an issue's attempts twice over. send_backs starts
            -- again with it: the new attempt is judged on its own work.
+           -- An escalation the review valve released is the same hand-back
+           -- and spends the same count (specs/queen/review_valve.t27,
+           -- MAX_RELEASES), so the two roads cannot each spend it.
            ceiling_releases = CASE
-             WHEN EXCLUDED.started AND queen_dispatch.send_backs >= 2
+             WHEN EXCLUDED.started
+                  AND (queen_dispatch.send_backs >= 2
+                       OR queen_dispatch.review_state = 'escalate')
              THEN queen_dispatch.ceiling_releases + 1
              ELSE queen_dispatch.ceiling_releases END,
            send_backs = CASE

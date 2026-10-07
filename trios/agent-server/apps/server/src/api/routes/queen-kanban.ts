@@ -500,7 +500,9 @@ async function build(
       // Queen's own sentence underneath said there was nothing to choose.
       `SELECT issue, branch, started, detail, finished_at, outcome,
               review_state, review_note, owned_paths, dispatched_at,
-              send_backs, judged_head
+              send_backs, judged_head,
+              -- What dispatchRowState's ceiling and review valve read.
+              ceiling_releases, criteria, free_attempts, reviewer_misses
          FROM queen_dispatch
         WHERE started = true
           AND (finished_at IS NULL OR outcome NOT LIKE 'reaped%')

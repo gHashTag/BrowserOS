@@ -73,8 +73,9 @@ describe('stateOfDispatch: the send-back lease', () => {
   // running, 673 candidates refused with "nothing to choose". Every refusal was
   // honest and the swarm still stopped, because nothing ever handed the issue
   // back. It is handed back ONCE now, an hour later, with the last review's
-  // findings in the brief; the second time it stays a person's.
-  it('hands a spent ceiling back once, an hour later, and never again', () => {
+  // findings in the brief; the second time the review valve closes it as
+  // obsolete (specs/queen/review_valve.t27), so the files are freed.
+  it('hands a spent ceiling back once, an hour later, then closes it', () => {
     const spent = { sendBacks: 2, ceiling: 2 }
     expect(stateOfDispatch(true, 'sendBack', { ...spent, idleMs: 0 })).toBe(
       'rejected',
@@ -88,14 +89,14 @@ describe('stateOfDispatch: the send-back lease', () => {
         idleMs: 1000 * HOUR,
         releases: 1,
       }),
-    ).toBe('rejected')
+    ).toBe('cancelled')
     expect(
       stateOfDispatch(true, 'sendBack', {
         idleMs: 1000 * HOUR,
         sendBacks: 9,
         releases: 1,
       }),
-    ).toBe('rejected')
+    ).toBe('cancelled')
   })
 
   it('respects a ceiling passed in, so the number is not restated here', () => {
@@ -111,22 +112,31 @@ describe('stateOfDispatch: the send-back lease', () => {
         idleMs: 19 * HOUR,
         sendBacks: 4,
         ceiling: 4,
-        // Handed back once already: from here a person decides.
+        // Handed back once already: the valve closes it as obsolete
+        // (specs/queen/review_valve.t27), so the boundary is freed.
         releases: 1,
       }),
-    ).toBe('rejected')
+    ).toBe('cancelled')
   })
 
-  it('never releases an escalation, whatever the clock says', () => {
-    // This assertion once covered `wait` and `null` as well, and the wait valve
-    // below deliberately changed that: a wait whose transcript is frozen can
-    // never become anything else, so past a long floor it is released. The
-    // assertion was narrowed rather than deleted, because the rule it still
-    // states is the one that matters most here - an escalation asks for a
-    // PERSON, and no timer is a person.
+  it('releases an escalation by the review valve, never by hand', () => {
+    // This once said an escalation waits for a PERSON for ever. Measured
+    // 2026-10-05: 144 escalate rows held their files and nobody came. The
+    // owner's rule is now that no outcome waits for a person: an escalation
+    // is released once (after RETRY_FLOOR_MINUTES) and then closed.
     expect(
       stateOfDispatch(true, 'escalate', { idleMs: 1000 * HOUR, sendBacks: 0 }),
-    ).toBe('awaitingReview')
+    ).toBe('failed')
+    expect(
+      stateOfDispatch(true, 'escalate', {
+        idleMs: 1000 * HOUR,
+        sendBacks: 0,
+        releases: 1,
+      }),
+    ).toBe('cancelled')
+    expect(stateOfDispatch(true, 'escalate', { idleMs: 0, sendBacks: 0 })).toBe(
+      'awaitingReview',
+    )
   })
 
   it('never releases anything that has not finished', () => {
@@ -177,9 +187,20 @@ describe('stateOfDispatch: the wait valve', () => {
     ).toBe('awaitingReview')
   })
 
-  it('NEVER releases an escalation - it asks for a person, and a timer is not one', () => {
+  it('holds an escalation with no criteria for the backfill, then closes it', () => {
     expect(
-      stateOfDispatch(true, 'escalate', { idleMs: 1000 * HOUR, sendBacks: 0 }),
+      stateOfDispatch(true, 'escalate', {
+        idleMs: 1000 * HOUR,
+        sendBacks: 0,
+        criteria: 0,
+      }),
+    ).toBe('cancelled')
+    expect(
+      stateOfDispatch(true, 'escalate', {
+        idleMs: HOUR,
+        sendBacks: 0,
+        criteria: 0,
+      }),
     ).toBe('awaitingReview')
   })
 
