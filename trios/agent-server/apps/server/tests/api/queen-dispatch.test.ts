@@ -44,6 +44,25 @@ import {
   workspaceRoot,
 } from '../../src/api/services/queen-dispatch'
 import { resetYoungBees } from '../../src/api/services/queen-resources'
+
+/**
+ * Deps that begin from a landed task lease (#6657, specs/queen/control.t27):
+ * these suites measure the lanes BELOW the claim - keys, room, lanes, closes -
+ * and the lease's own statements are held against queen-control.test.ts.
+ * `null` release/publish keep the recorded queries down to the tables each
+ * test pins, and the claim stub leaves the control CARD real in every test.
+ */
+const LEASE_LANDED = {
+  claimTaskLease: async () => ({
+    landed: true,
+    holder: 'test',
+    fence: 1,
+    expiresAt: '2026-10-06T12:03:00.000Z',
+  }),
+  releaseTaskLease: null,
+  publishEvent: null,
+} as const
+
 import { logger } from '../../src/lib/logger'
 
 const GENERIC_WORKER_KEYS = [
@@ -274,7 +293,17 @@ describe('queen dispatch precheck', () => {
         query: async () => ({ rowCount: 1, rows: [] }),
       } as unknown as Pool
 
-      const outcome = await dispatchBee(pool, 1308, 'brief', [], [0, 1])
+      const outcome = await dispatchBee(
+        pool,
+        1308,
+        'brief',
+        [],
+        [0, 1],
+        undefined,
+        [],
+        'none',
+        LEASE_LANDED,
+      )
 
       expect(outcome.started).toBe(false)
       expect(outcome.detail).toContain('TRIOS_QUEEN_WORKER_API_KEY_3')
@@ -472,7 +501,17 @@ describe('queen dispatch precheck', () => {
         query: async () => ({ rowCount: 1, rows: [] }),
       } as unknown as Pool
 
-      const outcome = await dispatchBee(pool, 1308, 'brief', [], [0])
+      const outcome = await dispatchBee(
+        pool,
+        1308,
+        'brief',
+        [],
+        [0],
+        undefined,
+        [],
+        'none',
+        LEASE_LANDED,
+      )
 
       expect(outcome.started).toBe(false)
       expect(outcome.detail).toContain('TRIOS_QUEEN_WORKER_API_KEY_2')
@@ -932,6 +971,7 @@ describe('the container is asked before a worktree is cut', () => {
       [],
       'none',
       {
+        ...LEASE_LANDED,
         // The container's own refusal: no runner is asked here (the runner's
         // first look is queen-runner-work.test.ts).
         offer: null,
@@ -986,6 +1026,7 @@ describe('the container is asked before a worktree is cut', () => {
       [],
       'none',
       {
+        ...LEASE_LANDED,
         memory: calm,
         volume: () => ({ totalBytes: 50 * GB, freeBytes: 5.1 * GB }),
         reap: async (opts = {}) => {
@@ -1045,6 +1086,7 @@ describe('the container is asked before a worktree is cut', () => {
       [],
       'none',
       {
+        ...LEASE_LANDED,
         memory: calm,
         volume: () => ({ totalBytes: 50 * GB, freeBytes: 5.1 * GB }),
         reap: async () => {
@@ -1077,6 +1119,7 @@ describe('the container is asked before a worktree is cut', () => {
       [],
       'none',
       {
+        ...LEASE_LANDED,
         memory: calm,
         volume: () =>
           reaps === 0 ? { totalBytes: 50 * GB, freeBytes: 5.1 * GB } : roomy(),
@@ -1187,6 +1230,7 @@ describe('the container is asked before a worktree is cut', () => {
     const start = 1_789_000_000_000
     const go = (issue: number, ms: number) =>
       dispatchBee(pool, issue, 'brief', [], [], undefined, [], 'none', {
+        ...LEASE_LANDED,
         memory: nearlyFull,
         volume: roomy,
         now: () => ms,
@@ -1307,6 +1351,7 @@ describe('the container is asked before a worktree is cut', () => {
         [],
         'none',
         {
+          ...LEASE_LANDED,
           memory: calm,
           volume: () =>
             reaps === 0
@@ -1346,6 +1391,7 @@ describe('the container is asked before a worktree is cut', () => {
       [],
       'none',
       {
+        ...LEASE_LANDED,
         memory: full,
         volume: () => null,
       },
@@ -1406,6 +1452,7 @@ describe('handing a bee to a runner', () => {
         ['the tab opens'],
         'stated',
         {
+          ...LEASE_LANDED,
           memory: () => {
             measured += 1
             return { kind: 'unsupported', platform: 'darwin' }
@@ -1450,6 +1497,7 @@ describe('handing a bee to a runner', () => {
       [],
       'none',
       {
+        ...LEASE_LANDED,
         memory: () => {
           measured += 1
           return {
@@ -1513,6 +1561,136 @@ describe('handing a bee to a runner', () => {
       /INSERT INTO queen_dispatch\b/.test(q.text),
     )
     expect(insert?.values?.[2]).toBe(false)
+  })
+})
+
+/**
+ * The task lease gates the whole dispatch (#6657, specs/queen/control.t27 -
+ * vendored, read by the compiler at run time). The claim comes before any
+ * lane; a lost claim writes nothing; every path that starts no bee hands the
+ * claim back; a bee that starts publishes task.created for ITS lane. The
+ * lease's own statements are queen-control.test.ts's to hold - this describes
+ * the wiring, with every control function below injected and recorded.
+ */
+describe('the task lease gates the dispatch', () => {
+  const oneKey = () => {
+    process.env.TRIOS_QUEEN_WORKER_PROVIDER = 'zai'
+    process.env.TRIOS_QUEEN_WORKER_BASE_URL = 'https://api.z.ai/api/paas/v4'
+    process.env.TRIOS_QUEEN_WORKER_API_KEY = 'a'
+  }
+  const GB = 1_000_000_000
+  const fullMemory = () =>
+    ({
+      kind: 'measured',
+      usedBytes: 21.2 * GB,
+      limitBytes: 24 * GB,
+      source: 'cgroup v2',
+      limitSource: 'cgroup',
+    }) as const
+
+  it('stops the dispatch cold when another holder has the lease, and writes nothing', async () => {
+    // A lost claim must not even reach recordDispatch: the upsert keys on the
+    // issue alone, so a row written by the loser lands on the live holder's
+    // dispatch - the exact clobber the lease exists to prevent.
+    oneKey()
+    const { pool, asked } = recordingPool(() => ({ rowCount: 0, rows: [] }))
+    const outcome = await dispatchBee(
+      pool,
+      1700,
+      'brief',
+      [],
+      [],
+      undefined,
+      [],
+      'none',
+      {
+        claimTaskLease: async () => ({
+          landed: false,
+          holder: 'the-other-container',
+          fence: 5,
+          expiresAt: '2026-10-06T12:02:30.000Z',
+        }),
+      },
+    )
+    expect(outcome.started).toBe(false)
+    expect(outcome.detail).toContain('the-other-container')
+    expect(outcome.detail).toContain('fence 5')
+    // Nothing booked, nothing released, nothing logged: the claim was never
+    // ours to give back.
+    expect(
+      asked.filter((q) =>
+        /queen_dispatch|queen_task_lease|queen_event_log/.test(q.sql),
+      ),
+    ).toEqual([])
+  })
+
+  it('hands the claim back when the container has no room', async () => {
+    // The refusal that ends most rounds once the swarm is memory-bound. A
+    // dispatch that parks the lease there holds the issue for a full TTL
+    // against a container that never took it.
+    oneKey()
+    const { pool } = recordingPool(() => ({ rowCount: 0, rows: [] }))
+    const released: number[] = []
+    const outcome = await dispatchBee(
+      pool,
+      1701,
+      'brief',
+      [],
+      [],
+      undefined,
+      [],
+      'none',
+      {
+        ...LEASE_LANDED,
+        releaseTaskLease: async (_pool, issue) => {
+          released.push(issue)
+          return true
+        },
+        offer: null,
+        memory: fullMemory,
+        volume: () => ({ totalBytes: 50 * GB, freeBytes: 19 * GB }),
+      },
+    )
+    expect(outcome.started).toBe(false)
+    expect(outcome.room?.resource).toBe('memory')
+    expect(released).toEqual([1701])
+  })
+
+  it('publishes task.created naming the lane that took it', async () => {
+    oneKey()
+    process.env.TRIOS_QUEEN_BEES_RUN_ELSEWHERE = 'on'
+    const { pool } = recordingPool(() => ({ rowCount: 0, rows: [] }))
+    const published: Array<{
+      name: string
+      payload: Record<string, unknown>
+    }> = []
+    try {
+      const outcome = await dispatchBee(
+        pool,
+        1702,
+        'brief',
+        [],
+        [],
+        undefined,
+        [],
+        'none',
+        {
+          ...LEASE_LANDED,
+          publishEvent: async (_pool, name, payload) => {
+            published.push({ name, payload })
+            return published.length
+          },
+        },
+      )
+      expect(outcome.started).toBe(true)
+      expect(outcome.detail).toContain('queued for a runner')
+      expect(published).toHaveLength(1)
+      expect(published[0]?.name).toBe('queen/task.created')
+      expect(published[0]?.payload.lane).toBe('runner')
+      expect(published[0]?.payload.issue).toBe(1702)
+    } finally {
+      delete process.env.TRIOS_QUEEN_BEES_RUN_ELSEWHERE
+    }
   })
 })
 
@@ -2489,7 +2667,15 @@ describe('a durable close frees the slot at once', () => {
         : { rowCount: 1, rows: [] },
     )
     await closeDispatch(pool, 1295, 'conv-1295', 'finished')
-    expect(asked.length).toBe(2)
+    // The CLOSE asked twice - refused, then landed. The landed close also
+    // releases the task lease and appends queen/task.ended (#6657), so the
+    // statements-after-the-close grew; the close itself did not.
+    expect(
+      asked.filter((q) => q.sql.includes('finished_at = now()')),
+    ).toHaveLength(2)
+    expect(asked.some((q) => /INSERT INTO queen_event_log/.test(q.sql))).toBe(
+      true,
+    )
     expect(heard).toEqual([1295])
   })
 
@@ -2499,6 +2685,10 @@ describe('a durable close frees the slot at once', () => {
   it('closes quietly when no listener is installed', async () => {
     const { pool, asked } = recordingPool(() => ({ rowCount: 1, rows: [] }))
     await closeDispatch(pool, 1295, 'conv-1295', 'finished')
-    expect(asked.length).toBe(1)
+    // One close, no retry - and nothing signals, because nobody listens. The
+    // lease release and the ended event after it are writes, not signals.
+    expect(
+      asked.filter((q) => q.sql.includes('finished_at = now()')),
+    ).toHaveLength(1)
   })
 })

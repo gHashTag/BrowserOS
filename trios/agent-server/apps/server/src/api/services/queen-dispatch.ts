@@ -35,6 +35,13 @@ import {
   type EnvironmentKey,
 } from './queen-contributor-keys'
 import {
+  claimTaskLease,
+  loadControlSpec,
+  publishEvent,
+  releaseTaskLease,
+} from './queen-control'
+import { queenHolderName } from './queen-lease'
+import {
   describeReading,
   diskLineUsedPercent,
   judgeBeeRoom,
@@ -4340,7 +4347,23 @@ export async function finishDispatch(
       conversationId ?? null,
     ],
   )
-  return result.rowCount ?? 0
+  const closed = result.rowCount ?? 0
+  if (closed > 0) {
+    // The task is over, so its lease is too (#6657). Release is guarded on
+    // this process's holder name: after a takeover the fence is the new
+    // holder's, and a guarded UPDATE is what keeps this one from giving away
+    // a lease it no longer owns. The reapers land here as well, which is how
+    // a reaped task's lease is released without waiting out its TTL.
+    await releaseTaskLease(pool, issue, queenHolderName()).catch(() => false)
+    void publishEvent(pool, 'queen/task.ended', { issue, outcome }).catch(
+      (error) =>
+        logger.warn('Queen event log write failed', {
+          issue,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+    )
+  }
+  return closed
 }
 
 /**
@@ -4591,6 +4614,46 @@ export async function dispatchBee(
 ): Promise<DispatchOutcome> {
   const branch = `queen-${issue}`
 
+  // THE TASK LEASE COMES FIRST (#6657, specs/queen/control.t27). Before any
+  // lane, key or worktree is measured, the ISSUE itself must be ours to work:
+  // a lease nobody holds lands here, an expired one is taken over with a new
+  // fence, and a live one names its holder and stops this dispatch cold.
+  // Without it, the only record that a task was taken was the dispatch row
+  // itself - which a dead container leaves open until the two-hour stall
+  // reaper, holding the issue (and every path it owns) for that long.
+  //
+  // A lost claim writes NOTHING. recordDispatch upserts by issue alone, so a
+  // row written here would land on top of the live holder's dispatch - the
+  // defect the lease exists to prevent, committed by the lease's own loser.
+  const control = await loadControlSpec()
+  const holder = queenHolderName()
+  const claimFn = deps.claimTaskLease ?? claimTaskLease
+  const releaseFn =
+    deps.releaseTaskLease === null
+      ? null
+      : (deps.releaseTaskLease ?? releaseTaskLease)
+  const publishFn =
+    deps.publishEvent === null ? null : (deps.publishEvent ?? publishEvent)
+  const claim = await claimFn(pool, issue, holder, control.taskLeaseTtlSeconds)
+  if (!claim.landed) {
+    const detail =
+      `task lease held by ${claim.holder} (fence ${claim.fence}, ` +
+      `expires ${claim.expiresAt}); not booked against the issue`
+    logger.warn('Queen tick chose an issue whose lease is live elsewhere', {
+      issue,
+      detail,
+    })
+    return { started: false, issue, branch, detail }
+  }
+
+  // Every path from here to a started bee holds the claim; every path that
+  // does not start one must give it back, or a refused dispatch parks the
+  // issue for a full TTL. Kept in one helper so the returns below stay honest.
+  const releaseClaim = () =>
+    releaseFn
+      ? releaseFn(pool, issue, holder).catch(() => false)
+      : Promise.resolve(false)
+
   // A RUNNER FIRST. A runner's lane costs this container no key, no memory and
   // no disk, so an idle one takes the task before any of those is measured -
   // and a deployment with no provider key at all can still be served by the
@@ -4607,10 +4670,33 @@ export async function dispatchBee(
         criteriaSource,
       })
     : null
-  if (offered) return offered
+  if (offered) {
+    // The runner holds the task now. A started runner keeps the claim (the
+    // round's heartbeat renews it while its dispatch row is open); a refused
+    // offer gives it back so the next round can try another lane.
+    if (!offered.started) {
+      await releaseClaim()
+    } else if (publishFn) {
+      // Same event the other lanes publish: the log records that the task
+      // began, and the lane says whose machine carried it.
+      void publishFn(pool, 'queen/task.created', {
+        issue,
+        branch,
+        holder,
+        lane: 'runner',
+      }).catch((error) =>
+        logger.warn('Queen event log write failed', {
+          issue,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      )
+    }
+    return offered
+  }
   if (deps.runnerOnly) {
     // The round's runner-only pass: the container is full, so a task no runner
     // takes is not started and not booked against the issue either.
+    await releaseClaim()
     return {
       started: false,
       issue,
@@ -4647,6 +4733,7 @@ export async function dispatchBee(
       detail,
     })
     await recordDispatch(pool, issue, branch, false, detail, ownedPaths)
+    await releaseClaim()
     return { started: false, issue, branch, detail }
   }
   if (!chosen) {
@@ -4656,6 +4743,7 @@ export async function dispatchBee(
       detail,
     })
     await recordDispatch(pool, issue, branch, false, detail, ownedPaths)
+    await releaseClaim()
     return { started: false, issue, branch, detail }
   }
 
@@ -4692,6 +4780,20 @@ export async function dispatchBee(
       chosen.model,
       { brief },
     )
+    // The lease stays: the runner's dispatch row is open from this line, and
+    // the round's heartbeat renews the claim until the row closes.
+    if (publishFn)
+      void publishFn(pool, 'queen/task.created', {
+        issue,
+        branch,
+        holder,
+        lane: 'runner',
+      }).catch((error) =>
+        logger.warn('Queen event log write failed', {
+          issue,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      )
     logger.info('Queen queued a bee for a runner', {
       issue,
       branch,
@@ -4725,6 +4827,10 @@ export async function dispatchBee(
     // row each time - wiping the last attempt's conversation, tokens and
     // outcome for a reason that has nothing to do with the issue. The warning
     // above and the round report, one row per round already, carry it.
+    // The CLAIM still goes back: this refusal ends most rounds once the swarm
+    // is memory-bound, and a lease parked here would hold the issue for a
+    // full TTL against a container that never took it.
+    await releaseClaim()
     return {
       started: false,
       issue,
@@ -4741,6 +4847,7 @@ export async function dispatchBee(
   )
   if (!cut.ok) {
     await recordDispatch(pool, issue, branch, false, cut.detail, ownedPaths)
+    await releaseClaim()
     return { started: false, issue, branch, detail: cut.detail }
   }
 
@@ -4758,6 +4865,25 @@ export async function dispatchBee(
     chosen.provider,
     chosen.model,
   )
+  if (!cut.started) {
+    // The turn refused to start; the claim outlived its purpose in the same
+    // breath it got one. Give it back or the next round reads the issue as
+    // taken for a full TTL.
+    await releaseClaim()
+  } else {
+    if (publishFn)
+      void publishFn(pool, 'queen/task.created', {
+        issue,
+        branch,
+        holder,
+        lane: 'container',
+      }).catch((error) =>
+        logger.warn('Queen event log write failed', {
+          issue,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      )
+  }
   cut.begin()
   logger.info('Queen dispatch', {
     issue,
@@ -4976,6 +5102,16 @@ export interface BeeRoomDeps {
   now?: () => number
   /** Handed to `prepareWorktree`, whose own volume check reads the real disk. */
   volumeUsed?: (dir: string) => number | null
+  /**
+   * The task-lease claim (#6657). Injectable so a test of the lanes BELOW the
+   * claim can start from a landed claim instead of scripting lease SQL; the
+   * control card itself stays real in every test.
+   */
+  claimTaskLease?: typeof claimTaskLease
+  /** Claim release; `null` skips it for a caller that never held a claim. */
+  releaseTaskLease?: typeof releaseTaskLease | null
+  /** Event-log publish; `null` skips it (the log is tested on its own). */
+  publishEvent?: typeof publishEvent | null
 }
 
 /**
