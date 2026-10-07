@@ -13,11 +13,24 @@ t27="${T27_ROOT:?set T27_ROOT to a gHashTag/t27 checkout}"
 trinity="${TRINITY_ROOT:?set TRINITY_ROOT to a gHashTag/trinity checkout}"
 dst="$here/specs"
 
-mkdir -p "$dst/crons" "$dst/skills" "$dst/automation"
-rm -f "$dst"/crons/*.t27 "$dst"/skills/*.t27
+mkdir -p "$dst/crons" "$dst/skills" "$dst/automation" "$dst/queen"
+rm -f "$dst"/crons/*.t27 "$dst"/skills/*.t27 "$dst"/queen/*.t27
 cp "$t27"/specs/crons/*.t27 "$dst/crons/"
 cp "$t27"/specs/skills/*.t27 "$dst/skills/"
 cp "$t27"/specs/automation/inngest-queen-scheduler.t27 "$dst/automation/"
+# The control card carries a provenance header naming the exact blob, so the
+# file explains itself wherever it is read; the body below the header stays
+# byte-identical to the source.
+control_blob="$(git -C "$t27" rev-parse master:specs/queen/control.t27)"
+cp "$t27"/specs/queen/control.t27 "$dst/queen/control.t27.body"
+{
+  echo "; Vendored from gHashTag/t27 specs/queen/control.t27, git blob $control_blob (master)."
+  echo '; The scheduler contract: event kinds, fenced task leases, reconcile cadence. This copy is'
+  echo '; read by the vendored t27_compiler.wasm at runtime; nothing here is parsed with a regex.'
+  echo '; Refresh: scripts/sync-t27-specs.sh (T27_ROOT), then bun test tests/api/queen-control.test.ts'
+  cat "$dst/queen/control.t27.body"
+} >"$dst/queen/control.t27"
+rm "$dst/queen/control.t27.body"
 cp "$trinity"/apps/website/public/t27/t27_compiler.wasm "$dst/t27_compiler.wasm"
 
 t27_sha="$(git -C "$t27" rev-parse --short=8 HEAD)"
@@ -26,7 +39,7 @@ trinity_sha="$(git -C "$trinity" rev-parse --short=8 HEAD)"
 wasm_sha="$(sha256sum "$dst/t27_compiler.wasm" | cut -d' ' -f1)"
 
 cat >"$dst/PIN" <<EOF
-source: gHashTag/t27 $t27_ref @ $t27_sha (specs/crons, specs/skills, specs/automation/inngest-queen-scheduler.t27), byte-identical
+source: gHashTag/t27 $t27_ref @ $t27_sha (specs/crons, specs/skills, specs/automation/inngest-queen-scheduler.t27, specs/queen/control.t27), byte-identical
 wasm: gHashTag/trinity @ $trinity_sha apps/website/public/t27/t27_compiler.wasm sha256 $wasm_sha
 refresh: scripts/sync-t27-specs.sh (T27_ROOT, TRINITY_ROOT), then bun test tests/api/queen-inngest.test.ts
 EOF

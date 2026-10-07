@@ -46,6 +46,12 @@ import { outstandingEscalations } from '../routes/queen-needs-you'
 import { githubCiDeps, takeBackRefusedAcceptances } from './queen-ci-verdict'
 import { contributorRuntime } from './queen-contributor-keys'
 import {
+  ensureControlTables,
+  loadControlSpec,
+  reclaimableTaskLeases,
+  renewRunningLeases,
+} from './queen-control'
+import {
   type CriterionRun,
   criteriaCounts,
   criteriaWitness,
@@ -1627,6 +1633,39 @@ export async function runRound(
   let candidates: number[]
   let candidateBodies: Record<string, string>
   await ensureQueenColumns(pool)
+  // The control plane of specs/queen/control.t27 (#6657): tables present on
+  // any deploy, this holder's in-flight task leases renewed (the round IS the
+  // heartbeat - shorter than the TTL on purpose, so a container that stops
+  // rounding loses its tasks in minutes, not hours), and leases already past
+  // their TTL said out loud. Takeover itself needs no sweep: the claim's
+  // WHERE clause hands an expired lease to its next contender under the row
+  // lock.
+  try {
+    const control = await loadControlSpec()
+    await ensureControlTables(pool)
+    const renewed = await renewRunningLeases(
+      pool,
+      holder,
+      control.taskLeaseTtlSeconds,
+    )
+    const reclaimable = await reclaimableTaskLeases(pool)
+    if (renewed > 0 || reclaimable.length > 0) {
+      logger.info('Queen control pass', {
+        holder,
+        renewed,
+        expiredLeases: reclaimable,
+      })
+    }
+  } catch (error) {
+    // A control failure must not stop the round: the lease above still
+    // excludes the other Queens, and the dispatches of the previous deploy
+    // still hold their issues. Logged loudly because a supervisor that
+    // silently stopped heartbeating will quietly lose every task it runs.
+    logger.warn('Queen control pass failed; leases will age out at their TTL', {
+      holder,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
   // Kept out of the `else` branch below: the dispatch loop reads criteria from
   // it, and a variable scoped to the branch that fills it is a variable the
   // dispatch cannot see.
