@@ -285,7 +285,187 @@ export async function publishEvent(
   )
   const seq = Number(result.rows[0]?.seq ?? 0)
   logger.info('Queen control event', { stream, name, kind, seq })
+  // After the row exists, never before: a reaction that ran ahead of the log
+  // would be a reaction to an event nobody can replay.
+  if (eventListener) {
+    try {
+      eventListener({ stream, name, kind, seq })
+    } catch (error) {
+      logger.warn('Queen control event listener failed', {
+        name,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
   return seq
+}
+
+/** One event as the log recorded it. */
+export interface ControlEvent {
+  stream: string
+  name: string
+  kind: number
+  seq: number
+}
+
+let eventListener: ((event: ControlEvent) => void) | null = null
+
+/**
+ * Who hears an event once it is in the log. One listener, set by the process
+ * that runs the Queen's round (`wakeOnControlEvents` in queen-tick.ts); null
+ * clears it. A process that runs no round - a bee runner - sets none, and its
+ * events are still recorded.
+ */
+export function setControlEventListener(
+  listener: ((event: ControlEvent) => void) | null,
+): void {
+  eventListener = listener
+}
+
+/**
+ * Queue a person's assignment (card section 3). Idempotent: asking twice keeps
+ * the first request's place in the order.
+ */
+export async function requestAssign(
+  pool: Pool,
+  issue: number,
+  by: string,
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO queen_manual_assign (issue, requested_by)
+     VALUES ($1, $2) ON CONFLICT (issue) DO NOTHING`,
+    [issue, by],
+  )
+}
+
+/** The assignments still waiting, oldest first. */
+export async function pendingAssigns(pool: Pool): Promise<number[]> {
+  const result = await pool.query(
+    'SELECT issue FROM queen_manual_assign ORDER BY requested_at, issue',
+  )
+  return result.rows.map((r) => Number(r.issue))
+}
+
+/** Drop the assignments a round has served. */
+export async function clearAssigns(
+  pool: Pool,
+  issues: number[],
+): Promise<void> {
+  if (issues.length === 0) return
+  await pool.query(
+    'DELETE FROM queen_manual_assign WHERE issue = ANY($1::int[])',
+    [issues],
+  )
+}
+
+/**
+ * Whether a task's lease is held right now by a bee that is still working: the
+ * card's `task_leased_live` input to assign_answer. A lease that expired, or
+ * whose dispatch already ended, holds nothing.
+ */
+export async function taskLeasedLive(
+  pool: Pool,
+  issue: number,
+): Promise<boolean> {
+  const result = await pool.query(
+    `SELECT 1 FROM queen_task_lease t
+       JOIN queen_dispatch d ON d.issue = t.issue
+      WHERE t.issue = $1 AND t.expires_at >= now()
+        AND d.started AND d.finished_at IS NULL`,
+    [issue],
+  )
+  return (result.rowCount ?? 0) > 0
+}
+
+export type CancelResult =
+  | { status: 'none' }
+  | { status: 'accepted' }
+  | {
+      status: 'cancelled'
+      /** The bee was still working when the cancel landed. */
+      wasRunning: boolean
+      conversationId: string | null
+      /** The task lease's fence after the cancel, or null if it never had one. */
+      fence: number | null
+    }
+
+/**
+ * Cancel one task (card section 3).
+ *
+ * - cancel_allowed: an accepted dispatch is not cancelled - only the CI
+ *   take-back of dispatch.t27 undoes an accept.
+ * - The row ends in one statement: `review_state = 'cancelled'` (which
+ *   stateOfDispatch reads as `failed`, free in claimOnIssue, so the files are
+ *   released at once) and `finished_at` set if it was not. `finishDispatch`
+ *   writes only `WHERE finished_at IS NULL AND conversation_id = ...`, so the
+ *   interrupted bee's own late ending does not land.
+ * - cancel_counts_against_issue is false: send_backs, free_attempts and
+ *   ceiling_releases are not touched.
+ * - fence_after_cancel: the task lease's fence moves on and the lease expires,
+ *   so any write still carrying the old fence is stale.
+ * - A pending assignment of the issue is withdrawn with it.
+ *
+ * Interrupting the running turn is the caller's half, because only the process
+ * that streams the turn can close its connection (`abortBeeHere`).
+ */
+export async function cancelTask(
+  pool: Pool,
+  issue: number,
+  by: string,
+  reason: string,
+): Promise<CancelResult> {
+  const note =
+    `Cancelled by ${by}` +
+    (reason ? `: ${reason}` : '') +
+    ' (gHashTag/t27 specs/queen/control.t27 section 3). Not counted against the issue.'
+  const ended = await pool.query(
+    `WITH before AS (
+       SELECT issue, finished_at IS NULL AS running, conversation_id,
+              coalesce(review_state, '') AS was
+         FROM queen_dispatch WHERE issue = $1 FOR UPDATE
+     )
+     UPDATE queen_dispatch d
+        SET review_state = 'cancelled',
+            judged_note = CASE WHEN b.was = 'cancelled' THEN d.judged_note
+                               ELSE $2 || coalesce(E'\\n' || d.judged_note, '')
+                          END,
+            finished_at = coalesce(d.finished_at, now()),
+            outcome = coalesce(d.outcome, 'cancelled')
+       FROM before b
+      WHERE d.issue = b.issue AND b.was <> 'accept'
+      RETURNING b.running, b.conversation_id, b.was`,
+    [issue, note],
+  )
+  if (!ended.rowCount) {
+    const exists = await pool.query(
+      'SELECT review_state FROM queen_dispatch WHERE issue = $1',
+      [issue],
+    )
+    await clearAssigns(pool, [issue])
+    if (!exists.rowCount) return { status: 'none' }
+    return { status: 'accepted' }
+  }
+  const row = ended.rows[0]
+  const fenced = await pool.query(
+    `UPDATE queen_task_lease
+        SET fence = fence + 1, expires_at = now() - make_interval(secs => 1)
+      WHERE issue = $1
+      RETURNING fence`,
+    [issue],
+  )
+  await clearAssigns(pool, [issue])
+  logger.info('Queen task cancelled', {
+    issue,
+    by,
+    was: row.was || null,
+    wasRunning: Boolean(row.running),
+  })
+  return {
+    status: 'cancelled',
+    wasRunning: Boolean(row.running),
+    conversationId: row.conversation_id ? String(row.conversation_id) : null,
+    fence: fenced.rowCount ? Number(fenced.rows[0].fence) : null,
+  }
 }
 
 /** The event names this card knows, for callers that publish by name. */

@@ -39,7 +39,7 @@ import type { Pool } from 'pg'
 import { createQueenPool } from '../../lib/db/queen-pool'
 import { logger } from '../../lib/logger'
 import { bundleOfBranch } from '../routes/queen-export'
-import { runClaimedBee, salvageDispatch } from './queen-dispatch'
+import { abortBeeHere, runClaimedBee, salvageDispatch } from './queen-dispatch'
 import { queenLeaseDatabaseUrl } from './queen-lease'
 
 export interface BeeOrder {
@@ -226,6 +226,17 @@ export async function runOneOrder(
     const outcome = await runClaimedBee(pool, order)
     if (!outcome.started) return order
     await waitForEnding(pool, order, runner)
+    // The row stopped matching. When this runner's own drain wrote the ending
+    // the turn is already over and this does nothing; when the Queen ended the
+    // row instead - a cancel (control card section 3), a reap, a re-dispatch -
+    // the turn is no longer the table's business and is stopped here, the only
+    // process that can close its stream.
+    if (abortBeeHere(order.issue, order.conversationId)) {
+      logger.info('Runner interrupted a bee the Queen ended', {
+        runner,
+        issue: order.issue,
+      })
+    }
     await storeBundle(pool, order.issue, runner).catch((error) => {
       logger.warn('Runner could not store the bundle of a finished bee', {
         issue: order.issue,
