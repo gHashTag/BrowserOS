@@ -125,6 +125,17 @@ class FakeGithub implements AppGithub {
   nextId = 1000
   /** Throw after the comment is created, before the answer returns. */
   dieAfterPost = false
+  /** The changed files of every pull request, and their text at the head. */
+  files: Array<Record<string, unknown>> = [
+    {
+      filename: 'src/a.ts',
+      status: 'modified',
+      additions: 3,
+      deletions: 1,
+      patch: '@@ -1 +1,3 @@\n-old\n+new\n+more\n+lines',
+    },
+  ]
+  contents = new Map<string, string>()
 
   async installations() {
     return [{ id: INST, account: 'gHashTag' }]
@@ -173,19 +184,14 @@ class FakeGithub implements AppGithub {
         : { status: 404, body: null }
     }
     m = p.match(/^\/repos\/([^/]+\/[^/]+)\/pulls\/(\d+)\/files$/)
-    if (m)
-      return {
-        status: 200,
-        body: [
-          {
-            filename: 'src/a.ts',
-            status: 'modified',
-            additions: 3,
-            deletions: 1,
-            patch: '@@ -1 +1,3 @@\n-old\n+new\n+more\n+lines',
-          },
-        ],
-      }
+    if (m) return { status: 200, body: this.files }
+    m = p.match(/^\/repos\/([^/]+\/[^/]+)\/contents\/(.+)$/)
+    if (m && method === 'GET') {
+      const text = this.contents.get(decodeURIComponent(m[2]))
+      return text === undefined
+        ? { status: 404, body: '' }
+        : { status: 200, body: text }
+    }
     m = p.match(/^\/repos\/([^/]+\/[^/]+)\/issues\/comments$/)
     if (m && method === 'GET') {
       const since = Date.parse(u.searchParams.get('since') ?? '1970-01-01')
@@ -695,6 +701,96 @@ describe('the t27-bees app against Postgres', () => {
       pr: 1,
       state: 'posted',
     })
+  })
+
+  it('posts what the t27 compiler said as a checked fact, apart from the model', async () => {
+    if (!pool) return expect(offlineRequested()).toBe(true)
+    const w = world()
+    await install([{ full_name: REPO }])
+    w.github.pulls.set(REPO, [
+      {
+        number: 9,
+        head: H1,
+        draft: false,
+        state: 'open',
+        updated_at: new Date().toISOString(),
+        user: { login: 'alice', type: 'User' },
+      },
+    ])
+    w.github.files = [
+      {
+        filename: 'specs/good.t27',
+        status: 'added',
+        additions: 4,
+        deletions: 0,
+        patch: '+module M;',
+      },
+      {
+        filename: 'specs/bad.t27',
+        status: 'modified',
+        additions: 1,
+        deletions: 1,
+        patch: '+x',
+      },
+      {
+        filename: 'specs/gone.t27',
+        status: 'removed',
+        additions: 0,
+        deletions: 3,
+        patch: '-y',
+      },
+      {
+        filename: 'docs/notes.t27.md',
+        status: 'added',
+        additions: 1,
+        deletions: 0,
+        patch: '+z',
+      },
+    ]
+    w.github.contents.set('specs/good.t27', 'module M;\n')
+    w.github.contents.set('specs/bad.t27', 'module M;\npub fn f( {\n')
+    const asked: string[] = []
+    const messages: string[] = []
+    const llm = w.deps.llm
+    const deps = {
+      ...w.deps,
+      llm: async (s: string, m: string) => {
+        messages.push(m)
+        return llm(s, m)
+      },
+      checkT27: async (path: string, text: string) => {
+        asked.push(path)
+        const broken = text.includes('f( {')
+        return {
+          path,
+          verdict: broken ? 1 : 0,
+          parses: !broken,
+          typechecks: !broken,
+          errors: broken ? 1 : 0,
+          discarded: 0,
+          first: broken ? "parse error in fn 'f' near line 2" : '',
+        }
+      },
+    }
+    await handleAppEvent(pool, push(9, H1), env)
+    await advanceApp(pool, deps)
+    // only the .t27 files still in the head: not the removed one, not the .t27.md
+    expect(asked).toEqual(['specs/good.t27', 'specs/bad.t27'])
+    const body = w.github.appCommentsOn(REPO, 9)[0].body
+    const checked = body.indexOf('### Checked by the t27 compiler')
+    const opined = body.indexOf('### Read by the model')
+    expect(checked).toBeGreaterThan(0)
+    expect(opined).toBeGreaterThan(checked)
+    expect(body).toContain('- `specs/good.t27`: parses and typechecks.')
+    expect(body).toContain(
+      "- `specs/bad.t27`: **does not parse**: `parse error in fn 'f' near line 2`",
+    )
+    expect(body).toContain(
+      'A pass means the file is well formed, not that it is right.',
+    )
+    // the model is told the facts, and told not to restate or contradict them
+    expect(messages[0]).toContain('measured facts')
+    expect(messages[0]).toContain('specs/bad.t27')
   })
 
   it('is dormant, and says why, without the app key', async () => {

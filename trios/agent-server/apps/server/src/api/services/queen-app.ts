@@ -67,9 +67,16 @@ import {
   DEPTH_SUMMARY,
   GE_PR_PUSHED,
   GE_UNINSTALLED,
+  MAX_COMPILER_CHECKS,
   MAX_REVIEW_LINES,
   REVIEW_MARKER,
 } from './queen-app.gen'
+import {
+  type CheckT27,
+  type CompilerCheck,
+  checkT27WithNativeCompiler,
+  compilerLine,
+} from './queen-app-compiler'
 import {
   type AppGithub,
   type AppRepo,
@@ -81,6 +88,7 @@ import {
   appReaction,
   commandOf,
   freeReviewsLeft,
+  isT27Path,
   reviewDepth,
   reviewWanted,
 } from './queen-app-logic'
@@ -531,6 +539,8 @@ export interface AppDeps {
   github: AppGithub | null
   llm: AppLlm
   env: NodeJS.ProcessEnv
+  /** Measures a changed .t27 file (queen-app-compiler.ts). Absent: not measured. */
+  checkT27?: CheckT27
 }
 
 export function defaultAppDeps(env: NodeJS.ProcessEnv = process.env): AppDeps {
@@ -538,6 +548,7 @@ export function defaultAppDeps(env: NodeJS.ProcessEnv = process.env): AppDeps {
   return {
     github: credentials ? createAppGithub(credentials) : null,
     env,
+    checkT27: checkT27WithNativeCompiler,
     llm: async (system, message) => {
       const lane = reviewLaneCandidates([])[0]
       if (!lane)
@@ -1006,7 +1017,7 @@ async function writeReviews(pool: Pool, deps: AppDeps): Promise<number> {
         const mine = await appComments(github, inst, row.repo, row.pr)
         return mine.find((c) => c.body.includes(`<!-- ${key} -->`))?.url ?? null
       },
-      () => composeReview(github, inst, row, p, deps.llm),
+      () => composeReview(github, inst, row, p, deps),
       async (text) => {
         const mine = await appComments(github, inst, row.repo, row.pr)
         const prefix = `<!-- ${REVIEW_MARKER}${row.repo}#${row.pr}@`
@@ -1080,8 +1091,9 @@ async function composeReview(
   inst: number,
   row: ReviewRow,
   pull: Record<string, unknown>,
-  llm: AppLlm,
+  deps: AppDeps,
 ): Promise<string> {
+  const llm = deps.llm
   const files: Array<Record<string, unknown>> = []
   for (let page = 1; page <= 3; page += 1) {
     const r = await github.call(
@@ -1116,6 +1128,11 @@ async function composeReview(
       patch += piece
     }
   }
+  const checks = deps.checkT27
+    ? await compilerChecks(github, inst, row, files, deps.checkT27)
+    : { checked: [] as CompilerCheck[], skipped: 0 }
+  const checkedLines = checks.checked.map(compilerLine)
+
   const message = [
     `Repository: ${row.repo}`,
     `Pull request #${row.pr}: ${String(pull.title ?? '')}`,
@@ -1126,6 +1143,13 @@ async function composeReview(
     `Files (${files.length}, +${added} -${deleted}):`,
     listing.slice(0, 8000),
     '',
+    ...(checkedLines.length > 0
+      ? [
+          'What the t27 compiler said about the changed .t27 files at this head. These are measured facts, already posted above your text: do not repeat them and do not contradict them.',
+          ...checkedLines,
+          '',
+        ]
+      : []),
     depth === DEPTH_SUMMARY
       ? `The diff is not shown: ${row.summary_only ? 'a summary was asked for' : `it is larger than ${MAX_REVIEW_LINES} changed lines`}. Summarize from the title, description and file list, and claim no problem in code you were not shown.`
       : `Diff${cut ? ' (cut: the rest was not shown, say so if it matters)' : ''}:\n${patch}`,
@@ -1146,6 +1170,22 @@ async function composeReview(
   return [
     '## Summary by t27-bees',
     '',
+    ...(checkedLines.length > 0
+      ? [
+          '### Checked by the t27 compiler',
+          `<sub>t27c parse, parse-complete and typecheck on each changed .t27 file at \`${row.head_sha.slice(0, 7)}\`. Nothing was generated, built or run. A pass means the file is well formed, not that it is right.</sub>`,
+          '',
+          ...checkedLines,
+          ...(checks.skipped > 0
+            ? [
+                `- ${checks.skipped} more .t27 file(s) were not checked (at most ${MAX_COMPILER_CHECKS} per review).`,
+              ]
+            : []),
+          '',
+          '### Read by the model',
+          '',
+        ]
+      : []),
     sanitizeModelText(answer.text),
     '',
     '---',
@@ -1274,5 +1314,45 @@ export async function appStatus(
       note: r.note ?? null,
       at: r.updated_at,
     })),
+  }
+}
+
+/** The most a .t27 file may weigh to be checked; GitHub serves larger ones too. */
+export const APP_CHECK_MAX_BYTES = 300_000
+
+/**
+ * Run the changed .t27 files (is_t27_path, at most MAX_COMPILER_CHECKS) through
+ * the compiler at the head. A file the API cannot serve, or one too large, is
+ * left out rather than reported: unmeasured is never a verdict.
+ */
+async function compilerChecks(
+  github: AppGithub,
+  inst: number,
+  row: ReviewRow,
+  files: Array<Record<string, unknown>>,
+  check: CheckT27,
+): Promise<{ checked: CompilerCheck[]; skipped: number }> {
+  const candidates = files
+    .filter((f) => f.status !== 'removed')
+    .map((f) => String(f.filename ?? ''))
+    .filter((name) => name !== '' && isT27Path(name))
+  const checked: CompilerCheck[] = []
+  for (const name of candidates.slice(0, MAX_COMPILER_CHECKS)) {
+    const path = name.split('/').map(encodeURIComponent).join('/')
+    const raw = await github.call(
+      inst,
+      'GET',
+      `/repos/${row.repo}/contents/${path}?ref=${row.head_sha}`,
+      undefined,
+      'application/vnd.github.raw',
+    )
+    if (raw.status !== 200 || typeof raw.body !== 'string') continue
+    if (raw.body.length > APP_CHECK_MAX_BYTES) continue
+    const result = await check(name, raw.body)
+    if (result) checked.push(result)
+  }
+  return {
+    checked,
+    skipped: Math.max(0, candidates.length - MAX_COMPILER_CHECKS),
   }
 }

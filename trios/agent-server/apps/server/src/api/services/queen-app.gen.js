@@ -51,7 +51,15 @@ export const APP_RECONCILE_SECONDS = 600;
 export const APP_POLL_SECONDS = 180;
 export const APP_REVIEWS_PER_ROUND = 2;
 export const REVIEW_MARKER = "t27-bees:review:";
+export const V_CLEAN = 0;
+export const V_BROKEN = 1;
+export const MAX_COMPILER_CHECKS = 10;
+export const T27_SUFFIX = ".t27$";
+// t27c gen-js: fn compiler_verdict was not emitted -- this backend lowers declarations, not bodies.
+// t27c gen-js: fn is_t27_path was not emitted -- this backend lowers declarations, not bodies.
 export const COMMAND_HELP = ["review -- review this pull request's head again, even if it was reviewed", "summary -- write only the summary", "help -- list these commands", "pause -- stop reviewing this pull request", "resume -- review it again from the next push"];
+// t27c gen-js: a TestBlock was not emitted -- it is checked by the compiler, not by the artifact.
+// t27c gen-js: a TestBlock was not emitted -- it is checked by the compiler, not by the artifact.
 // t27c gen-js: a TestBlock was not emitted -- it is checked by the compiler, not by the artifact.
 // t27c gen-js: a TestBlock was not emitted -- it is checked by the compiler, not by the artifact.
 // t27c gen-js: a TestBlock was not emitted -- it is checked by the compiler, not by the artifact.
@@ -68,7 +76,7 @@ export const COMMAND_HELP = ["review -- review this pull request's head again, e
 
 // Declaration order, which the spec's own laws depend on.
 export const __STRUCT_ORDER__ = [];
-export const __DECL_ORDER__ = ["GE_INSTALLED", "GE_UNINSTALLED", "GE_REPOS_ADDED", "GE_REPOS_REMOVED", "GE_PR_OPENED", "GE_PR_PUSHED", "GE_PR_READY", "GE_PR_CLOSED", "GE_COMMENT", "GE_OTHER", "APP_EVENTS", "EVENT_PAIRS", "EVENT_CODES", "AR_IGNORE", "AR_REGISTER", "AR_UNREGISTER", "AR_REVIEW", "AR_FORGET", "AR_COMMAND", "AR_QUOTA", "FREE_REVIEWS_PUBLIC", "FREE_REVIEWS_PRIVATE", "MAX_REVIEW_LINES", "DEPTH_FULL", "DEPTH_SUMMARY", "C_NONE", "C_REVIEW", "C_SUMMARY", "C_HELP", "C_PAUSE", "C_RESUME", "MENTION", "COMMAND_WORDS", "LIST_END", "LIST_SEP", "APP_RECONCILE_SECONDS", "APP_POLL_SECONDS", "APP_REVIEWS_PER_ROUND", "REVIEW_MARKER", "COMMAND_HELP"];
+export const __DECL_ORDER__ = ["GE_INSTALLED", "GE_UNINSTALLED", "GE_REPOS_ADDED", "GE_REPOS_REMOVED", "GE_PR_OPENED", "GE_PR_PUSHED", "GE_PR_READY", "GE_PR_CLOSED", "GE_COMMENT", "GE_OTHER", "APP_EVENTS", "EVENT_PAIRS", "EVENT_CODES", "AR_IGNORE", "AR_REGISTER", "AR_UNREGISTER", "AR_REVIEW", "AR_FORGET", "AR_COMMAND", "AR_QUOTA", "FREE_REVIEWS_PUBLIC", "FREE_REVIEWS_PRIVATE", "MAX_REVIEW_LINES", "DEPTH_FULL", "DEPTH_SUMMARY", "C_NONE", "C_REVIEW", "C_SUMMARY", "C_HELP", "C_PAUSE", "C_RESUME", "MENTION", "COMMAND_WORDS", "LIST_END", "LIST_SEP", "APP_RECONCILE_SECONDS", "APP_POLL_SECONDS", "APP_REVIEWS_PER_ROUND", "REVIEW_MARKER", "V_CLEAN", "V_BROKEN", "MAX_COMPILER_CHECKS", "T27_SUFFIX", "COMMAND_HELP"];
 
 // What this spec holds and this backend did not print. Empty is the whole
 // story most of the time; an entry here is a promise the artifact does not
