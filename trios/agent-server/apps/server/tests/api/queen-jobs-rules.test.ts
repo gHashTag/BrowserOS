@@ -158,3 +158,52 @@ describe('the release card, read by the compiler wasm', () => {
     expect(cargoVersion('[package]\nname = "t27c"\n')).toBeNull()
   })
 })
+
+describe('a job is asked for in an issue', () => {
+  const body = (mode?: string) =>
+    [
+      'Release t27c 0.6.0 through the swarm.',
+      '',
+      '## Job',
+      '',
+      'card: release-t27c',
+      'version: 0.6.0',
+      ...(mode ? [`mode: ${mode}`] : []),
+      '',
+      '## Notes',
+      'version: 9.9.9',
+    ].join('\n')
+
+  it('reads the card and the version, and rehearses unless told to publish', async () => {
+    const { jobRequestOf } = await import('../../src/api/services/queen-jobs')
+    const asked = { body: body(), labels: ['queen-job'], author: 'gHashTag' }
+    expect(jobRequestOf(asked, 'gHashTag')).toEqual({
+      card: 'release-t27c',
+      params: { version: '0.6.0' },
+      rehearsal: true,
+    })
+    expect(
+      jobRequestOf({ ...asked, body: body('publish') }, 'gHashTag')?.rehearsal,
+    ).toBe(false)
+    expect(
+      jobRequestOf({ ...asked, body: body('Publish') }, 'gHashTag')?.rehearsal,
+    ).toBe(true)
+  })
+
+  it('ignores an unlabelled issue, a stranger, and an unknown card', async () => {
+    const { jobRequestOf } = await import('../../src/api/services/queen-jobs')
+    const asked = { body: body(), labels: ['queen-job'], author: 'gHashTag' }
+    expect(jobRequestOf({ ...asked, labels: [] }, 'gHashTag')).toBeNull()
+    expect(jobRequestOf({ ...asked, author: 'someone' }, 'gHashTag')).toBeNull()
+    expect(jobRequestOf({ ...asked, author: undefined }, 'gHashTag')).toBeNull()
+    expect(
+      jobRequestOf(
+        { ...asked, body: body().replace('release-t27c', 'drop-db') },
+        'gHashTag',
+      ),
+    ).toBeNull()
+    expect(
+      jobRequestOf({ ...asked, body: 'card: release-t27c' }, 'gHashTag'),
+    ).toBeNull()
+  })
+})

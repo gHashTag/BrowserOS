@@ -22,7 +22,9 @@ import {
   cancelJob,
   getJob,
   type JobIo,
+  listJobs,
   startJob,
+  startJobsFromIssues,
 } from '../../src/api/services/queen-jobs'
 import {
   J_CANCELLED,
@@ -300,6 +302,25 @@ describe('a release the Queen runs, with no session open', () => {
       (await startJob(pool, 'release-t27c', { version: '0.6.0' }, true, 'test'))
         .ok,
     ).toBe(true)
+  })
+
+  it('starts one job per asking issue, and only the owner asks', async () => {
+    if (!pool) return expect(offlineRequested()).toBe(true)
+    const body = '## Job\n\ncard: release-t27c\nversion: 0.6.0\n'
+    const issues = [
+      { number: 9001, body, labels: ['queen-job'], author: 'gHashTag' },
+      { number: 9002, body, labels: ['queen-job'], author: 'stranger' },
+      { number: 9003, body, labels: [], author: 'gHashTag' },
+    ]
+    const first = await startJobsFromIssues(pool, issues, 'gHashTag')
+    expect(first.length).toBe(1)
+    // the next round reads the same issue again and starts nothing
+    expect(await startJobsFromIssues(pool, issues, 'gHashTag')).toEqual([])
+    const jobs = await listJobs(pool)
+    expect(jobs.length).toBe(1)
+    expect(jobs[0].params.issue).toBe('9001')
+    expect(jobs[0].rehearsal).toBe(true)
+    expect(jobs[0].started_by).toBe('issue #9001')
   })
 
   it('refuses a start without its parameter', async () => {

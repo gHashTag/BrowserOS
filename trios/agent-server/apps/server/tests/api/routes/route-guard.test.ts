@@ -118,10 +118,13 @@ describe('route-guard audit over src/api/server.ts', () => {
     // starts or cancels a multi-step job the Queen drives (specs/queen/jobs.t27,
     // t27#7676). It WRITES, and a job can publish a release, so it is a guarded
     // wrapper: `guardedSubAppCount` went 17 to 18.
-    expect(report.totalMounts).toBe(53)
+    // RE-MEASURED 2026-10-08 again: 53 became 54 with /queen/public-jobs, an
+    // explicit publicReadCorsMiddleware() on the jobs' card, version and step
+    // sentences (no credential, no secret). Public-read went 10 to 11.
+    expect(report.totalMounts).toBe(54)
     expect(report.prefixGuardCount).toBe(18)
     expect(report.guardedSubAppCount).toBe(18)
-    expect(report.publicReadCount).toBe(10)
+    expect(report.publicReadCount).toBe(11)
   })
 
   it('reports zero unguarded mounts once the reasoned allowlist is applied', () => {
@@ -139,7 +142,7 @@ describe('route-guard audit over src/api/server.ts', () => {
     )
   })
 
-  it('splits the thirty /queen mounts into 10 public-read, 11 wrapper-guarded and 9 allowlisted', () => {
+  it('splits the thirty-one /queen mounts into 11 public-read, 11 wrapper-guarded and 9 allowlisted', () => {
     const queenMounts = classifyMounts(source).filter(
       (mount) => mount.path === '/queen' || mount.path.startsWith('/queen/'),
     )
@@ -187,7 +190,9 @@ describe('route-guard audit over src/api/server.ts', () => {
     // sub-app because it writes and can stop a running bee.
     // RE-MEASURED 2026-10-08: twenty-nine became thirty. The eleventh wrapper
     // is /queen/jobs, guarded inside its own sub-app because it writes.
-    expect(queenMounts.length).toBe(30)
+    // RE-MEASURED 2026-10-08 again: thirty became thirty-one. The eleventh
+    // public-read is /queen/public-jobs.
+    expect(queenMounts.length).toBe(31)
 
     const counts: Record<string, number> = {
       'public-read': 0,
@@ -201,7 +206,7 @@ describe('route-guard audit over src/api/server.ts', () => {
     // The four buckets must account for every mount with the exact expected
     // split; anything unaccounted for breaks one of these numbers.
     expect(counts).toEqual({
-      'public-read': 10,
+      'public-read': 11,
       'prefix-guard': 0,
       wrapper: 11,
       unguarded: 9,

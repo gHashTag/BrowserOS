@@ -196,6 +196,8 @@ export async function startJob(
   params: Record<string, unknown>,
   rehearsal: boolean,
   by: string,
+  /** The issue that asked for the job, kept in its params (one job per issue). */
+  fromIssue?: number,
 ): Promise<StartResult> {
   let card: JobCard
   try {
@@ -215,6 +217,7 @@ export async function startJob(
     }
     clean[p] = v
   }
+  if (fromIssue !== undefined) clean.issue = String(fromIssue)
   // The unique index on (card) WHERE state = running is job_may_start in the
   // database: two starts that race cannot both insert.
   const inserted = await pool.query(
@@ -238,6 +241,86 @@ export async function startJob(
     by,
   })
   return { ok: true, job: inserted.rows[0] as JobRow }
+}
+
+/** The label that marks an issue as a job request. Only a collaborator can set a label. */
+export const JOB_LABEL = 'queen-job'
+
+export interface JobRequest {
+  card: string
+  params: Record<string, string>
+  rehearsal: boolean
+}
+
+/**
+ * The job an issue asks for, or null. An issue asks when it carries the
+ * JOB_LABEL, its author is the repository's owner, and its body has a
+ * `## Job` section of `key: value` lines naming a card. A rehearsal unless the
+ * section says `mode: publish` in so many words: the default is the one that
+ * cannot publish.
+ */
+export function jobRequestOf(
+  issue: { body: string; labels?: string[]; author?: string },
+  owner: string,
+): JobRequest | null {
+  if (!(issue.labels ?? []).includes(JOB_LABEL)) return null
+  if (!issue.author || issue.author.toLowerCase() !== owner.toLowerCase())
+    return null
+  const lines = issue.body.split(/\r?\n/)
+  const start = lines.findIndex((l) => /^##\s+Job\s*$/.test(l.trim()))
+  if (start < 0) return null
+  const fields: Record<string, string> = {}
+  for (const line of lines.slice(start + 1)) {
+    if (/^#{1,6}\s/.test(line.trim())) break
+    const m = line.match(/^\s*[-*]?\s*([a-z_]+)\s*:\s*(\S+)\s*$/i)
+    if (m) fields[m[1].toLowerCase()] = m[2]
+  }
+  const card = fields.card
+  if (!card || !(card in JOB_CARDS)) return null
+  const { card: _card, mode, ...params } = fields
+  return { card, params, rehearsal: mode !== 'publish' }
+}
+
+/**
+ * Start the jobs that open issues ask for, once per issue. Called by the round
+ * with the issue list it already read, so a job request costs no extra GitHub
+ * read. Never throws; returns the job ids it started.
+ */
+export async function startJobsFromIssues(
+  pool: Pool,
+  issues: Array<{
+    number: number
+    body: string
+    labels?: string[]
+    author?: string
+  }>,
+  owner: string,
+): Promise<number[]> {
+  const started: number[] = []
+  for (const issue of issues) {
+    const request = jobRequestOf(issue, owner)
+    if (!request) continue
+    const seen = await pool.query(
+      `SELECT 1 FROM queen_job WHERE params->>'issue' = $1 LIMIT 1`,
+      [String(issue.number)],
+    )
+    if ((seen.rowCount ?? 0) > 0) continue
+    const result = await startJob(
+      pool,
+      request.card,
+      request.params,
+      request.rehearsal,
+      `issue #${issue.number}`,
+      issue.number,
+    )
+    if (result.ok) started.push(result.job.id)
+    else
+      logger.info('Queen did not start a job an issue asked for', {
+        issue: issue.number,
+        why: result.error,
+      })
+  }
+  return started
 }
 
 export async function getJob(pool: Pool, id: number): Promise<JobRow | null> {
