@@ -46,11 +46,21 @@ import { outstandingEscalations } from '../routes/queen-needs-you'
 import { githubCiDeps, takeBackRefusedAcceptances } from './queen-ci-verdict'
 import { contributorRuntime } from './queen-contributor-keys'
 import {
+  clearAssigns,
   ensureControlTables,
   loadControlSpec,
+  pendingAssigns,
   reclaimableTaskLeases,
   renewRunningLeases,
+  setControlEventListener,
 } from './queen-control'
+import {
+  EV_TASK_CREATED,
+  EV_TASK_ENDED,
+  eventApplies,
+  manualFirst,
+  wakesQueen,
+} from './queen-control-rules'
 import {
   type CriterionRun,
   criteriaCounts,
@@ -1899,6 +1909,13 @@ export async function runRound(
   )
   if (closed.size > 0) candidates = candidates.filter((n) => !closed.has(n))
 
+  // next_source (control card section 3): a person's assignments go first, in
+  // the order they were asked for. Still handed to queend like any candidate,
+  // so an assigned issue with no boundary, or whose files are held, is skipped
+  // with the same reason an automatic one would be, and stays assigned.
+  const assigned = await pendingAssigns(pool).catch(() => [] as number[])
+  if (assigned.length > 0) candidates = manualFirst(candidates, assigned)
+
   // Named, because RING-00 is asked about this exact array a few lines below
   // and "the same number" has to be the same number, not a second reading of
   // the same idea.
@@ -2129,6 +2146,17 @@ export async function runRound(
       started: dispatchesThatStarted(started).length,
     })
   }
+
+  // An assignment is served once a bee started on it; the rest keep waiting.
+  const served = started
+    .filter((d) => d.started && assigned.includes(d.issue))
+    .map((d) => d.issue)
+  await clearAssigns(pool, served).catch((error) => {
+    logger.warn('Queen could not clear served assignments', {
+      served,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  })
 
   await report(pool, reviewed, started, choice, candidates.length)
   // A round every one of whose dispatches was refused started nothing, so it
@@ -4686,6 +4714,44 @@ export function refillOnBeeCompletion(request: (why: string) => void): void {
   setDurableCloseListener((issue) => request(`bee #${issue} finished`))
 }
 
+/**
+ * Connect the control event log to the round gate (specs/queen/control.t27
+ * section 1: events wake the Queen, the tick only reconciles).
+ *
+ * Every event this process records whose kind wakes the Queen asks for a
+ * round at once (wake_delay_seconds is 0 for a waking kind); a heartbeat
+ * wakes nobody. A sequence number at or below the last one applied on its
+ * stream is a redelivery and changes nothing (event_applies). Wakes that land
+ * while a round runs coalesce into ONE follow-up - the gate's own flag, which
+ * is followup_reactions.
+ *
+ * TWO KINDS ARRIVE ALREADY WOKEN, and are not woken twice. `task.ended` is
+ * published by the durable close, whose own listener (refillOnBeeCompletion)
+ * already asks for the round - and asks only once the row reads finished. And
+ * `task.created` is published by the round itself, which has just offered
+ * every free slot. A second request for either would not be lost but doubled:
+ * the gate would run one more full round, GitHub reads included, for every bee
+ * that started or ended. reaction_of still names both as waking; this is only
+ * which path delivers the wake.
+ *
+ * Events recorded by another process (a runner) are in the log and are read by
+ * the next round, which the durable close and the tick already guarantee.
+ *
+ * EXPORTED FOR THE SUITE, like refillOnBeeCompletion: the wiring is the feature.
+ */
+export function wakeOnControlEvents(
+  request: (why: string) => void,
+  alreadyWoken: ReadonlySet<number> = new Set([EV_TASK_CREATED, EV_TASK_ENDED]),
+): void {
+  const lastApplied = new Map<string, number>()
+  setControlEventListener(({ stream, name, kind, seq }) => {
+    if (!eventApplies(lastApplied.get(stream) ?? 0, seq)) return
+    lastApplied.set(stream, seq)
+    if (!wakesQueen(kind) || alreadyWoken.has(kind)) return
+    request(`event ${name} #${seq}`)
+  })
+}
+
 let timer: ReturnType<typeof setInterval> | undefined
 
 /**
@@ -4766,6 +4832,7 @@ export function startQueenTick(): void {
   // own, so this adds no scheduler, only a queue of at most one.
   const gate = createRoundGate(round)
   refillOnBeeCompletion(gate.request)
+  wakeOnControlEvents(gate.request)
 
   gate.request('service starting')
   timer = setInterval(() => gate.request('periodic tick'), interval * 1000)

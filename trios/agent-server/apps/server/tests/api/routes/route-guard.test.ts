@@ -109,9 +109,14 @@ describe('route-guard audit over src/api/server.ts', () => {
     // RE-MEASURED with the runner cabinet merged in: 49 became 51.
     // /queen/me/runners and /queen/runner are allowlisted with their
     // own-bearer reasons; no other count moved.
-    expect(report.totalMounts).toBe(51)
+    // RE-MEASURED 2026-10-07: 51 became 52 with /queen/tasks, where a person
+    // cancels or assigns a task (specs/queen/control.t27 section 3,
+    // gHashTag/t27#6657). It WRITES and can interrupt a running bee, so it is
+    // a guarded wrapper, and `guardedSubAppCount` went 16 to 17. Public-read
+    // and prefix counts unchanged.
+    expect(report.totalMounts).toBe(52)
     expect(report.prefixGuardCount).toBe(18)
-    expect(report.guardedSubAppCount).toBe(16)
+    expect(report.guardedSubAppCount).toBe(17)
     expect(report.publicReadCount).toBe(10)
   })
 
@@ -130,7 +135,7 @@ describe('route-guard audit over src/api/server.ts', () => {
     )
   })
 
-  it('splits the twenty-eight /queen mounts into 10 public-read, 9 wrapper-guarded and 9 allowlisted', () => {
+  it('splits the twenty-nine /queen mounts into 10 public-read, 10 wrapper-guarded and 9 allowlisted', () => {
     const queenMounts = classifyMounts(source).filter(
       (mount) => mount.path === '/queen' || mount.path.startsWith('/queen/'),
     )
@@ -173,7 +178,10 @@ describe('route-guard audit over src/api/server.ts', () => {
     // twenty-eight. The two new allowlisted mounts are not shells:
     // /queen/me/runners and /queen/runner answer only a bearer they verify
     // themselves (see the reasons).
-    expect(queenMounts.length).toBe(28)
+    // RE-MEASURED 2026-10-07: twenty-eight became twenty-nine. The tenth
+    // wrapper is /queen/tasks (cancel and assign), guarded inside its own
+    // sub-app because it writes and can stop a running bee.
+    expect(queenMounts.length).toBe(29)
 
     const counts: Record<string, number> = {
       'public-read': 0,
@@ -189,7 +197,7 @@ describe('route-guard audit over src/api/server.ts', () => {
     expect(counts).toEqual({
       'public-read': 10,
       'prefix-guard': 0,
-      wrapper: 9,
+      wrapper: 10,
       unguarded: 9,
     })
 

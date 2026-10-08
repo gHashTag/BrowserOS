@@ -2460,12 +2460,25 @@ export async function salvageDispatch(
  */
 const beesRunningHere = new Map<number, string>()
 
+/**
+ * How to stop each of those turns: close the connection its stream arrives on.
+ * `/chat` runs the turn under the request's own signal, so a closed connection
+ * IS a cancelled turn - the same road a person's closed tab takes. Kept beside
+ * `beesRunningHere`, not in it, so every reader of that map is unchanged.
+ */
+const beeAbortsHere = new Map<
+  number,
+  { conversationId: string; abort: () => void }
+>()
+
 /** This process has started a turn on this issue and not yet closed it. */
 export function markBeeRunningHere(
   issue: number,
   conversationId: string,
+  abort?: () => void,
 ): void {
   beesRunningHere.set(issue, conversationId)
+  if (abort) beeAbortsHere.set(issue, { conversationId, abort })
 }
 
 /** That turn is over. Only the turn that set the entry may clear it. */
@@ -2475,6 +2488,28 @@ export function clearBeeRunningHere(
 ): void {
   if (beesRunningHere.get(issue) === conversationId)
     beesRunningHere.delete(issue)
+  if (beeAbortsHere.get(issue)?.conversationId === conversationId)
+    beeAbortsHere.delete(issue)
+}
+
+/**
+ * Interrupt the turn this process is streaming on an issue (control card
+ * section 3: "a running one is interrupted"). With a conversation, only that
+ * attempt is stopped, so a late cancel cannot reach the attempt that replaced
+ * it. Returns whether a turn was stopped here; the row's ending is the
+ * caller's, and `closeDispatch` still runs when the stream breaks.
+ */
+export function abortBeeHere(issue: number, conversationId?: string): boolean {
+  const entry = beeAbortsHere.get(issue)
+  if (!entry) return false
+  if (conversationId && entry.conversationId !== conversationId) return false
+  beeAbortsHere.delete(issue)
+  try {
+    entry.abort()
+  } catch {
+    // Aborting a controller whose fetch already settled is harmless.
+  }
+  return true
 }
 
 /** Whether a bee this process started is still streaming on this issue. */
@@ -3604,7 +3639,13 @@ async function startTurn(
   workingDirectory: string,
   chosen: WorkerProvider,
   ownedPaths: string[],
-): Promise<{ ok: boolean; detail: string; beginDrain?: () => void }> {
+): Promise<{
+  ok: boolean
+  detail: string
+  beginDrain?: () => void
+  /** Close the stream, which cancels the turn (control card section 3). */
+  abort?: () => void
+}> {
   const token = process.env.TRIOS_API_TOKEN
   if (!token)
     return {
@@ -3612,9 +3653,13 @@ async function startTurn(
       detail: 'this server has no TRIOS_API_TOKEN to call itself with',
     }
   const port = process.env.PORT || '8080'
+  // The only handle on a running turn: `/chat` runs it under the request's
+  // signal, so aborting this request is what interrupts the bee.
+  const controller = new AbortController()
 
   try {
     const response = await fetch(`http://127.0.0.1:${port}/chat`, {
+      signal: controller.signal,
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -3680,6 +3725,7 @@ async function startTurn(
       // of the stream can name whose quota it was (#1301).
       beginDrain: () =>
         void drain(pool, response, conversationId, issue, chosen.provider),
+      abort: () => controller.abort('cancelled by the Queen'),
     }
   } catch (error) {
     return {
@@ -5000,7 +5046,7 @@ async function cutAndStart(
       // a row, not a corpse. The stall sweep reads this before it salvages, so
       // a long turn's worktree is never committed from under it.
       // `closeDispatch` clears it.
-      if (turn.ok) markBeeRunningHere(issue, conversationId)
+      if (turn.ok) markBeeRunningHere(issue, conversationId, turn.abort)
       // ONLY NOW may the stream be read. Everything that reads the bee's output
       // eventually writes to the caller's row, and a writer that can outrun the
       // row's creation is a writer that silently updates nothing.

@@ -51,6 +51,15 @@ CREATE TABLE IF NOT EXISTS queen_event_log (
   recorded_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (stream, seq)
 );
+
+-- A person's assignments, waiting for a round (control card section 3,
+-- next_source: manual before automatic). One row per issue; the round removes
+-- it once a bee starts on the issue, and a cancel removes it too.
+CREATE TABLE IF NOT EXISTS queen_manual_assign (
+  issue int PRIMARY KEY,
+  requested_by text NOT NULL,
+  requested_at timestamptz NOT NULL DEFAULT now()
+);
 `
 
 // Exported so a test can read the exact string the container executes at boot,

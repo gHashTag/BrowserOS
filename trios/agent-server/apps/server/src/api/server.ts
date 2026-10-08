@@ -74,6 +74,7 @@ import {
   createQueenCabinetRoute,
   createQueenRunnerRoute,
 } from './routes/queen-runners'
+import { createQueenTasksRoute } from './routes/queen-tasks'
 import { createQueenTreeRoute } from './routes/queen-tree'
 import { createRefinePromptRoutes } from './routes/refine-prompt'
 import { createShutdownRoute } from './routes/shutdown'
@@ -297,6 +298,13 @@ export async function createHttpServer(config: HttpServerConfig) {
     .use('/*', requireTrustedAppOrigin())
     .route('/', createQueenExportRoute())
 
+  // A person cancels or assigns a task (specs/queen/control.t27 section 3).
+  // It WRITES and it can interrupt a running bee, so it is guarded inside its
+  // own sub-app like the lease above - never a bare factory mount.
+  const queenTasksRoutes = new Hono<Env>()
+    .use('/*', requireTrustedAppOrigin())
+    .route('/', createQueenTasksRoute())
+
   const queenRegistryRoutes = new Hono<Env>()
     .use('/*', requireTrustedAppOrigin())
     .route('/', createQueenRegistryRoute())
@@ -452,6 +460,7 @@ export async function createHttpServer(config: HttpServerConfig) {
     .route('/queen/feed/data', queenFeedDataRoutes)
     .route('/queen/lease', queenLeaseRoutes)
     .route('/queen/export', queenExportRoutes)
+    .route('/queen/tasks', queenTasksRoutes)
     .route('/queen/rehearsal', queenRehearsalRoutes)
     .use('/shutdown/*', requireTrustedAppOrigin())
     .route(
