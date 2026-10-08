@@ -28,6 +28,9 @@ import {
   EV_TASK_ENDED,
   EV_TICK,
   EV_WORKER_IDLE,
+  P_CLONE,
+  P_REUSE,
+  P_WAIT,
   R_ASSIGN,
   R_CANCEL,
   R_DISPATCH,
@@ -107,6 +110,20 @@ export function fenceAfterCancel(fence: number): number {
 /** cancel_counts_against_issue: an interruption spends no retry. */
 export function cancelCountsAgainstIssue(): boolean {
   return false
+}
+
+/**
+ * placement (section 5): reuse an idle runtime of the task's domain, else clone
+ * onto any free lane, else wait. A domain is an affinity, not a cap.
+ */
+export function placement(
+  idleInDomain: number,
+  running: number,
+  cap: number,
+): number {
+  if (idleInDomain > 0) return P_REUSE
+  if (running < cap) return P_CLONE
+  return P_WAIT
 }
 
 /** attempt_start (section 6): where the next attempt on an issue starts. */

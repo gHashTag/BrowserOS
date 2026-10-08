@@ -33,6 +33,7 @@ import {
   DISPATCH_OUTCOME_LABELS,
   finishDispatch,
 } from '../../src/api/services/queen-dispatch'
+import { claimQueuedBee } from '../../src/api/services/queen-runner'
 import {
   dispatchRowState,
   ensureQueenColumns,
@@ -367,5 +368,71 @@ describe('a runtime that stops beating loses its task within one TTL', () => {
     await lapse(4408)
     expect(await renewTaskLeases(pool, [4408], TTL)).toEqual([])
     expect(await renewTaskLeases(pool, [], TTL)).toEqual([])
+  })
+})
+
+describe('a runner takes its own domain first, and never waits for it', () => {
+  let scratch: { url: string; drop: () => Promise<void> } | null = null
+  let pool: Pool | null = null
+  const previousUrl = process.env.DATABASE_URL
+
+  beforeEach(async () => {
+    scratch = await scratchDatabase()
+    if (!scratch) return
+    process.env.DATABASE_URL = scratch.url
+    await runPgMigrations()
+    pool = createQueenPool(scratch.url)
+    await ensureQueenColumns(pool)
+  })
+
+  afterEach(async () => {
+    await pool?.end().catch(() => undefined)
+    pool = null
+    await scratch?.drop()
+    scratch = null
+    if (previousUrl === undefined) delete process.env.DATABASE_URL
+    else process.env.DATABASE_URL = previousUrl
+  })
+
+  /** An order queued `ageSeconds` ago, in `domain`. */
+  const order = async (
+    issue: number,
+    domain: number | null,
+    ageSeconds: number,
+  ): Promise<void> => {
+    await (pool as Pool).query(
+      `INSERT INTO queen_dispatch
+         (issue, branch, started, detail, owned_paths, conversation_id,
+          key_index, queued_at, brief, domain)
+       VALUES ($1, $2, true, 'queued for a runner', '[]'::jsonb, $3, 0,
+               now() - make_interval(secs => $4), 'do it', $5)`,
+      [issue, `queen-${issue}`, `conv-${issue}`, ageSeconds, domain],
+    )
+  }
+
+  it('takes an order of its own domain before an older one', async () => {
+    if (!pool) return expect(offlineRequested()).toBe(true)
+    await order(4500, 2, 300)
+    await order(4501, 1, 200)
+    await order(4502, 1, 100)
+    const first = await claimQueuedBee(pool, 'runner-a', 1)
+    expect(first?.issue).toBe(4501)
+    expect(first?.domain).toBe(1)
+  })
+
+  it('takes the oldest order when it has no domain yet', async () => {
+    if (!pool) return expect(offlineRequested()).toBe(true)
+    await order(4510, 2, 300)
+    await order(4511, 1, 200)
+    expect((await claimQueuedBee(pool, 'runner-a', null))?.issue).toBe(4510)
+  })
+
+  it('takes another domain rather than wait for its own', async () => {
+    if (!pool) return expect(offlineRequested()).toBe(true)
+    await order(4520, 2, 300)
+    await order(4521, null, 200)
+    expect((await claimQueuedBee(pool, 'runner-a', 3))?.issue).toBe(4520)
+    expect((await claimQueuedBee(pool, 'runner-a', 3))?.issue).toBe(4521)
+    expect(await claimQueuedBee(pool, 'runner-a', 3)).toBeNull()
   })
 })

@@ -47,6 +47,7 @@ import {
   TIP_NONE,
   TIP_SENT_BACK,
 } from './queen-control-rules'
+import { domainOfTask } from './queen-domains'
 import { queenHolderName } from './queen-lease'
 import {
   describeReading,
@@ -4902,6 +4903,20 @@ export async function dispatchBee(
       chosen.model,
       { brief },
     )
+    // The order's domain (specs/queen/domains.t27), so a runner can prefer the
+    // work its domain's build and worktrees are warm for (control card section
+    // 5). Best effort: an order without one is taken in queue order, as before.
+    await pool
+      .query('UPDATE queen_dispatch SET domain = $2 WHERE issue = $1', [
+        issue,
+        domainOfTask(ownedPaths),
+      ])
+      .catch((error) =>
+        logger.warn('Queen could not record the domain of an order', {
+          issue,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      )
     // The lease stays: the runner's dispatch row is open from this line, and
     // the round's heartbeat renews the claim until the row closes.
     if (publishFn)

@@ -413,6 +413,10 @@ ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS runner_start_remote text;
 ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS runner_start_branch text;
 ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS runner_claimed_at timestamptz;
 ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS runner_lease_at timestamptz;
+-- The agent domain of the task (gHashTag/t27 specs/queen/domains.t27), set on
+-- an order for a bee runner so a runner can prefer its own domain's work
+-- (control card section 5: a domain is an affinity, not a cap).
+ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS domain smallint;
 ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS runner_remote text;
 ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS runner_branch text;
 ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS runner_head text;
