@@ -158,4 +158,8 @@ Specs → Queen → Universe → Verdict → Workflow → eXternal → Yield →
 
 ---
 
+## Actors, not threads
+
+*See the canonical section in [`gHashTag/t27/AGENTS.md`](https://github.com/gHashTag/t27/blob/main/AGENTS.md#actors-not-thread) for the owner's rule from 2026-10-08, replacement order, and Queen code location.*
+
 ## φ² + 1/φ² = 3 | TRINITY
