@@ -1,0 +1,178 @@
+// SPDX-License-Identifier: Apache-2.0
+; specs/queen/dashboard.t27 -- what the board says about the swarm: why bees are idle, what a task's
+; drawer shows, and how the board splits into lanes
+; Owner, 2026-10-08 (translated): "why are the bees idle?! solve it at last!"; a dashboard of every
+; task of the project, with any filter (https://app.t27.ai/game/kanban). Epic #7718, slice 5.
+; What the board could not say before this card (gHashTag/trinity Queen.tsx, measured that day):
+; - why lanes stood empty. /queen/status counted the round's skips (claimed 86, completed 312,
+;   missingBoundary 200, fileConflict 164, incompleteSpec 75, notFirst 6 at 13:34Z) and the board drew
+;   none of it, so "16 idle" read as a fault whether the cause was a held file, an issue with no
+;   Boundary, or no work at all.
+; - anything about one task beyond its column: no history, no lease, no attempt counts.
+; - more than one repository at a time in a readable way: every card in one heap per column.
+; incompleteSpec is a note, not a refusal (the Queen can still choose such an issue), so it is no
+; reason for an idle lane and this card does not take it. Event kinds are control.t27's EV_* (index
+; of a per-kind table). The board runs this card as wasm.
+; ASCII only (L3).
+; phi^2 + 1/phi^2 = 3 | TRINITY
+
+module QueenDashboard;
+
+pub const DASH_KINDS : u8 = 10;
+
+; --- 1. Why bees are idle ----------------------------------------------------------------------------
+
+pub fn free_lanes(capacity: u32, active: u32) -> u32 {
+    if (active >= capacity) { return 0; }
+    return capacity - active;
+}
+
+/// FULL: no lane is free. PACING: lanes are free and eligible issues wait their turn (the Queen offers
+/// a few each round). FILES: nothing is eligible, and the largest reason is files another bee holds.
+/// SHAPE: the largest reason is issues with no Boundary (the shaper writes them; a person can too).
+/// CLAIMED: every open issue is already taken, running or waiting for its review. EMPTY: there is no
+/// open work at all. UNKNOWN: the round has not answered.
+pub const IV_FULL : u8 = 0;
+pub const IV_PACING : u8 = 1;
+pub const IV_FILES : u8 = 2;
+pub const IV_SHAPE : u8 = 3;
+pub const IV_CLAIMED : u8 = 4;
+pub const IV_EMPTY : u8 = 5;
+pub const IV_UNKNOWN : u8 = 6;
+pub const VERDICT_NAMES : [7]str = ["full", "pacing", "files", "shape", "claimed", "empty", "unknown"];
+
+/// From the round's skip counts: `waiting` = notFirst (eligible, not chosen this round),
+/// `no_boundary` = missingBoundary, `held_files` = fileConflict, `claimed` = claimed. A tie goes to
+/// the reason a person can act on soonest: files, then shape, then claimed.
+pub fn idle_verdict(known: bool, capacity: u32, active: u32, waiting: u32, no_boundary: u32, held_files: u32, claimed: u32) -> u8 {
+    if (known == false) { return IV_UNKNOWN; }
+    if (free_lanes(capacity, active) == 0) { return IV_FULL; }
+    if (waiting > 0) { return IV_PACING; }
+    if (held_files == 0 and no_boundary == 0 and claimed == 0) { return IV_EMPTY; }
+    if (held_files >= no_boundary and held_files >= claimed) { return IV_FILES; }
+    if (no_boundary >= claimed) { return IV_SHAPE; }
+    return IV_CLAIMED;
+}
+
+/// How the strip is drawn: OK (the swarm does what it can), WARN (lanes idle for a reason that clears
+/// by itself as work finishes), ACT (lanes idle for a reason someone can fix), NONE (nothing to say).
+pub const TONE_NONE : u8 = 0;
+pub const TONE_OK : u8 = 1;
+pub const TONE_WARN : u8 = 2;
+pub const TONE_ACT : u8 = 3;
+pub const VERDICT_TONE : [7]u8 = [1, 1, 2, 3, 2, 3, 0];
+
+pub fn verdict_tone(verdict: u8) -> u8 {
+    if (verdict > IV_UNKNOWN) { return TONE_NONE; }
+    return VERDICT_TONE[verdict];
+}
+
+; --- 2. A task's drawer ------------------------------------------------------------------------------
+
+/// The newest TIMELINE_MAX events that name the task, newest first. Kinds that name no task (idle,
+/// heartbeat, tick) never appear.
+pub const TIMELINE_MAX : u32 = 50;
+pub const IN_TIMELINE : [10]u8 = [1, 1, 0, 1, 1, 1, 1, 1, 0, 0];
+
+pub fn timeline_shows(kind: u8) -> bool {
+    if (kind >= DASH_KINDS) { return false; }
+    return IN_TIMELINE[kind] == 1;
+}
+
+/// A task's lease (control.t27 section 2), as the drawer says it: none, live until its expiry, or
+/// expired and waiting to be taken back. Times are seconds since the epoch.
+pub const LS_NONE : u8 = 0;
+pub const LS_LIVE : u8 = 1;
+pub const LS_EXPIRED : u8 = 2;
+
+pub fn lease_state(has_lease: bool, expires_at: u64, now: u64) -> u8 {
+    if (has_lease == false) { return LS_NONE; }
+    if (expires_at <= now) { return LS_EXPIRED; }
+    return LS_LIVE;
+}
+
+; --- 3. Lanes ----------------------------------------------------------------------------------------
+
+/// The board's rows across its columns: none, one per repository, one per kind of task.
+pub const LANE_NONE : u8 = 0;
+pub const LANE_REPO : u8 = 1;
+pub const LANE_KIND : u8 = 2;
+pub const LANE_NAMES : [3]str = ["none", "repo", "kind"];
+
+/// Lanes ranked by how many cards they hold; past LANES_MAX the rest share one "other" lane, so a
+/// column never turns into a list of headings.
+pub const LANES_MAX : u32 = 8;
+
+pub fn lane_shown(rank: u32) -> bool {
+    return rank < LANES_MAX;
+}
+
+test a_free_lane_has_a_reason {
+    assert free_lanes(70, 54) == 16;
+    assert free_lanes(70, 70) == 0;
+    assert free_lanes(70, 75) == 0;
+    // the round has not answered
+    assert idle_verdict(false, 70, 0, 9, 9, 9, 9) == IV_UNKNOWN;
+    // no free lane, whatever waits
+    assert idle_verdict(true, 70, 70, 6, 200, 164, 86) == IV_FULL;
+    // free lanes and eligible issues: waiting their turn
+    assert idle_verdict(true, 70, 54, 6, 200, 164, 86) == IV_PACING;
+    // nothing eligible: the largest reason
+    assert idle_verdict(true, 70, 54, 0, 200, 164, 86) == IV_SHAPE;
+    assert idle_verdict(true, 70, 54, 0, 100, 164, 86) == IV_FILES;
+    assert idle_verdict(true, 70, 54, 0, 10, 20, 86) == IV_CLAIMED;
+    assert idle_verdict(true, 70, 54, 0, 0, 0, 0) == IV_EMPTY;
+}
+
+test a_tie_goes_to_what_a_person_acts_on_first {
+    assert idle_verdict(true, 70, 54, 0, 50, 50, 50) == IV_FILES;
+    assert idle_verdict(true, 70, 54, 0, 50, 10, 50) == IV_SHAPE;
+    assert idle_verdict(true, 70, 54, 0, 0, 1, 0) == IV_FILES;
+    assert idle_verdict(true, 70, 54, 0, 1, 0, 0) == IV_SHAPE;
+    assert idle_verdict(true, 70, 54, 0, 0, 0, 1) == IV_CLAIMED;
+}
+
+test each_verdict_has_a_tone {
+    assert verdict_tone(IV_FULL) == TONE_OK;
+    assert verdict_tone(IV_PACING) == TONE_OK;
+    assert verdict_tone(IV_FILES) == TONE_WARN;
+    assert verdict_tone(IV_SHAPE) == TONE_ACT;
+    assert verdict_tone(IV_CLAIMED) == TONE_WARN;
+    assert verdict_tone(IV_EMPTY) == TONE_ACT;
+    assert verdict_tone(IV_UNKNOWN) == TONE_NONE;
+    assert verdict_tone(IV_UNKNOWN + 1) == TONE_NONE;
+}
+
+test a_timeline_holds_what_names_the_task {
+    assert timeline_shows(0) == true;
+    assert timeline_shows(1) == true;
+    assert timeline_shows(2) == false;
+    assert timeline_shows(3) == true;
+    assert timeline_shows(4) == true;
+    assert timeline_shows(5) == true;
+    assert timeline_shows(6) == true;
+    assert timeline_shows(7) == true;
+    assert timeline_shows(8) == false;
+    assert timeline_shows(9) == false;
+    assert timeline_shows(DASH_KINDS) == false;
+}
+
+test a_lease_is_none_live_or_expired {
+    assert lease_state(false, 2000, 1000) == LS_NONE;
+    assert lease_state(true, 2000, 1000) == LS_LIVE;
+    assert lease_state(true, 1001, 1000) == LS_LIVE;
+    assert lease_state(true, 1000, 1000) == LS_EXPIRED;
+    assert lease_state(true, 10, 1000) == LS_EXPIRED;
+}
+
+test lanes_past_the_ceiling_fold {
+    assert lane_shown(0) == true;
+    assert lane_shown(LANES_MAX - 1) == true;
+    assert lane_shown(LANES_MAX) == false;
+}
+
+invariant one_row_per_kind {
+    assert DASH_KINDS == 10;
+    assert VERDICT_TONE[IV_SHAPE] == TONE_ACT;
+    assert TIMELINE_MAX > 0;
+}
