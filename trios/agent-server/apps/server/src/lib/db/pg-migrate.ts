@@ -28,6 +28,42 @@ function createPool(databaseUrl: string): Pool {
 // how the boot path and the round path come to disagree.
 //
 // NO BACKTICKS here either; same reason as below.
+// Multi-step jobs the Queen drives (gHashTag/t27 specs/queen/jobs.t27, #7676)
+// and the effects journal of specs/queen/control.t27 section 7 that their
+// irreversible steps go through. One running job per card is the partial
+// unique index: two starts that race cannot both insert (job_may_start).
+// No backticks in this string: it is a JS template literal.
+export const QUEEN_JOBS_SQL = `
+CREATE TABLE IF NOT EXISTS queen_job (
+  id bigserial PRIMARY KEY,
+  card text NOT NULL,
+  params jsonb NOT NULL DEFAULT '{}'::jsonb,
+  rehearsal boolean NOT NULL DEFAULT false,
+  state smallint NOT NULL DEFAULT 0,
+  step int NOT NULL DEFAULT 0,
+  step_runs int NOT NULL DEFAULT 0,
+  step_started_at timestamptz NOT NULL DEFAULT now(),
+  subject text,
+  checks_at_subject boolean NOT NULL DEFAULT true,
+  note text,
+  log jsonb NOT NULL DEFAULT '[]'::jsonb,
+  started_by text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS queen_job_one_running_per_card
+  ON queen_job (card) WHERE state = 0;
+
+CREATE TABLE IF NOT EXISTS queen_effect (
+  key text PRIMARY KEY,
+  kind smallint NOT NULL,
+  state smallint NOT NULL,
+  runs int NOT NULL DEFAULT 0,
+  result jsonb,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+`
+
 export const QUEEN_CONTROL_SQL = `
 CREATE TABLE IF NOT EXISTS queen_task_lease (
   issue int PRIMARY KEY,
@@ -211,6 +247,7 @@ CREATE TABLE IF NOT EXISTS queen_tick (
 );
 
 ${QUEEN_CONTROL_SQL}
+${QUEEN_JOBS_SQL}
 ALTER TABLE queen_dispatch
   ADD COLUMN IF NOT EXISTS owned_paths jsonb NOT NULL DEFAULT '[]'::jsonb;
 

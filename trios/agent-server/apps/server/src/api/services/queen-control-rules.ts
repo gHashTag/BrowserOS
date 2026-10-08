@@ -19,6 +19,18 @@ import {
   A_HELD,
   A_OK,
   A_WRONG_DOMAIN,
+  DO_GIVE_UP,
+  DO_LOOK,
+  DO_NOTHING,
+  DO_RUN,
+  DO_SKIP,
+  EFF_DONE,
+  EFF_NONE,
+  EFFECT_RUN_LIMIT,
+  EK_COMMENT,
+  EK_PULL_REQUEST,
+  EK_PUSH,
+  EK_RELEASE,
   EV_ASSIGN,
   EV_CANCEL,
   EV_EVIDENCE,
@@ -110,6 +122,55 @@ export function fenceAfterCancel(fence: number): number {
 /** cancel_counts_against_issue: an interruption spends no retry. */
 export function cancelCountsAgainstIssue(): boolean {
   return false
+}
+
+/**
+ * Section 7, the effects journal. effect_can_be_looked_up: whether GitHub can
+ * say if an effect landed (a push, a pull request, a comment, a release).
+ */
+export function effectCanBeLookedUp(kind: number): boolean {
+  if (kind === EK_PUSH) return true
+  if (kind === EK_PULL_REQUEST) return true
+  if (kind === EK_COMMENT) return true
+  if (kind === EK_RELEASE) return true
+  return false
+}
+
+/** rerun_or_give_up */
+export function rerunOrGiveUp(runs: number): number {
+  if (runs >= EFFECT_RUN_LIMIT) return DO_GIVE_UP
+  return DO_RUN
+}
+
+/** write_lands */
+export function writeLands(fence: number, myFence: number): boolean {
+  return fence === myFence
+}
+
+/** effect_action: what a holder does before an effect, from its journal entry. */
+export function effectAction(
+  entry: number,
+  kind: number,
+  runs: number,
+  fence: number,
+  myFence: number,
+): number {
+  if (writeLands(fence, myFence) === false) return DO_NOTHING
+  if (entry === EFF_NONE) return DO_RUN
+  if (entry === EFF_DONE) return DO_SKIP
+  if (effectCanBeLookedUp(kind)) return DO_LOOK
+  return rerunOrGiveUp(runs)
+}
+
+/** after_look */
+export function afterLook(found: boolean, runs: number): number {
+  if (found) return DO_SKIP
+  return rerunOrGiveUp(runs)
+}
+
+/** runs_after_intent */
+export function runsAfterIntent(runs: number): number {
+  return runs + 1
 }
 
 /**

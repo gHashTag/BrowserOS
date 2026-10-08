@@ -87,6 +87,7 @@ import {
   workerProbeEndpoint,
   workspaceRoot,
 } from './queen-dispatch'
+import { advanceJobs, ensureJobTables, startJobsFromIssues } from './queen-jobs'
 import {
   acquireQueenLease,
   logLeaseOutcome,
@@ -360,11 +361,22 @@ export function oracleOutcome(witness: Witness | null): string {
   return failing.every((s) => s.oraclePreBroken) ? 'pre-broken' : 'fail'
 }
 
+/** One open issue as the round reads it. */
+export interface OpenIssue {
+  number: number
+  body: string
+  title: string
+  /** Label names: a job request is marked `queen-job` (queen-jobs.ts). */
+  labels?: string[]
+  /** The author's login: only the repository owner may ask for a job. */
+  author?: string
+}
+
 export async function openIssues(repo: string): Promise<{
-  issues: Array<{ number: number; body: string; title: string }>
+  issues: OpenIssue[]
   complete: boolean
 }> {
-  const collected: Array<{ number: number; body: string; title: string }> = []
+  const collected: OpenIssue[] = []
   let complete = false
   const cap = issuePageCap()
   for (let page = 1; page <= cap; page++) {
@@ -379,6 +391,8 @@ export async function openIssues(repo: string): Promise<{
       title?: string
       body?: string | null
       pull_request?: unknown
+      labels?: Array<{ name?: string } | string>
+      user?: { login?: string } | null
     }>
     // The issues endpoint returns pull requests too, and a PR is not work to
     // delegate - it is work already done waiting for a verdict.
@@ -392,6 +406,10 @@ export async function openIssues(repo: string): Promise<{
         number: i.number,
         body: i.body ?? '',
         title: i.title ?? `#${i.number}`,
+        labels: (i.labels ?? [])
+          .map((l) => (typeof l === 'string' ? l : (l?.name ?? '')))
+          .filter((l) => l !== ''),
+        author: i.user?.login ?? undefined,
       })
     }
     // The RAW page length decides, not the filtered one: a page that was all
@@ -1707,6 +1725,20 @@ export async function runRound(
         ?.verdicts ?? {}
   } else {
     const { issues: open, complete } = await openIssues(repo)
+    // A job an issue asks for (label queen-job, a "## Job" section, written by
+    // the repository's owner) starts here, from the list the round already
+    // read; advanceJobs below takes its first steps in this same round.
+    await ensureJobTables(pool)
+      .then(() => startJobsFromIssues(pool, open, repo.split('/')[0] ?? ''))
+      .then((ids) => {
+        if (ids.length > 0)
+          logger.info('Queen started jobs from issues', { ids })
+      })
+      .catch((error) => {
+        logger.warn('Queen could not read job requests', {
+          error: error instanceof Error ? error.message : String(error),
+        })
+      })
     candidates = open.map((i) => i.number)
     candidateBodies = Object.fromEntries(
       open.map((i) => [String(i.number), i.body]),
@@ -2173,6 +2205,15 @@ export async function runRound(
   await clearAssigns(pool, served).catch((error) => {
     logger.warn('Queen could not clear served assignments', {
       served,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  })
+
+  // Multi-step jobs (specs/queen/jobs.t27): every running job takes the steps
+  // its card allows this round. A job holds no lane and no bee; a failure here
+  // is logged and the round goes on.
+  await advanceJobs(pool).catch((error) => {
+    logger.warn('Queen could not advance her jobs', {
       error: error instanceof Error ? error.message : String(error),
     })
   })

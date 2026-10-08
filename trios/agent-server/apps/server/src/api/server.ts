@@ -48,6 +48,7 @@ import {
   createQueenFeedRoute,
 } from './routes/queen-feed'
 import { createQueenHqRoute } from './routes/queen-hq'
+import { createQueenJobsRoute } from './routes/queen-jobs'
 import {
   createQueenBoardRoute,
   createQueenKanbanRoute,
@@ -60,6 +61,7 @@ import { createQueenPublicAgentsRoute } from './routes/queen-public-agents'
 import { createQueenPublicCreditsRoute } from './routes/queen-public-credits'
 import { createQueenPublicEarningsRoute } from './routes/queen-public-earnings'
 import { createQueenPublicHardwareRoute } from './routes/queen-public-hardware'
+import { createQueenPublicJobsRoute } from './routes/queen-public-jobs'
 import { createQueenPublicLeaderboardRoute } from './routes/queen-public-leaderboard'
 import { createQueenPublicResearchRoute } from './routes/queen-public-research'
 import { createQueenPublicStatusRoute } from './routes/queen-public-status'
@@ -305,6 +307,13 @@ export async function createHttpServer(config: HttpServerConfig) {
     .use('/*', requireTrustedAppOrigin())
     .route('/', createQueenTasksRoute())
 
+  // A person starts or cancels a multi-step job (specs/queen/jobs.t27). It
+  // WRITES, and a job's last steps can publish a release, so it is guarded
+  // inside its own sub-app like every route that writes.
+  const queenJobsRoutes = new Hono<Env>()
+    .use('/*', requireTrustedAppOrigin())
+    .route('/', createQueenJobsRoute())
+
   const queenRegistryRoutes = new Hono<Env>()
     .use('/*', requireTrustedAppOrigin())
     .route('/', createQueenRegistryRoute())
@@ -400,6 +409,7 @@ export async function createHttpServer(config: HttpServerConfig) {
     .use('/queen/public-agents', publicReadCorsMiddleware())
     .use('/queen/public-leaderboard', publicReadCorsMiddleware())
     .use('/queen/public-credits', publicReadCorsMiddleware())
+    .use('/queen/public-jobs', publicReadCorsMiddleware())
     .use('/queen/public-earnings', publicReadCorsMiddleware())
     .use('/queen/scheduler', publicReadCorsMiddleware())
     // The runner cabinet: exactly https://app.t27.ai, bearer only, no cookies.
@@ -426,6 +436,9 @@ export async function createHttpServer(config: HttpServerConfig) {
     .route('/queen/me/runners', createQueenCabinetRoute())
     .route('/queen/runner', createQueenRunnerRoute())
     .route('/queen/public-credits', createQueenPublicCreditsRoute())
+    // The swarm's multi-step jobs (a release, step by step): card, version,
+    // steps and their sentences. No credential, no secret.
+    .route('/queen/public-jobs', createQueenPublicJobsRoute())
     // What accepted spec work earned; recorded, not withdrawable. Repository,
     // issue, commit and declared .t27 paths only - no titles, notes or keys.
     .route('/queen/public-earnings', createQueenPublicEarningsRoute())
@@ -461,6 +474,7 @@ export async function createHttpServer(config: HttpServerConfig) {
     .route('/queen/lease', queenLeaseRoutes)
     .route('/queen/export', queenExportRoutes)
     .route('/queen/tasks', queenTasksRoutes)
+    .route('/queen/jobs', queenJobsRoutes)
     .route('/queen/rehearsal', queenRehearsalRoutes)
     .use('/shutdown/*', requireTrustedAppOrigin())
     .route(
