@@ -1,5 +1,14 @@
 # Project Instructions
 
+## This fork holds the browser extension only (owner rule, 2026-10-08)
+
+gHashTag/BrowserOS is a fork of browseros-ai/BrowserOS, which is someone else's project. Here it holds our browser extension and nothing else.
+
+- **What does not belong here:** Queen code, server code, specs, plans and any `trios/` directory.
+- **Where the Queen server lives:** gHashTag/trios, on branches `queen` and `queen-runners`. On 2026-10-09 the history of every branch that carried `trios/` here was moved there. Merged work went into those two branches, and unmerged work is kept under `refs/archive/browseros/<branch>`. The 922 branches here were then deleted.
+- **Where other work goes:** work on the Queen, the swarm, specs or tools goes to gHashTag/trios or gHashTag/t27, never to this fork.
+- **The Queen's concurrency rule:** see gHashTag/t27 `AGENTS.md`, "Actors, not threads".
+
 ## Docs Image Workflow
 
 When updating documentation that involves new screenshots or images:
