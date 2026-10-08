@@ -151,6 +151,10 @@ CREATE TABLE IF NOT EXISTS queen_event_counter (
   stream text PRIMARY KEY,
   last bigint NOT NULL
 );
+-- A task's drawer reads the events that name it, newest first
+-- (gHashTag/t27 specs/queen/dashboard.t27 timeline_shows).
+CREATE INDEX IF NOT EXISTS queen_event_log_issue
+  ON queen_event_log ((payload->>'issue'), seq);
 
 -- A person's assignments, waiting for a round (control card section 3,
 -- next_source: manual before automatic). One row per issue; the round removes
