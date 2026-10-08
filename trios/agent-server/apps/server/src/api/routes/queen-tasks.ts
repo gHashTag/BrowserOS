@@ -44,6 +44,7 @@ import {
 } from '../services/queen-control-rules'
 import { abortBeeHere } from '../services/queen-dispatch'
 import { queenLeaseDatabaseUrl } from '../services/queen-lease'
+import { ensureQueenColumns } from '../services/queen-tick'
 
 /** The seams a test replaces; every default is the production function. */
 export interface QueenTasksDeps {
@@ -54,7 +55,19 @@ export interface QueenTasksDeps {
   taskLeasedLive?: typeof taskLeasedLive
   publishEvent?: typeof publishEvent
   abortBeeHere?: typeof abortBeeHere
-  ensureControlTables?: typeof ensureControlTables
+  /** The tables and columns the statements below read. */
+  ensureTables?: (pool: Pool) => Promise<void>
+}
+
+/**
+ * What a round makes sure of before it reads the dispatch table, made sure of
+ * here too: the columns a cancel writes (judged_note, send_backs...) are added
+ * by the round's own migration, and a person may call this door on a fresh
+ * database before the first round has run.
+ */
+async function ensureTables(pool: Pool): Promise<void> {
+  await ensureQueenColumns(pool)
+  await ensureControlTables(pool)
 }
 
 let sharedPool: Pool | null = null
@@ -88,7 +101,7 @@ export function createQueenTasksRoute(deps: QueenTasksDeps = {}) {
   const leasedLive = deps.taskLeasedLive ?? taskLeasedLive
   const publish = deps.publishEvent ?? publishEvent
   const abortHere = deps.abortBeeHere ?? abortBeeHere
-  const ensure = deps.ensureControlTables ?? ensureControlTables
+  const ensure = deps.ensureTables ?? ensureTables
 
   return new Hono()
     .get('/assigned', async (c) => {

@@ -31,7 +31,7 @@ function route(over: Partial<QueenTasksDeps> = {}) {
   const aborted: Array<[number, string | undefined]> = []
   const app = createQueenTasksRoute({
     pool: () => pool,
-    ensureControlTables: async () => {},
+    ensureTables: async () => {},
     publishEvent: async (_pool, name, payload) => {
       published.push([name, payload])
       return published.length

@@ -27,7 +27,10 @@ import {
   taskLeasedLive,
 } from '../../src/api/services/queen-control'
 import { finishDispatch } from '../../src/api/services/queen-dispatch'
-import { dispatchRowState } from '../../src/api/services/queen-tick'
+import {
+  dispatchRowState,
+  ensureQueenColumns,
+} from '../../src/api/services/queen-tick'
 import { runPgMigrations } from '../../src/lib/db/pg-migrate'
 import { createQueenPool, queenSchema } from '../../src/lib/db/queen-pool'
 
@@ -88,6 +91,9 @@ describe('a person cancels and assigns through the same machine', () => {
     process.env.DATABASE_URL = scratch.url
     await runPgMigrations()
     pool = createQueenPool(scratch.url)
+    // The columns a round adds before it reads the table (send_backs,
+    // judged_note...), as production has them.
+    await ensureQueenColumns(pool)
   })
 
   afterEach(async () => {
@@ -139,7 +145,9 @@ describe('a person cancels and assigns through the same machine', () => {
     expect(after.review_state).toBe('cancelled')
     expect(after.finished_at).not.toBeNull()
     expect(after.outcome).toBe('cancelled')
-    expect(String(after.judged_note)).toContain('Cancelled by owner: wrong issue')
+    expect(String(after.judged_note)).toContain(
+      'Cancelled by owner: wrong issue',
+    )
     // cancel_counts_against_issue is false
     expect(Number(after.send_backs)).toBe(1)
     expect(Number(after.free_attempts)).toBe(2)
@@ -155,7 +163,13 @@ describe('a person cancels and assigns through the same machine', () => {
     if (!pool) return expect(offlineRequested()).toBe(true)
     await running(4301)
     await cancelTask(pool, 4301, 'owner', '')
-    await finishDispatch(pool, 4301, 'stream ended badly', undefined, 'conv-4301')
+    await finishDispatch(
+      pool,
+      4301,
+      'stream ended badly',
+      undefined,
+      'conv-4301',
+    )
     expect((await row(4301)).outcome).toBe('cancelled')
   })
 
