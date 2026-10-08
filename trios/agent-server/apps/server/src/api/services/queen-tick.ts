@@ -43,6 +43,7 @@ import { logger } from '../../lib/logger'
 import { startModelProbes, workerModelRanking } from '../../lib/model-ranking'
 import { importRunnerBranch } from '../routes/queen-export'
 import { outstandingEscalations } from '../routes/queen-needs-you'
+import { advanceApp } from './queen-app'
 import { githubCiDeps, takeBackRefusedAcceptances } from './queen-ci-verdict'
 import { contributorRuntime } from './queen-contributor-keys'
 import {
@@ -2217,6 +2218,20 @@ export async function runRound(
       error: error instanceof Error ? error.message : String(error),
     })
   })
+
+  // The t27-bees app (specs/queen/app.t27): list installations, poll served
+  // repositories, write the queued reviews and replies. Dormant without the
+  // app's key; a failure is logged and the round goes on.
+  await advanceApp(pool)
+    .then((app) => {
+      if (app.reviewed + app.replied > 0)
+        logger.info('t27-bees round', { ...app })
+    })
+    .catch((error) => {
+      logger.warn('t27-bees could not take its round', {
+        error: error instanceof Error ? error.message : String(error),
+      })
+    })
 
   await report(pool, reviewed, started, choice, candidates.length)
   // A round every one of whose dispatches was refused started nothing, so it

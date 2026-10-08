@@ -40,6 +40,7 @@ import { createMonitoringRoutes } from './routes/monitoring'
 import { createOAuthRoutes } from './routes/oauth'
 import { createOpenClawRoutes } from './routes/openclaw'
 import { createProviderRoutes } from './routes/provider'
+import { createQueenAppWebhookRoute } from './routes/queen-app-webhook'
 import { createQueenContributorKeysRoute } from './routes/queen-contributor-keys'
 import { createQueenDashboardRoute } from './routes/queen-dashboard'
 import { createQueenExportRoute } from './routes/queen-export'
@@ -58,6 +59,7 @@ import { createQueenLeaseRoute } from './routes/queen-lease'
 import { createQueenNeedsYouRoute } from './routes/queen-needs-you'
 import { createQueenPublicActivityRoute } from './routes/queen-public-activity'
 import { createQueenPublicAgentsRoute } from './routes/queen-public-agents'
+import { createQueenPublicAppRoute } from './routes/queen-public-app'
 import { createQueenPublicCreditsRoute } from './routes/queen-public-credits'
 import { createQueenPublicEarningsRoute } from './routes/queen-public-earnings'
 import { createQueenPublicHardwareRoute } from './routes/queen-public-hardware'
@@ -410,6 +412,7 @@ export async function createHttpServer(config: HttpServerConfig) {
     .use('/queen/public-leaderboard', publicReadCorsMiddleware())
     .use('/queen/public-credits', publicReadCorsMiddleware())
     .use('/queen/public-jobs', publicReadCorsMiddleware())
+    .use('/queen/public-app', publicReadCorsMiddleware())
     .use('/queen/public-earnings', publicReadCorsMiddleware())
     .use('/queen/scheduler', publicReadCorsMiddleware())
     // The runner cabinet: exactly https://app.t27.ai, bearer only, no cookies.
@@ -439,6 +442,13 @@ export async function createHttpServer(config: HttpServerConfig) {
     // The swarm's multi-step jobs (a release, step by step): card, version,
     // steps and their sentences. No credential, no secret.
     .route('/queen/public-jobs', createQueenPublicJobsRoute())
+    // The t27-bees app (specs/queen/app.t27): configured or not, what it
+    // serves, its recent reviews on public repositories. No credential.
+    .route('/queen/public-app', createQueenPublicAppRoute())
+    // GitHub delivers the app's webhooks here, from its own server: there is
+    // no Origin to trust. The guard is the HMAC of the body under
+    // TRIOS_BEES_WEBHOOK_SECRET, and the route is off while that is unset.
+    .route('/queen/app/webhook', createQueenAppWebhookRoute())
     // What accepted spec work earned; recorded, not withdrawable. Repository,
     // issue, commit and declared .t27 paths only - no titles, notes or keys.
     .route('/queen/public-earnings', createQueenPublicEarningsRoute())

@@ -64,6 +64,58 @@ CREATE TABLE IF NOT EXISTS queen_effect (
 );
 `
 
+// The t27-bees GitHub App (gHashTag/t27 specs/queen/app.t27, #7682 #7695):
+// the repositories its installations serve, one review row per pull request
+// head (the primary key is review_wanted's "already reviewed this head"), the
+// replies a comment asked for, and the webhook deliveries and comments already
+// read, so a redelivery or a poll that meets the same comment acts once.
+// No backticks in this string: it is a JS template literal.
+export const QUEEN_APP_SQL = `
+CREATE TABLE IF NOT EXISTS queen_app_repo (
+  repo text PRIMARY KEY,
+  installation_id bigint NOT NULL,
+  private boolean NOT NULL DEFAULT false,
+  added_at timestamptz NOT NULL DEFAULT now(),
+  polled_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS queen_app_review (
+  repo text NOT NULL,
+  pr int NOT NULL,
+  head_sha text NOT NULL,
+  state smallint NOT NULL DEFAULT 0,
+  asked_again boolean NOT NULL DEFAULT false,
+  summary_only boolean NOT NULL DEFAULT false,
+  attempts int NOT NULL DEFAULT 0,
+  note text,
+  url text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (repo, pr, head_sha)
+);
+CREATE TABLE IF NOT EXISTS queen_app_paused (
+  repo text NOT NULL,
+  pr int NOT NULL,
+  PRIMARY KEY (repo, pr)
+);
+CREATE TABLE IF NOT EXISTS queen_app_reply (
+  key text PRIMARY KEY,
+  repo text NOT NULL,
+  pr int NOT NULL,
+  body text NOT NULL,
+  state smallint NOT NULL DEFAULT 0,
+  attempts int NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS queen_app_seen (
+  key text PRIMARY KEY,
+  seen_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS queen_app_meta (
+  key text PRIMARY KEY,
+  at timestamptz NOT NULL DEFAULT now()
+);
+`
+
 export const QUEEN_CONTROL_SQL = `
 CREATE TABLE IF NOT EXISTS queen_task_lease (
   issue int PRIMARY KEY,
@@ -248,6 +300,7 @@ CREATE TABLE IF NOT EXISTS queen_tick (
 
 ${QUEEN_CONTROL_SQL}
 ${QUEEN_JOBS_SQL}
+${QUEEN_APP_SQL}
 ALTER TABLE queen_dispatch
   ADD COLUMN IF NOT EXISTS owned_paths jsonb NOT NULL DEFAULT '[]'::jsonb;
 

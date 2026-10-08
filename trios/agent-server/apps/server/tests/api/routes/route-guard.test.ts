@@ -25,7 +25,7 @@ import {
 const source = readServerSource()
 const report = auditServer(source, DEFAULT_ALLOWLIST)
 
-// Regression pin for the --no-allowlist run: exactly these eleven mounts carry
+// Regression pin for the --no-allowlist run: exactly these twelve mounts carry
 // no guard today, each for a reason the comments beside the mount give.
 // RE-MEASURED 2026-09-13: /api/inngest joined. It is not a shell - it is the
 // Queen's scheduler endpoint - and it is unguarded on purpose: Inngest signs
@@ -41,8 +41,13 @@ const report = auditServer(source, DEFAULT_ALLOWLIST)
 // (a session the app.t27.ai issuer confirms; a live runner token), which is a
 // guard the trusted-origin check cannot express - it would refuse the one page
 // and the one process that call them. Reasons in tools/route-guard-audit.mjs.
+// RE-MEASURED 2026-10-08: /queen/app/webhook joined. GitHub delivers the
+// t27-bees app's events from its own server, so there is no Origin to trust;
+// the HMAC of the body under TRIOS_BEES_WEBHOOK_SECRET is the guard, and the
+// route refuses everything while that secret is unset.
 const EXPECTED_UNGUARDED_WITHOUT_ALLOWLIST = [
   '/api/inngest',
+  '/queen/app/webhook',
   '/health',
   '/queen/contributor-keys',
   '/queen/dashboard',
@@ -121,10 +126,15 @@ describe('route-guard audit over src/api/server.ts', () => {
     // RE-MEASURED 2026-10-08 again: 53 became 54 with /queen/public-jobs, an
     // explicit publicReadCorsMiddleware() on the jobs' card, version and step
     // sentences (no credential, no secret). Public-read went 10 to 11.
-    expect(report.totalMounts).toBe(54)
+    // RE-MEASURED 2026-10-08, the t27-bees app: 54 became 56. /queen/public-app
+    // is an explicit publicReadCorsMiddleware() on whether the app is
+    // configured (booleans), the public repositories it serves and its reviews
+    // there; public-read went 11 to 12. /queen/app/webhook is allowlisted: GitHub
+    // calls it with no Origin, and the HMAC of the body is its guard.
+    expect(report.totalMounts).toBe(56)
     expect(report.prefixGuardCount).toBe(18)
     expect(report.guardedSubAppCount).toBe(18)
-    expect(report.publicReadCount).toBe(11)
+    expect(report.publicReadCount).toBe(12)
   })
 
   it('reports zero unguarded mounts once the reasoned allowlist is applied', () => {
@@ -134,7 +144,7 @@ describe('route-guard audit over src/api/server.ts', () => {
     expect(report.entriesMissingReason).toEqual([])
   })
 
-  it('reports exactly the eleven reasoned exceptions when the allowlist is dropped', () => {
+  it('reports exactly the twelve reasoned exceptions when the allowlist is dropped', () => {
     // The classifier reports mounts in file order; the assertion is on the
     // exact set, so both sides are sorted before comparing.
     expect([...unguardedMounts(source, [])].sort()).toEqual(
@@ -142,7 +152,7 @@ describe('route-guard audit over src/api/server.ts', () => {
     )
   })
 
-  it('splits the thirty-one /queen mounts into 11 public-read, 11 wrapper-guarded and 9 allowlisted', () => {
+  it('splits the thirty-three /queen mounts into 12 public-read, 11 wrapper-guarded and 10 allowlisted', () => {
     const queenMounts = classifyMounts(source).filter(
       (mount) => mount.path === '/queen' || mount.path.startsWith('/queen/'),
     )
@@ -192,7 +202,10 @@ describe('route-guard audit over src/api/server.ts', () => {
     // is /queen/jobs, guarded inside its own sub-app because it writes.
     // RE-MEASURED 2026-10-08 again: thirty became thirty-one. The eleventh
     // public-read is /queen/public-jobs.
-    expect(queenMounts.length).toBe(31)
+    // RE-MEASURED 2026-10-08, the t27-bees app: thirty-one became thirty-three.
+    // The twelfth public-read is /queen/public-app; the tenth allowlisted mount
+    // is /queen/app/webhook, signed by GitHub (reason in the allowlist).
+    expect(queenMounts.length).toBe(33)
 
     const counts: Record<string, number> = {
       'public-read': 0,
@@ -206,10 +219,10 @@ describe('route-guard audit over src/api/server.ts', () => {
     // The four buckets must account for every mount with the exact expected
     // split; anything unaccounted for breaks one of these numbers.
     expect(counts).toEqual({
-      'public-read': 11,
+      'public-read': 12,
       'prefix-guard': 0,
       wrapper: 11,
-      unguarded: 9,
+      unguarded: 10,
     })
 
     // Every unguarded /queen mount must be one of the allowlisted shells.
