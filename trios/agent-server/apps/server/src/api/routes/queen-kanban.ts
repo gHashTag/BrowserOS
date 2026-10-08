@@ -67,12 +67,12 @@ interface QueryResult {
  * test can stand in for pg without opening a socket, the way the four sibling
  * public routes already declare theirs.
  */
-interface PublicBoardPool {
+export interface PublicBoardPool {
   query(sql: string, values?: unknown[]): Promise<QueryResult>
   end(): Promise<void>
 }
 
-interface Card {
+export interface Card {
   number: number
   title: string
   column: string
@@ -477,7 +477,7 @@ export interface BoardInput {
   now?: number
 }
 
-async function build(
+export async function build(
   pool: PublicBoardPool,
 ): Promise<{ cards: Card[]; pulse: Pulse }> {
   const variant = process.env.TRIOS_VARIANT || 'prod'
