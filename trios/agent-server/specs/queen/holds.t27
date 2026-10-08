@@ -1,0 +1,73 @@
+// SPDX-License-Identifier: Apache-2.0
+; specs/queen/holds.t27 -- when a task's files stop shutting other bees out
+; Owner, 2026-10-08 (translated): "we improved the planner and made actors, so why are so few bees
+; working? where are the blockers?" Measured at 15:24Z on the live Queen:
+; - 32 of 70 lanes busy; the round ended "nothing to choose": no issue was eligible.
+; - fileConflict 167. All 135 cards in BLOCKED had their files held by another task; 131 of those
+;   holders were in REVIEW, and for 125 no bee was running on the file at all.
+; - bootstrap/src/compiler.rs alone shut out 105 issues. Its holders: one escalated to a person,
+;   one finished at 13:31 and waiting two hours for a verdict, one just sent back.
+; - the Queen finished 47 tasks that hour and reviewed 23, so the queue of finished work (91) grew,
+;   and every task in it held its files for up to 48 hours (QueenDelegation.reviewBoundaryHoldHours).
+; A boundary exists so two bees never write one file at once. That holds while a bee may be writing.
+; Once the work is finished, the only thing it shuts out is the next bee; a later conflict is a
+; merge to resolve, which costs less than a lane standing idle for hours. The owner chose this
+; trade on 2026-10-08 (escalations release at once, finished work after AWAITING_HOLD_MINUTES).
+; ASCII only (L3).
+; phi^2 + 1/phi^2 = 3 | TRINITY
+
+module QueenHolds;
+
+/// Where a task stands, for its files:
+/// WORKING: queued or running, a bee may be writing now.
+/// SEND_BACK: its verdict sent it back; the same work is expected back on these files.
+/// AWAITING: finished, waiting for a verdict (a wait, an empty attempt, no verdict yet).
+/// ESCALATED: waiting for a person. No person is in the loop (owner, 2026-10-05), so it holds nothing.
+/// DONE: accepted, failed or cancelled.
+pub const HS_WORKING : u8 = 0;
+pub const HS_SEND_BACK : u8 = 1;
+pub const HS_AWAITING : u8 = 2;
+pub const HS_ESCALATED : u8 = 3;
+pub const HS_DONE : u8 = 4;
+pub const HOLD_STAGES : u8 = 5;
+
+/// How long finished work keeps its files after it finished: long enough for a verdict that comes
+/// within a round or two, short enough that a slow review never empties the swarm.
+pub const AWAITING_HOLD_MINUTES : u32 = 30;
+
+/// A send-back is usually taken again within a round; past this, it waits like any finished work.
+pub const SEND_BACK_HOLD_MINUTES : u32 = 120;
+
+/// Whether the task's files still shut other bees out, `minutes` after it finished (the bee's own
+/// end, written once; a verdict's time is re-written every round a wait is re-read, so it cannot be
+/// the clock). A stage this card does not know holds nothing.
+pub fn holds_files(stage: u8, minutes: u32) -> bool {
+    if (stage == HS_WORKING) { return true; }
+    if (stage == HS_SEND_BACK) { return minutes < SEND_BACK_HOLD_MINUTES; }
+    if (stage == HS_AWAITING) { return minutes < AWAITING_HOLD_MINUTES; }
+    return false;
+}
+
+test a_bee_at_work_holds_its_files {
+    assert holds_files(HS_WORKING, 0) == true;
+    assert holds_files(HS_WORKING, 4000000000) == true;
+}
+
+test finished_work_lets_go_after_a_while {
+    assert holds_files(HS_AWAITING, 0) == true;
+    assert holds_files(HS_AWAITING, AWAITING_HOLD_MINUTES - 1) == true;
+    assert holds_files(HS_AWAITING, AWAITING_HOLD_MINUTES) == false;
+    assert holds_files(HS_SEND_BACK, SEND_BACK_HOLD_MINUTES - 1) == true;
+    assert holds_files(HS_SEND_BACK, SEND_BACK_HOLD_MINUTES) == false;
+}
+
+test a_person_and_a_verdict_hold_nothing {
+    assert holds_files(HS_ESCALATED, 0) == false;
+    assert holds_files(HS_DONE, 0) == false;
+    assert holds_files(HOLD_STAGES, 0) == false;
+}
+
+invariant a_send_back_waits_longer_than_finished_work {
+    assert SEND_BACK_HOLD_MINUTES > AWAITING_HOLD_MINUTES;
+    assert AWAITING_HOLD_MINUTES > 0;
+}

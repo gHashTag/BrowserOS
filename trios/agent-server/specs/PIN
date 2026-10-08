@@ -17,3 +17,6 @@ events: queen/events.wasm sha256 4f568a63f46b4dc125877421128fb080f76f001ec6a46d3
 dashboard card: gHashTag/t27 specs/queen/dashboard.t27 (t27#7826, PR t27#7827, blob 4dc1ebf05e262ebaf7acd5e77301bfcf9d1bbff2), byte-identical; dashboard.wasm = t27c gen-c + zig 0.16.0 cc --target=wasm32-wasi -Oz -DNDEBUG -mexec-model=reactor, exports free_lanes,idle_verdict,verdict_tone,timeline_shows,lease_state,lane_shown (reproducible: two builds, one hash)
 dashboard: queen/dashboard.t27 sha256 c97cea04ec3c86622f000d83098cdf5ae2d548ac36f10a48123506e6ac0d4e26
 dashboard: queen/dashboard.wasm sha256 2b310da336cd9332c179ee487c01188f2f9de8d2170403dfb61dc15737338557
+holds card: gHashTag/t27 specs/queen/holds.t27 (t27#7838, PR t27#7839, blob 64ce76f48f939f7afa03bb43bfa36e2d069a7d2b), byte-identical; holds.wasm = t27c gen-c + zig 0.16.0 cc --target=wasm32-wasi -Oz -DNDEBUG -mexec-model=reactor, exports holds_files (reproducible: two builds, one hash)
+holds: queen/holds.t27 sha256 6a4855c2d77b9b122a4cacf40159ecf81e0cdfaba58928f225e058bb60e6b6b1
+holds: queen/holds.wasm sha256 80af0a3a399f4343f6d618a4da088abfb146b949144f934041385e7cc92fc14b
