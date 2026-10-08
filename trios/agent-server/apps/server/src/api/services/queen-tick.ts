@@ -50,11 +50,14 @@ import {
   ensureControlTables,
   loadControlSpec,
   pendingAssigns,
+  publishEvent,
   reclaimableTaskLeases,
+  reclaimExpiredLeases,
   renewRunningLeases,
   setControlEventListener,
 } from './queen-control'
 import {
+  EV_LEASE_EXPIRED,
   EV_TASK_CREATED,
   EV_TASK_ENDED,
   eventApplies,
@@ -1658,12 +1661,28 @@ export async function runRound(
       holder,
       control.taskLeaseTtlSeconds,
     )
+    // R_RECLAIM: a runner that stopped beating for a whole TTL loses its
+    // task now, not after the runner reapers' 10 or 15 minutes. Each one is
+    // an EV_LEASE_EXPIRED in the log.
+    const reclaimed = await reclaimExpiredLeases(
+      pool,
+      control.taskLeaseTtlSeconds,
+      DISPATCH_OUTCOME_LABELS.reapedLeaseExpired,
+    )
+    for (const { issue, fence } of reclaimed) {
+      await publishEvent(pool, 'queen/lease.expired', { issue, fence }).catch(
+        () => 0,
+      )
+    }
     const reclaimable = await reclaimableTaskLeases(pool)
-    if (renewed > 0 || reclaimable.length > 0) {
+    if (renewed > 0 || reclaimed.length > 0) {
       logger.info('Queen control pass', {
         holder,
         renewed,
-        expiredLeases: reclaimable,
+        reclaimed: reclaimed.map((r) => r.issue),
+        // Every lease past its TTL, released ones included: what the claim
+        // would hand to its next contender.
+        expiredLeases: reclaimable.length,
       })
     }
   } catch (error) {
@@ -4731,8 +4750,9 @@ export function refillOnBeeCompletion(request: (why: string) => void): void {
  * `task.created` is published by the round itself, which has just offered
  * every free slot. A second request for either would not be lost but doubled:
  * the gate would run one more full round, GitHub reads included, for every bee
- * that started or ended. reaction_of still names both as waking; this is only
- * which path delivers the wake.
+ * that started or ended. `lease.expired` is the same case: only the round
+ * publishes it, while reclaiming, before it chooses. reaction_of still names
+ * all three as waking; this is only which path delivers the wake.
  *
  * Events recorded by another process (a runner) are in the log and are read by
  * the next round, which the durable close and the tick already guarantee.
@@ -4741,7 +4761,11 @@ export function refillOnBeeCompletion(request: (why: string) => void): void {
  */
 export function wakeOnControlEvents(
   request: (why: string) => void,
-  alreadyWoken: ReadonlySet<number> = new Set([EV_TASK_CREATED, EV_TASK_ENDED]),
+  alreadyWoken: ReadonlySet<number> = new Set([
+    EV_TASK_CREATED,
+    EV_TASK_ENDED,
+    EV_LEASE_EXPIRED,
+  ]),
 ): void {
   const lastApplied = new Map<string, number>()
   setControlEventListener(({ stream, name, kind, seq }) => {

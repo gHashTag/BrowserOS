@@ -47,6 +47,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import type { Pool } from 'pg'
 import { logger } from '../../lib/logger'
+import { loadControlSpec, renewTaskLeases } from './queen-control'
 import {
   announceDurableClose,
   baseHeadSha,
@@ -418,10 +419,27 @@ export async function renewRunnerLease(
   )
   const row = rows?.[0]
   if (!row) return null
+  const claimed = row.runner_claimed_at != null
+  // A lent runner's heartbeat is its bee's heartbeat (control card section 2):
+  // once it has claimed the task, its beat keeps the task lease alive, and a
+  // runner that stops beating loses the task within one TTL. Best effort: the
+  // older runner_lease_at above still stands if this cannot be written.
+  if (claimed) {
+    await loadControlSpec()
+      .then((spec) =>
+        renewTaskLeases(pool, [Number(row.issue)], spec.taskLeaseTtlSeconds),
+      )
+      .catch((error) => {
+        logger.warn('Could not renew the task lease of a lent runner', {
+          issue: Number(row.issue),
+          error: error instanceof Error ? error.message : String(error),
+        })
+      })
+  }
   return {
     issue: Number(row.issue),
     conversationId: String(row.conversation_id),
-    claimed: row.runner_claimed_at != null,
+    claimed,
   }
 }
 

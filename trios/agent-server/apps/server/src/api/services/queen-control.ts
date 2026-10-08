@@ -229,10 +229,81 @@ export async function renewRunningLeases(
          AND EXISTS (
            SELECT 1 FROM queen_dispatch d
             WHERE d.issue = t.issue AND d.started AND d.finished_at IS NULL
+              -- Only what the Queen herself is running or still holding as an
+              -- order. A task a runner has taken is renewed by that runner
+              -- (renewTaskLeases), so its lease says whether the RUNTIME is
+              -- alive - the card's heartbeat comes from the agent runtime,
+              -- not from the Queen vouching for a process she cannot see.
+              AND d.claimed_by IS NULL
+              AND d.runner_claimed_at IS NULL
          )`,
     [holder, ttlSeconds],
   )
   return result.rowCount ?? 0
+}
+
+/**
+ * A runtime's heartbeat for the tasks it is running (card section 2:
+ * TASK_HEARTBEAT_SECONDS, renew_lands). Renews only a lease that has not
+ * expired: once a lease lapsed, the task may already be another runtime's,
+ * and a late heartbeat must not revive it. Returns the issues renewed.
+ */
+export async function renewTaskLeases(
+  pool: Pick<Pool, 'query'>,
+  issues: number[],
+  ttlSeconds: number,
+): Promise<number[]> {
+  if (issues.length === 0) return []
+  const result = await pool.query(
+    `UPDATE queen_task_lease
+        SET renewed_at = now(),
+            expires_at = now() + make_interval(secs => $2)
+      WHERE issue = ANY($1::int[]) AND expires_at >= now()
+      RETURNING issue`,
+    [issues, ttlSeconds],
+  )
+  return result.rows.map((r) => Number(r.issue))
+}
+
+/**
+ * Reclamation (card section 2: reclaimable, EV_LEASE_EXPIRED -> R_RECLAIM).
+ * A task a runner took is ended at once when its lease has lapsed AND the
+ * runner's own older pulse - `claimed_at` for a bee runner, `runner_lease_at`
+ * for a lent runner - has also been silent for a whole TTL, instead of waiting
+ * out the 10- and 15-minute silences of the runner reapers.
+ *
+ * Both, not either. A runner from before this rule renews only its old pulse;
+ * draining through a deploy, it must not be mistaken for a dead one. A task
+ * the Queen runs herself is left to the boot and stall reapers, which salvage
+ * the worktree before they end the row; an order no runner has taken yet is
+ * the offer reapers' business. Returns the issues ended, with their fences.
+ */
+export async function reclaimExpiredLeases(
+  pool: Pool,
+  ttlSeconds: number,
+  outcome: string,
+): Promise<Array<{ issue: number; fence: number }>> {
+  const result = await pool.query(
+    `UPDATE queen_dispatch d
+        SET finished_at = now(), outcome = $2
+       FROM queen_task_lease t
+      WHERE t.issue = d.issue
+        AND t.expires_at < now()
+        AND d.started = true AND d.finished_at IS NULL
+        AND (
+          (d.claimed_by IS NOT NULL
+             AND d.claimed_at < now() - make_interval(secs => $1))
+          OR (d.runner_claimed_at IS NOT NULL
+             AND coalesce(d.runner_lease_at, d.runner_claimed_at)
+                 < now() - make_interval(secs => $1))
+        )
+      RETURNING d.issue, t.fence`,
+    [ttlSeconds, outcome],
+  )
+  return result.rows.map((r) => ({
+    issue: Number(r.issue),
+    fence: Number(r.fence),
+  }))
 }
 
 /**
