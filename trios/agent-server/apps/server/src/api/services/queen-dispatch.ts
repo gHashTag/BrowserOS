@@ -40,6 +40,13 @@ import {
   publishEvent,
   releaseTaskLease,
 } from './queen-control'
+import {
+  attemptStart,
+  ST_HOLD,
+  ST_TIP,
+  TIP_NONE,
+  TIP_SENT_BACK,
+} from './queen-control-rules'
 import { queenHolderName } from './queen-lease'
 import {
   describeReading,
@@ -3607,9 +3614,13 @@ export async function prepareWorktree(
   }
 
   const base = baseRef()
+  const start = await attemptStartRef(root, branch, base)
+  if (start.hold) {
+    return { ok: false, path, detail: start.detail }
+  }
   const added = await run(
     'git',
-    ['worktree', 'add', '-B', branch, path, base],
+    ['worktree', 'add', '-B', branch, path, start.ref],
     root,
     180_000,
   )
@@ -3621,7 +3632,66 @@ export async function prepareWorktree(
     }
   }
   const farmed = await farmNodeModules(path, root)
-  return { ok: true, path, detail: `cut from ${base}${farmed}` }
+  return { ok: true, path, detail: `${start.detail}${farmed}` }
+}
+
+/**
+ * Where a freshly cut attempt starts (specs/queen/control.t27 section 6,
+ * attempt_start).
+ *
+ * Measured 2026-10-06: every attempt was cut from the base, so a re-dispatch
+ * over finished work started over, its head did not descend from the tip
+ * already on the remote, and the export (which never forces) refused it - 73
+ * of the 102 accepted, never-pushed heads counted that day.
+ *
+ * The tip is the remote `queen-<issue>` after the fetch above. No tip, or a tip
+ * the base already contains, is TIP_NONE: the attempt starts from the base, as
+ * before. A tip of its own is TIP_SENT_BACK: the policy re-dispatches an issue
+ * only after its attempt was declined or released (an accepted dispatch is
+ * never chosen again - claimOnIssue), so the next bee continues from that work
+ * and its push is a fast-forward. A tip the card would hold (unjudged or
+ * accepted work) cannot be told apart here, and is never offered: the hold is
+ * the policy's, upstream. The local worktree reuse above already continues
+ * from this volume's own last attempt.
+ */
+export async function attemptStartRef(
+  root: string,
+  branch: string,
+  base: string,
+): Promise<{ ref: string; hold: boolean; detail: string }> {
+  const tipRef = `origin/${branch}`
+  const tipAt = await run(
+    'git',
+    ['rev-parse', '--verify', '--quiet', `${tipRef}^{commit}`],
+    root,
+    60_000,
+  )
+  let tip = TIP_NONE
+  if (tipAt.code === 0) {
+    const onBase = await run(
+      'git',
+      ['merge-base', '--is-ancestor', tipRef, base],
+      root,
+      60_000,
+    )
+    if (onBase.code !== 0) tip = TIP_SENT_BACK
+  }
+  const step = attemptStart(tip)
+  if (step === ST_TIP) {
+    return {
+      ref: tipRef,
+      hold: false,
+      detail: `cut from ${tipRef}, the previous attempt's tip (attempt_start)`,
+    }
+  }
+  if (step === ST_HOLD) {
+    return {
+      ref: base,
+      hold: true,
+      detail: `${tipRef} holds work still waiting for its verdict; held (attempt_start)`,
+    }
+  }
+  return { ref: base, hold: false, detail: `cut from ${base}` }
 }
 
 /**
