@@ -84,6 +84,7 @@ import {
   workspaceRoot,
 } from './queen-dispatch'
 import { pruneEvents, wakesHere } from './queen-events'
+import { heldPaths } from './queen-holds'
 import { advanceJobs, ensureJobTables, startJobsFromIssues } from './queen-jobs'
 import {
   acquireQueenLease,
@@ -1906,7 +1907,9 @@ export async function runRound(
     return boardTask(owner, repoName, {
       conversationId: row.conversation_id,
       issue: row.issue,
-      ownedPaths: row.owned_paths ?? [],
+      // holds.t27: finished work lets go of its files after a while, and an
+      // escalation at once; its issue stays claimed by its state, not its paths.
+      ownedPaths: heldPaths(row),
       branch: row.branch,
       // A finished task's clock starts when it FINISHED, not when it was
       // dispatched: `stillHoldsBoundary` measures the wait for a verdict from
