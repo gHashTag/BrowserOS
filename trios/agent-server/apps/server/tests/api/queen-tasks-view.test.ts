@@ -183,9 +183,33 @@ describe('the bees made from dispatch rows', () => {
     ])
     expect(bees[0]).toMatchObject({
       task: 'gHashTag/t27#7513',
-      since: '2026-10-08T07:01:00.000Z',
+      // the turn's start, not the runner's last renewal of claimed_at
+      since: '2026-10-08T07:00:00.000Z',
       lastEventAt: '2026-10-08T07:59:30.000Z',
     })
     expect(bees[3].lastEventAt).toBe(null)
+  })
+
+  it('a bee never heard from turns quiet, whatever a runner renews', () => {
+    const [bee] = beesOf(
+      [
+        {
+          issue: 7600,
+          key_index: 2,
+          dispatched_at: at('07:50:00'),
+          queued_at: at('07:49:00'),
+          claimed_by: 'runner-2:9',
+          // renewed 10 s ago by waitForEnding: liveness of the runner, not work
+          claimed_at: at('07:59:50'),
+          runner_claimed_at: null,
+          conversation_id: 'c9',
+        },
+      ],
+      new Map(),
+      'gHashTag/t27',
+      now,
+    )
+    expect(bee.since).toBe('2026-10-08T07:50:00.000Z')
+    expect(bee.state).toBe('quiet')
   })
 })
