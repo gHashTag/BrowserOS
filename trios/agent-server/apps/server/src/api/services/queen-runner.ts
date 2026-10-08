@@ -40,10 +40,13 @@ import { createQueenPool } from '../../lib/db/queen-pool'
 import { logger } from '../../lib/logger'
 import { bundleOfBranch } from '../routes/queen-export'
 import { loadControlSpec, renewTaskLeases } from './queen-control'
+import { P_REUSE, placement } from './queen-control-rules'
 import { abortBeeHere, runClaimedBee, salvageDispatch } from './queen-dispatch'
 import { queenLeaseDatabaseUrl } from './queen-lease'
 
 export interface BeeOrder {
+  /** The task's agent domain (specs/queen/domains.t27), when the order has one. */
+  domain?: number | null
   issue: number
   branch: string
   brief: string
@@ -86,6 +89,14 @@ function pollSeconds(): number {
 export async function claimQueuedBee(
   pool: Pool,
   runner: string,
+  /**
+   * The domain of the last task this runner ran, or null for a runner that has
+   * run none. An order of that domain is taken first - the runtime is "an idle
+   * runtime of the task's domain", placement's P_REUSE - and any other order
+   * after it, oldest first: a domain is an affinity, not a cap (control card
+   * section 5, owner 2026-10-08), so no order waits for a runtime of its own.
+   */
+  preferDomain: number | null = null,
 ): Promise<BeeOrder | null> {
   const rows = await pool.query(
     `UPDATE queen_dispatch
@@ -96,11 +107,14 @@ export async function claimQueuedBee(
            AND claimed_by IS NULL
            AND finished_at IS NULL
            AND started = true
-         ORDER BY queued_at
+         ORDER BY (domain IS NOT DISTINCT FROM $2::smallint
+                   AND $2::smallint IS NOT NULL) DESC,
+                  queued_at
          FOR UPDATE SKIP LOCKED
          LIMIT 1)
-      RETURNING issue, branch, brief, owned_paths, conversation_id, key_index`,
-    [runner],
+      RETURNING issue, branch, brief, owned_paths, conversation_id, key_index,
+                domain`,
+    [runner, preferDomain],
   )
   const row = rows.rows?.[0]
   if (!row) return null
@@ -125,6 +139,7 @@ export async function claimQueuedBee(
       : [],
     conversationId,
     keyIndex,
+    domain: row.domain == null ? null : Number(row.domain),
   }
 }
 
@@ -215,13 +230,23 @@ export async function runOneOrder(
   pool: Pool,
   runner: string,
 ): Promise<BeeOrder | null> {
-  const order = await claimQueuedBee(pool, runner)
+  const order = await claimQueuedBee(pool, runner, lastDomain)
   if (!order) return null
+  // placement, as this runtime answered it: its own domain's work is a reuse,
+  // anything else a clone onto this free lane (control card section 5).
+  const placed = placement(
+    lastDomain !== null && order.domain === lastDomain ? 1 : 0,
+    0,
+    1,
+  )
   logger.info('Runner claimed a bee', {
     runner,
     issue: order.issue,
     branch: order.branch,
+    domain: order.domain ?? null,
+    placement: placed === P_REUSE ? 'reuse' : 'clone',
   })
+  if (order.domain != null) lastDomain = order.domain
   inFlight.set(order.issue, order)
   // The first beat at once: preparing the worktree can take longer than a
   // heartbeat, and the lease must say this runtime is alive from the claim on.
@@ -255,6 +280,13 @@ export async function runOneOrder(
 
 /** The orders this process is carrying right now, by issue. */
 const inFlight = new Map<number, BeeOrder>()
+
+/**
+ * The domain of the last task this runtime took: what its builds and worktrees
+ * are warm for. Kept for the life of the process, which is the runtime's
+ * lineage - a turn's own context is cleared with the turn.
+ */
+let lastDomain: number | null = null
 
 /**
  * The runtime's heartbeat (specs/queen/control.t27 section 2): renew the task

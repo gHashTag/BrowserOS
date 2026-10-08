@@ -28,6 +28,9 @@ import {
   EV_TASK_ENDED,
   EV_TICK,
   EV_WORKER_IDLE,
+  P_CLONE,
+  P_REUSE,
+  P_WAIT,
   R_ASSIGN,
   R_CANCEL,
   R_DISPATCH,
@@ -38,6 +41,12 @@ import {
   SRC_AUTO,
   SRC_MANUAL,
   SRC_NONE,
+  ST_BASE,
+  ST_HOLD,
+  ST_TIP,
+  TIP_NONE,
+  TIP_PR_CLOSED,
+  TIP_SENT_BACK,
 } from './queen-control.gen'
 
 export * from './queen-control.gen'
@@ -101,6 +110,28 @@ export function fenceAfterCancel(fence: number): number {
 /** cancel_counts_against_issue: an interruption spends no retry. */
 export function cancelCountsAgainstIssue(): boolean {
   return false
+}
+
+/**
+ * placement (section 5): reuse an idle runtime of the task's domain, else clone
+ * onto any free lane, else wait. A domain is an affinity, not a cap.
+ */
+export function placement(
+  idleInDomain: number,
+  running: number,
+  cap: number,
+): number {
+  if (idleInDomain > 0) return P_REUSE
+  if (running < cap) return P_CLONE
+  return P_WAIT
+}
+
+/** attempt_start (section 6): where the next attempt on an issue starts. */
+export function attemptStart(tip: number): number {
+  if (tip === TIP_NONE) return ST_BASE
+  if (tip === TIP_SENT_BACK) return ST_TIP
+  if (tip === TIP_PR_CLOSED) return ST_TIP
+  return ST_HOLD
 }
 
 /**

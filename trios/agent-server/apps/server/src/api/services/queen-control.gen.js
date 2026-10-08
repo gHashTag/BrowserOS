@@ -56,7 +56,10 @@ export const A_WRONG_DOMAIN = 3;
 // t27c gen-js: fn fits was not emitted -- this backend lowers declarations, not bodies.
 export const DOMAINS = ["t27-c: the C and assembler backends", "t27-b: the native backend and the compiler", "specs: .t27 specifications, seals and their tests", "queen-ops: the supervisor, its reviewers and the board"];
 export const DOMAIN_COUNT = 4;
-export const DOMAIN_CAP = 4;
+export const DOMAIN_T27C = 0;
+export const DOMAIN_T27B = 1;
+export const DOMAIN_SPECS = 2;
+export const DOMAIN_QUEEN_OPS = 3;
 export const AG_BOOT = 0;
 export const AG_IDLE = 1;
 export const AG_BUSY = 2;
@@ -94,12 +97,43 @@ export const TIP_PR_CLOSED = 4;
 // t27c gen-js: fn attempt_push_lands was not emitted -- this backend lowers declarations, not bodies.
 // t27c gen-js: fn may_supersede was not emitted -- this backend lowers declarations, not bodies.
 // t27c gen-js: fn supersede_keeps_old_tip was not emitted -- this backend lowers declarations, not bodies.
+export const EFF_NONE = 0;
+export const EFF_INTENT = 1;
+export const EFF_DONE = 2;
+export const EK_MODEL_CALL = 0;
+export const EK_PUSH = 1;
+export const EK_PULL_REQUEST = 2;
+export const EK_COMMENT = 3;
+export const EFFECT_KINDS = 4;
+export const DO_RUN = 0;
+export const DO_SKIP = 1;
+export const DO_LOOK = 2;
+export const DO_NOTHING = 3;
+export const DO_GIVE_UP = 4;
+export const EFFECT_RUN_LIMIT = 3;
+export const GITHUB_REQUEST_LIMIT_SECONDS = 10;
+// t27c gen-js: fn effect_can_be_looked_up was not emitted -- this backend lowers declarations, not bodies.
+// t27c gen-js: fn receiver_refuses_a_copy was not emitted -- this backend lowers declarations, not bodies.
+// t27c gen-js: fn intent_may_start was not emitted -- this backend lowers declarations, not bodies.
+// t27c gen-js: fn runs_after_intent was not emitted -- this backend lowers declarations, not bodies.
+// t27c gen-js: fn rerun_or_give_up was not emitted -- this backend lowers declarations, not bodies.
+// t27c gen-js: fn effect_action was not emitted -- this backend lowers declarations, not bodies.
+// t27c gen-js: fn after_look was not emitted -- this backend lowers declarations, not bodies.
+// t27c gen-js: fn give_up_counts_against_issue was not emitted -- this backend lowers declarations, not bodies.
+// t27c gen-js: fn look_wait_seconds was not emitted -- this backend lowers declarations, not bodies.
+// t27c gen-js: fn effect_may_repeat was not emitted -- this backend lowers declarations, not bodies.
 // t27c gen-js: a InvariantBlock was not emitted -- it is checked by the compiler, not by the artifact.
 // t27c gen-js: a InvariantBlock was not emitted -- it is checked by the compiler, not by the artifact.
 // t27c gen-js: a InvariantBlock was not emitted -- it is checked by the compiler, not by the artifact.
 // t27c gen-js: a InvariantBlock was not emitted -- it is checked by the compiler, not by the artifact.
 // t27c gen-js: a InvariantBlock was not emitted -- it is checked by the compiler, not by the artifact.
 // t27c gen-js: a InvariantBlock was not emitted -- it is checked by the compiler, not by the artifact.
+// t27c gen-js: a InvariantBlock was not emitted -- it is checked by the compiler, not by the artifact.
+// t27c gen-js: a InvariantBlock was not emitted -- it is checked by the compiler, not by the artifact.
+// t27c gen-js: a InvariantBlock was not emitted -- it is checked by the compiler, not by the artifact.
+// t27c gen-js: a TestBlock was not emitted -- it is checked by the compiler, not by the artifact.
+// t27c gen-js: a TestBlock was not emitted -- it is checked by the compiler, not by the artifact.
+// t27c gen-js: a TestBlock was not emitted -- it is checked by the compiler, not by the artifact.
 // t27c gen-js: a TestBlock was not emitted -- it is checked by the compiler, not by the artifact.
 // t27c gen-js: a TestBlock was not emitted -- it is checked by the compiler, not by the artifact.
 // t27c gen-js: a TestBlock was not emitted -- it is checked by the compiler, not by the artifact.
@@ -117,7 +151,7 @@ export const TIP_PR_CLOSED = 4;
 
 // Declaration order, which the spec's own laws depend on.
 export const __STRUCT_ORDER__ = [];
-export const __DECL_ORDER__ = ["EV_TASK_CREATED", "EV_TASK_ENDED", "EV_WORKER_IDLE", "EV_LEASE_EXPIRED", "EV_EVIDENCE", "EV_REVIEW", "EV_ASSIGN", "EV_CANCEL", "EV_HEARTBEAT", "EV_TICK", "EVENT_KINDS", "EVENT_NAMES", "R_NONE", "R_DISPATCH", "R_REVIEW", "R_RECLAIM", "R_ASSIGN", "R_CANCEL", "R_RECONCILE", "RECONCILE_SECONDS", "NO_HOLDER", "TASK_LEASE_TTL_SECONDS", "TASK_HEARTBEAT_SECONDS", "SRC_NONE", "SRC_MANUAL", "SRC_AUTO", "A_OK", "A_HELD", "A_AGENT_BUSY", "A_WRONG_DOMAIN", "DOMAINS", "DOMAIN_COUNT", "DOMAIN_CAP", "AG_BOOT", "AG_IDLE", "AG_BUSY", "AG_COMPACT", "AG_RETIRED", "AG_ILLEGAL", "AE_READY", "AE_ASSIGN", "AE_TASK_DONE", "AE_INTERRUPT", "AE_COMPACTED", "AE_RETIRE", "P_REUSE", "P_CLONE", "P_WAIT", "ST_BASE", "ST_TIP", "ST_HOLD", "TIP_NONE", "TIP_UNJUDGED", "TIP_SENT_BACK", "TIP_ACCEPTED", "TIP_PR_CLOSED"];
+export const __DECL_ORDER__ = ["EV_TASK_CREATED", "EV_TASK_ENDED", "EV_WORKER_IDLE", "EV_LEASE_EXPIRED", "EV_EVIDENCE", "EV_REVIEW", "EV_ASSIGN", "EV_CANCEL", "EV_HEARTBEAT", "EV_TICK", "EVENT_KINDS", "EVENT_NAMES", "R_NONE", "R_DISPATCH", "R_REVIEW", "R_RECLAIM", "R_ASSIGN", "R_CANCEL", "R_RECONCILE", "RECONCILE_SECONDS", "NO_HOLDER", "TASK_LEASE_TTL_SECONDS", "TASK_HEARTBEAT_SECONDS", "SRC_NONE", "SRC_MANUAL", "SRC_AUTO", "A_OK", "A_HELD", "A_AGENT_BUSY", "A_WRONG_DOMAIN", "DOMAINS", "DOMAIN_COUNT", "DOMAIN_T27C", "DOMAIN_T27B", "DOMAIN_SPECS", "DOMAIN_QUEEN_OPS", "AG_BOOT", "AG_IDLE", "AG_BUSY", "AG_COMPACT", "AG_RETIRED", "AG_ILLEGAL", "AE_READY", "AE_ASSIGN", "AE_TASK_DONE", "AE_INTERRUPT", "AE_COMPACTED", "AE_RETIRE", "P_REUSE", "P_CLONE", "P_WAIT", "ST_BASE", "ST_TIP", "ST_HOLD", "TIP_NONE", "TIP_UNJUDGED", "TIP_SENT_BACK", "TIP_ACCEPTED", "TIP_PR_CLOSED", "EFF_NONE", "EFF_INTENT", "EFF_DONE", "EK_MODEL_CALL", "EK_PUSH", "EK_PULL_REQUEST", "EK_COMMENT", "EFFECT_KINDS", "DO_RUN", "DO_SKIP", "DO_LOOK", "DO_NOTHING", "DO_GIVE_UP", "EFFECT_RUN_LIMIT", "GITHUB_REQUEST_LIMIT_SECONDS"];
 
 // What this spec holds and this backend did not print. Empty is the whole
 // story most of the time; an entry here is a promise the artifact does not
