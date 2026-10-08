@@ -4922,7 +4922,7 @@ export function startQueenTick(): void {
   gate.request('service starting')
   timer = setInterval(() => gate.request('periodic tick'), interval * 1000)
 
-  const handover = () => {
+  const handover = async (): Promise<void> => {
     if (timer) clearInterval(timer)
     // The gate with it, for the same reason as the timer: no round may start
     // after the process has handed the hive back.
@@ -4931,8 +4931,56 @@ export function startQueenTick(): void {
     // SIGTERM nobody is going to reach its `finally` before the process ends.
     for (const beat of heartbeats) clearInterval(beat)
     heartbeats.clear()
-    releaseQueenLease(pool, LEASE_NAME, queenHolderName()).catch(() => {})
+    await releaseQueenLease(pool, LEASE_NAME, queenHolderName()).catch(() => {})
   }
-  process.once('SIGTERM', handover)
-  process.once('SIGINT', handover)
+  // ROUNDS THROUGH THE DRAIN. This container is also a bee runner, and a
+  // stopping runner waits up to TRIOS_BEE_RUNNER_DRAIN_SECONDS for its bees.
+  // The next container cannot start until this one ends, because there is one
+  // instance and one volume. Measured 2026-10-08 ("Runner draining ...
+  // seconds 1800"): handing the hive back on SIGTERM left NO round running for
+  // the whole drain, so every release emptied the swarm for thirty minutes.
+  // When bees run elsewhere, a round only writes orders that the other runners
+  // claim, and this runner already stopped claiming. So the rounds go on until
+  // the process is about to end, and main.ts hands the hive back then
+  // (stopQueenTickNow), after the drain.
+  stopAtExit = handover
+  process.once('SIGTERM', () => {
+    if (roundsThroughDrain()) {
+      logger.info(
+        'Queen keeps her rounds through the drain; orders go to the other runners',
+      )
+      return
+    }
+    void handover()
+  })
+  process.once('SIGINT', () => void handover())
+}
+
+let stopAtExit: (() => Promise<void>) | null = null
+
+/**
+ * Whether a stopping container keeps running rounds until it ends. Two
+ * conditions: its bees run elsewhere, so a round writes orders rather than
+ * starting a bee here, and it drains, so its end is far enough away to matter.
+ */
+export function roundsThroughDrain(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  const drain = env.TRIOS_BEE_RUNNER_DRAIN_SECONDS?.trim() ?? ''
+  return (
+    env.TRIOS_QUEEN_BEES_RUN_ELSEWHERE === 'on' &&
+    /^\d+$/.test(drain) &&
+    Number(drain) > 0
+  )
+}
+
+/**
+ * For the server's shutdown, after its runner drained: stop the rounds and
+ * hand the hive back, so the next container takes the lease at once instead
+ * of waiting out its TTL. A no-op when the tick never started.
+ */
+export async function stopQueenTickNow(): Promise<void> {
+  const stop = stopAtExit
+  stopAtExit = null
+  if (stop) await stop()
 }

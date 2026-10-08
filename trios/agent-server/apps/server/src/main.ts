@@ -18,7 +18,7 @@ import {
   peekOpenClawService,
 } from './api/services/openclaw/openclaw-service'
 import { drainActiveRunner, startBeeRunner } from './api/services/queen-runner'
-import { startQueenTick } from './api/services/queen-tick'
+import { startQueenTick, stopQueenTickNow } from './api/services/queen-tick'
 import { CdpBackend } from './browser/backends/cdp'
 import { Browser } from './browser/browser'
 import type { ServerConfig } from './config'
@@ -252,6 +252,9 @@ export class Application {
     // Bees first, while the database and the HTTP server are still up: a
     // runner given a drain window lets its bees end before anything closes.
     if (reason === 'SIGTERM') await drainActiveRunner().catch(() => {})
+    // The Queen ran her rounds through that drain (queen-tick.ts,
+    // roundsThroughDrain); she hands the hive back only now, just before exit.
+    await stopQueenTickNow().catch(() => {})
     stopSkillSync()
     // Only what was actually started. `getOpenClawService` constructs on
     // demand, so calling it here built the runtime it was meant to stop.
