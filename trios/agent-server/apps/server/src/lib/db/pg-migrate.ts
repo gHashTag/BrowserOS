@@ -140,6 +140,18 @@ CREATE TABLE IF NOT EXISTS queen_event_log (
   PRIMARY KEY (stream, seq)
 );
 
+-- The bus (gHashTag/t27 specs/queen/events.t27): which process wrote a row, so
+-- a reader can tell its own events from another's, and the counter each
+-- stream numbers from. The writing statement holds the counter row locked
+-- until it commits, so numbers are gapless and in commit order; MAX(seq)+1
+-- gave two writers one number. No seed: the first write of a stream creates
+-- its row past the log's own maximum (publishEvent).
+ALTER TABLE queen_event_log ADD COLUMN IF NOT EXISTS origin text;
+CREATE TABLE IF NOT EXISTS queen_event_counter (
+  stream text PRIMARY KEY,
+  last bigint NOT NULL
+);
+
 -- A person's assignments, waiting for a round (control card section 3,
 -- next_source: manual before automatic). One row per issue; the round removes
 -- it once a bee starts on the issue, and a cancel removes it too.

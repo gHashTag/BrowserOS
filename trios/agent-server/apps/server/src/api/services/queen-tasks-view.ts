@@ -30,6 +30,8 @@ import {
   type PublicBoardPool,
 } from '../routes/queen-kanban'
 import { flag, loadCardWasm, u32 } from './queen-card-wasm'
+import { logBounds } from './queen-events'
+import { REFRESH_TASKS_MAX } from './queen-events.gen'
 import { isRunnerLane } from './queen-runners'
 import {
   BEE_STATE_NAMES,
@@ -91,9 +93,14 @@ export interface TasksQuery {
   repo: string | null
   q: string | null
   limit: number
+  /** Only these issues: what a page of events named (events.t27 refresh_action). */
+  issues: number[]
 }
 
-/** Read `?kind=&state=&repo=&q=&limit=` into masks and bounds. Unknown names are ignored. */
+/**
+ * Read `?kind=&state=&repo=&q=&limit=&issues=` into masks and bounds. Unknown
+ * names are ignored; `issues` keeps at most REFRESH_TASKS_MAX numbers.
+ */
 export function parseTasksQuery(
   params: Record<string, string | undefined>,
 ): TasksQuery {
@@ -112,6 +119,15 @@ export function parseTasksQuery(
       Number.isFinite(limit) && limit > 0
         ? Math.min(Math.floor(limit), TASK_PAGE_MAX)
         : TASK_PAGE_DEFAULT,
+    issues: [
+      ...new Set(
+        (params.issues ?? '')
+          .split(',')
+          .map((s) => s.trim())
+          .filter((s) => /^\d{1,9}$/.test(s))
+          .map(Number),
+      ),
+    ].slice(0, REFRESH_TASKS_MAX),
   }
 }
 
@@ -172,6 +188,8 @@ export function beesOf(
 
 export interface TasksView {
   at: string
+  /** The event log's newest number when this view was read: read past it (events.t27). */
+  cursor: number
   kinds: readonly string[]
   states: readonly string[]
   tasks: TaskRecord[]
@@ -192,6 +210,11 @@ export async function buildTasksView(
   repo: string,
   now: number = Date.now(),
 ): Promise<TasksView> {
+  // Before the rows, never after: an event that lands while they are read is
+  // then past the cursor and is read again, which a reader skips or reapplies
+  // (delta_action); taken after, it would be inside the view and never read.
+  const cursor = (await logBounds(pool, 'queen').catch(() => ({ newest: 0 })))
+    .newest
   const [board, running, jobs, reviews] = await Promise.all([
     buildBoard(pool as unknown as PublicBoardPool),
     pool.query(
@@ -306,8 +329,16 @@ export async function buildTasksView(
   const kindMask = mask(query.kinds)
   const stateMask = mask(query.states)
   const repoLower = query.repo?.toLowerCase() ?? null
+  const only = query.issues.length > 0 ? new Set(query.issues) : null
+  const named = (t: { repo: string; number: number | null; kind: string }) =>
+    only === null ||
+    (t.repo === repo &&
+      t.kind !== KIND_NAMES[TK_REVIEW] &&
+      t.number !== null &&
+      only.has(t.number))
   const matched = all.filter(
     (t) =>
+      named(t) &&
       taskMatches(kindMask, stateMask, t.kindIndex, t.stateIndex) &&
       (repoLower === null || t.repo.toLowerCase() === repoLower) &&
       (query.q === null ||
@@ -324,10 +355,13 @@ export async function buildTasksView(
     .slice(0, query.limit)
     .map(({ kindIndex: _k, stateIndex: _s, ...t }) => t)
   const shownBees = bees.filter(
-    (b) => repoLower === null || b.repo.toLowerCase() === repoLower,
+    (b) =>
+      (repoLower === null || b.repo.toLowerCase() === repoLower) &&
+      (only === null || only.has(b.number)),
   )
   return {
     at: new Date(now).toISOString(),
+    cursor,
     kinds: KIND_NAMES,
     states: STATE_NAMES,
     tasks: page,

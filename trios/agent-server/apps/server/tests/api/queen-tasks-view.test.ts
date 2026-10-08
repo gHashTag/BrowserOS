@@ -115,9 +115,19 @@ describe('the query', () => {
       repo: 'gHashTag/t27',
       q: 'port',
       limit: 2000,
+      issues: [],
     })
     expect(parseTasksQuery({}).limit).toBe(500)
     expect(parseTasksQuery({ limit: '-3' }).limit).toBe(500)
+  })
+
+  // events.t27 refresh_action: a board refreshes the tasks a page named
+  it('reads the issues a page of events named, once each, at most a hundred', () => {
+    expect(parseTasksQuery({ issues: '12, 7,12,x,-3,1e3' }).issues).toEqual([
+      12, 7,
+    ])
+    const many = Array.from({ length: 150 }, (_, i) => i + 1).join(',')
+    expect(parseTasksQuery({ issues: many }).issues).toHaveLength(100)
   })
 })
 

@@ -4031,6 +4031,11 @@ class Scribe {
         // A transcript row that will not save must not take the bee down with
         // it. Watching is a convenience; the work is not.
       })
+    // The bee is working: task.evidence, which events.t27 log_due thins to one
+    // row a minute per issue. The game reads it to show the bee busy.
+    await publishEvent(this.pool, 'queen/task.evidence', {
+      issue: this.issue,
+    }).catch(() => 0)
   }
 }
 

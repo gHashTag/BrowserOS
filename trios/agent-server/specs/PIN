@@ -11,3 +11,6 @@ shaping: policy/issue_shape.wasm sha256 506a5e70bd149bed16f6e0ef64ca4b7f2c4b2f59
 tasks card: gHashTag/t27 specs/queen/tasks.t27 (t27#7722, blob 7443ffb54a63d063330f04d578d97fe2d03ff402), byte-identical; tasks.wasm = t27c gen-c + zig 0.16.0 cc --target=wasm32-wasi -Oz -DNDEBUG -mexec-model=reactor, exports job_state,review_state,a2a_state,bee_state,task_matches
 tasks: queen/tasks.t27 sha256 8a0e16fb90725445cca03d5b87b2dacf4f2b9c33d27273e60f1c647c07ee7058
 tasks: queen/tasks.wasm sha256 baca275ead0ab544166f3f69cb139e1cfe2f3e7c404cac0df8e1ff5ba968c963
+events card: gHashTag/t27 specs/queen/events.t27 (t27#7789, PR t27#7800, blob 446bdf224310d2136319b553492215eedd2aac43), byte-identical; events.wasm = t27c gen-c + zig 0.16.0 cc --target=wasm32-wasi -Oz -DNDEBUG -mexec-model=reactor, exports next_seq,log_due,token_char,token_ok,cursor_read,delta_action,page_size,wait_seconds,refresh_action,board_action,wakes_here,runner_claims_now,prune_through (reproducible: two builds, one hash)
+events: queen/events.t27 sha256 3ada80a188347a6cb76ac620b014b35241097fb057395ab3fd82e5468bb7ede1
+events: queen/events.wasm sha256 4f568a63f46b4dc125877421128fb080f76f001ec6a46d3c88e41186b6d56807

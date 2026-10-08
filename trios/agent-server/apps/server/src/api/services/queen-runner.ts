@@ -39,9 +39,16 @@ import type { Pool } from 'pg'
 import { createQueenPool } from '../../lib/db/queen-pool'
 import { logger } from '../../lib/logger'
 import { bundleOfBranch } from '../routes/queen-export'
-import { loadControlSpec, renewTaskLeases } from './queen-control'
+import {
+  addControlEventReader,
+  followControlEvents,
+  loadControlSpec,
+  publishEvent,
+  renewTaskLeases,
+} from './queen-control'
 import { P_REUSE, placement } from './queen-control-rules'
 import { abortBeeHere, runClaimedBee, salvageDispatch } from './queen-dispatch'
+import { runnerClaimsNow } from './queen-events'
 import { queenLeaseDatabaseUrl } from './queen-lease'
 
 export interface BeeOrder {
@@ -467,9 +474,28 @@ export function startBeeRunner(): void {
   }, every * 1000)
   take()
 
+  // The bus (events.t27 section 4): an order is taken the moment the Queen
+  // writes it (task.created), not at the next poll; and the Queen hears that
+  // this runner came up with free slots (worker.idle) instead of finding out
+  // at her next round.
+  const stopReading = addControlEventReader(({ kind }) => {
+    if (!stopped && runnerClaimsNow(kind, slots - busy)) take()
+  })
+  followControlEvents(pool)
+    .then(() => publishEvent(pool, 'queen/worker.idle', { slots }))
+    .catch((error) =>
+      logger.warn(
+        'Runner cannot follow the event log; it takes orders by poll',
+        {
+          error: error instanceof Error ? error.message : String(error),
+        },
+      ),
+    )
+
   const stop = (): void => {
     stopped = true
     clearInterval(timer)
+    stopReading()
   }
   active = { pool, runner, stop }
 

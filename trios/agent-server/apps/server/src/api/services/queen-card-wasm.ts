@@ -23,6 +23,8 @@ type Fn = (...args: number[]) => number
 export interface CardWasm {
   /** Call an exported function with numbers (bools as 0/1). */
   call(name: string, ...args: number[]): number
+  /** Call one that takes or returns a u64: those cross as BigInt. */
+  call64(name: string, ...args: Array<number | bigint>): number | bigint
   /** Write texts into scratch memory; returns each one's address and length. */
   put(...texts: string[]): Array<{ at: number; len: number }>
   /** Room for an output buffer of `bytes` after the last put; returns its address. */
@@ -67,6 +69,14 @@ export function loadCardWasm(
         throw new Error(`${file} exports no ${name}`)
       return fn(...args)
     },
+    call64(name, ...args) {
+      const fn = x[name] as
+        | ((...a: Array<number | bigint>) => number | bigint)
+        | undefined
+      if (typeof fn !== 'function')
+        throw new Error(`${file} exports no ${name}`)
+      return fn(...args)
+    },
     put(...texts) {
       cursor = base
       return texts.map((text) => {
@@ -95,3 +105,5 @@ export function loadCardWasm(
 export const flag = (b: boolean): number => (b ? 1 : 0)
 export const u32 = (n: number): number =>
   Math.max(0, Math.min(0xffff_ffff, Math.floor(n))) >>> 0
+export const u64 = (n: number): bigint =>
+  BigInt(Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0)

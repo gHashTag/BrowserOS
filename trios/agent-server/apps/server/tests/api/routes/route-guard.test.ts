@@ -138,10 +138,14 @@ describe('route-guard audit over src/api/server.ts', () => {
     // an explicit publicReadCorsMiddleware() on issue titles and columns, jobs,
     // reviews on public repositories, and bees (issue, since, last heard, an
     // anonymous lane). Public-read went 13 to 14.
-    expect(report.totalMounts).toBe(58)
+    // RE-MEASURED 2026-10-08, the bus: 58 became 59 with /queen/public-events,
+    // an explicit publicReadCorsMiddleware() on event numbers, kinds and times,
+    // and only the payload keys and tokens events.t27 lets through. Public-read
+    // went 14 to 15.
+    expect(report.totalMounts).toBe(59)
     expect(report.prefixGuardCount).toBe(18)
     expect(report.guardedSubAppCount).toBe(18)
-    expect(report.publicReadCount).toBe(14)
+    expect(report.publicReadCount).toBe(15)
   })
 
   it('reports zero unguarded mounts once the reasoned allowlist is applied', () => {
@@ -216,7 +220,9 @@ describe('route-guard audit over src/api/server.ts', () => {
     // thirteenth public-read is /queen/public-shaping.
     // RE-MEASURED 2026-10-08, the task view: thirty-four became thirty-five. The
     // fourteenth public-read is /queen/public-tasks.
-    expect(queenMounts.length).toBe(35)
+    // RE-MEASURED 2026-10-08, the bus: thirty-five became thirty-six. The
+    // fifteenth public-read is /queen/public-events.
+    expect(queenMounts.length).toBe(36)
 
     const counts: Record<string, number> = {
       'public-read': 0,
@@ -230,7 +236,7 @@ describe('route-guard audit over src/api/server.ts', () => {
     // The four buckets must account for every mount with the exact expected
     // split; anything unaccounted for breaks one of these numbers.
     expect(counts).toEqual({
-      'public-read': 14,
+      'public-read': 15,
       'prefix-guard': 0,
       wrapper: 11,
       unguarded: 10,

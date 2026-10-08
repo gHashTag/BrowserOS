@@ -49,6 +49,7 @@ import { contributorRuntime } from './queen-contributor-keys'
 import {
   clearAssigns,
   ensureControlTables,
+  followControlEvents,
   loadControlSpec,
   pendingAssigns,
   publishEvent,
@@ -56,15 +57,9 @@ import {
   reclaimExpiredLeases,
   renewRunningLeases,
   setControlEventListener,
+  stopFollowing,
 } from './queen-control'
-import {
-  EV_LEASE_EXPIRED,
-  EV_TASK_CREATED,
-  EV_TASK_ENDED,
-  eventApplies,
-  manualFirst,
-  wakesQueen,
-} from './queen-control-rules'
+import { eventApplies, manualFirst, wakesQueen } from './queen-control-rules'
 import {
   type CriterionRun,
   criteriaCounts,
@@ -88,6 +83,7 @@ import {
   workerProbeEndpoint,
   workspaceRoot,
 } from './queen-dispatch'
+import { pruneEvents, wakesHere } from './queen-events'
 import { advanceJobs, ensureJobTables, startJobsFromIssues } from './queen-jobs'
 import {
   acquireQueenLease,
@@ -910,13 +906,18 @@ export async function closeObsolete(
       `reviewer_misses=${counters.reviewerMisses}, ` +
       `criteria=${counters.criteria ?? 'unread'}. Its files are free; the ` +
       'issue is not taken again while this dispatch is in the 7-day window.'
-    await pool.query(
+    const moved = await pool.query(
       `UPDATE queen_dispatch
           SET review_state = $3,
               judged_note = $4 || coalesce(E'\n' || judged_note, '')
         WHERE issue = $1 AND review_state = $2`,
       [issue, was, OBSOLETE_STATE, reason],
     )
+    if (moved.rowCount)
+      await publishEvent(pool, 'queen/task.reviewed', {
+        issue,
+        verdict: OBSOLETE_STATE,
+      }).catch(() => 0)
     logger.info('Queen review valve closed a dispatch', { issue, was })
   }
   return closed
@@ -4340,6 +4341,13 @@ async function recordVerdict(
       verdict.reviewAttempted,
     ],
   )
+  // A wait is the absence of a verdict, re-read every round; anything else is
+  // one, and the board moves the card on it.
+  if (verdict.state !== 'wait')
+    await publishEvent(pool, 'queen/task.reviewed', {
+      issue,
+      verdict: verdict.state,
+    }).catch(() => 0)
 }
 
 /**
@@ -4805,34 +4813,23 @@ export function refillOnBeeCompletion(request: (why: string) => void): void {
  * while a round runs coalesce into ONE follow-up - the gate's own flag, which
  * is followup_reactions.
  *
- * TWO KINDS ARRIVE ALREADY WOKEN, and are not woken twice. `task.ended` is
- * published by the durable close, whose own listener (refillOnBeeCompletion)
- * already asks for the round - and asks only once the row reads finished. And
- * `task.created` is published by the round itself, which has just offered
- * every free slot. A second request for either would not be lost but doubled:
- * the gate would run one more full round, GitHub reads included, for every bee
- * that started or ended. `lease.expired` is the same case: only the round
- * publishes it, while reclaiming, before it chooses. reaction_of still names
- * all three as waking; this is only which path delivers the wake.
- *
- * Events recorded by another process (a runner) are in the log and are read by
- * the next round, which the durable close and the tick already guarantee.
+ * THE PUBLISHER'S OWN KINDS ARE NOT WOKEN TWICE (events.t27 wakes_here,
+ * PUBLISHER_REACTS). `task.ended` is published by the durable close, whose own
+ * listener (refillOnBeeCompletion) already asks for the round. `task.created`
+ * and `lease.expired` are published by the round itself, and `tick` by the
+ * timer that asks for it. A second request for any of them would not be lost
+ * but doubled: one more full round, GitHub reads included, for every bee that
+ * started or ended. The same kinds written by ANOTHER process - a runner's
+ * task.ended - do wake her: before the bus they waited out the next round.
  *
  * EXPORTED FOR THE SUITE, like refillOnBeeCompletion: the wiring is the feature.
  */
-export function wakeOnControlEvents(
-  request: (why: string) => void,
-  alreadyWoken: ReadonlySet<number> = new Set([
-    EV_TASK_CREATED,
-    EV_TASK_ENDED,
-    EV_LEASE_EXPIRED,
-  ]),
-): void {
+export function wakeOnControlEvents(request: (why: string) => void): void {
   const lastApplied = new Map<string, number>()
-  setControlEventListener(({ stream, name, kind, seq }) => {
+  setControlEventListener(({ stream, name, kind, seq, publishedHere }) => {
     if (!eventApplies(lastApplied.get(stream) ?? 0, seq)) return
     lastApplied.set(stream, seq)
-    if (!wakesQueen(kind) || alreadyWoken.has(kind)) return
+    if (!wakesHere(wakesQueen(kind), kind, publishedHere)) return
     request(`event ${name} #${seq}`)
   })
 }
@@ -4918,12 +4915,32 @@ export function startQueenTick(): void {
   const gate = createRoundGate(round)
   refillOnBeeCompletion(gate.request)
   wakeOnControlEvents(gate.request)
+  // The bus (events.t27 section 4): this process reads every row of the log,
+  // a runner's included, so a runner's task.ended wakes her within a second.
+  followControlEvents(pool).catch((error) =>
+    logger.warn(
+      'Queen cannot follow the event log; events wake her at rounds',
+      {
+        error: error instanceof Error ? error.message : String(error),
+      },
+    ),
+  )
 
   gate.request('service starting')
-  timer = setInterval(() => gate.request('periodic tick'), interval * 1000)
+  let ticks = 0
+  timer = setInterval(() => {
+    gate.request('periodic tick')
+    // The tick is an event too (control.t27 EV_TICK): the timer that asks for
+    // the round writes it, so the board reads when the last one ran.
+    void publishEvent(pool, 'queen/tick', {}).catch(() => {})
+    // Once an hour, what events.t27 no longer keeps.
+    if (++ticks % Math.max(1, Math.round(3600 / interval)) === 0)
+      void pruneEvents(pool, 'queen').catch(() => {})
+  }, interval * 1000)
 
   const handover = async (): Promise<void> => {
     if (timer) clearInterval(timer)
+    stopFollowing()
     // The gate with it, for the same reason as the timer: no round may start
     // after the process has handed the hive back.
     gate.stop()
