@@ -143,6 +143,9 @@ class FakeGithub implements AppGithub {
   async installationRepos(_id: number) {
     return this.repos
   }
+  async installationFor(_repo: string) {
+    return INST
+  }
   async call(
     _inst: number,
     method: string,

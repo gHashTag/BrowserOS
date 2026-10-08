@@ -137,6 +137,7 @@ import {
 } from './queen-reviewer'
 import { idleRunner, reapSilentRunners } from './queen-runner-work'
 import { isRunnerLane } from './queen-runners'
+import { startShaping } from './queen-shaper'
 import { recordEarnings } from './queen-tri-earnings'
 
 /**
@@ -1740,6 +1741,10 @@ export async function runRound(
           error: error instanceof Error ? error.message : String(error),
         })
       })
+    // An issue that is not ready is shaped by the Queen, or its author is told
+    // once what it lacks (specs/queen/shaping.t27, t27#7714). Beside the
+    // round, never inside it: a shape is a model call.
+    startShaping(pool, open)
     candidates = open.map((i) => i.number)
     candidateBodies = Object.fromEntries(
       open.map((i) => [String(i.number), i.body]),

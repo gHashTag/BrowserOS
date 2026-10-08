@@ -118,6 +118,15 @@ export const RV_FAILED = 3
 export const APP_ATTEMPT_LIMIT = 3
 /** Repositories polled per round; the oldest-polled first, so all rotate. */
 export const APP_POLL_REPOS_PER_ROUND = 4
+/**
+ * Only repositories pushed to within this many days are polled. Measured
+ * 2026-10-08: the owner's installation covers 238 repositories, and at
+ * APP_POLL_REPOS_PER_ROUND a full cycle took about an hour, while polling all
+ * of them every APP_POLL_SECONDS would cost more than the 5,000 requests an
+ * hour GitHub allows. A repository that is pushed to again is polled again
+ * from the next reconcile, which reads `pushed_at`.
+ */
+export const APP_ACTIVE_DAYS = 14
 /** Replies (help, pause, quota) posted per round. */
 export const APP_REPLIES_PER_ROUND = 6
 /** The patch the model is shown, at most. Past it the review says it was cut. */
@@ -147,6 +156,9 @@ export async function ensureAppTables(pool: Pool): Promise<void> {
   await pool.query(QUEEN_APP_SQL)
   await pool.query(
     "ALTER TABLE queen_app_review ADD COLUMN IF NOT EXISTS ask text NOT NULL DEFAULT ''",
+  )
+  await pool.query(
+    'ALTER TABLE queen_app_repo ADD COLUMN IF NOT EXISTS pushed_at timestamptz',
   )
 }
 
@@ -644,9 +656,9 @@ async function reconcile(pool: Pool, github: AppGithub): Promise<number> {
     for (const r of repos) {
       known.add(r.repo.toLowerCase())
       await pool.query(
-        `INSERT INTO queen_app_repo (repo, installation_id, private) VALUES ($1, $2, $3)
-         ON CONFLICT (repo) DO UPDATE SET installation_id = $2, private = $3`,
-        [r.repo, inst.id, r.private],
+        `INSERT INTO queen_app_repo (repo, installation_id, private, pushed_at) VALUES ($1, $2, $3, $4)
+         ON CONFLICT (repo) DO UPDATE SET installation_id = $2, private = $3, pushed_at = $4`,
+        [r.repo, inst.id, r.private, r.pushedAt ?? null],
       )
     }
   }
@@ -672,9 +684,10 @@ async function pollRepos(pool: Pool, deps: AppDeps): Promise<number> {
   const github = deps.github as AppGithub
   const due = await pool.query(
     `SELECT * FROM queen_app_repo
-      WHERE polled_at IS NULL OR polled_at < now() - make_interval(secs => $1)
-      ORDER BY polled_at NULLS FIRST LIMIT $2`,
-    [APP_POLL_SECONDS, APP_POLL_REPOS_PER_ROUND],
+      WHERE (polled_at IS NULL OR polled_at < now() - make_interval(secs => $1))
+        AND (pushed_at IS NULL OR pushed_at > now() - make_interval(days => $3))
+      ORDER BY polled_at NULLS FIRST, pushed_at DESC NULLS LAST LIMIT $2`,
+    [APP_POLL_SECONDS, APP_POLL_REPOS_PER_ROUND, APP_ACTIVE_DAYS],
   )
   let polled = 0
   for (const row of due.rows as RepoRow[]) {
