@@ -131,10 +131,13 @@ describe('route-guard audit over src/api/server.ts', () => {
     // configured (booleans), the public repositories it serves and its reviews
     // there; public-read went 11 to 12. /queen/app/webhook is allowlisted: GitHub
     // calls it with no Origin, and the HMAC of the body is its guard.
-    expect(report.totalMounts).toBe(56)
+    // RE-MEASURED 2026-10-08, the shaper: 56 became 57 with /queen/public-shaping,
+    // an explicit publicReadCorsMiddleware() on issue numbers, boundary paths and
+    // notes of a public repository. Public-read went 12 to 13.
+    expect(report.totalMounts).toBe(57)
     expect(report.prefixGuardCount).toBe(18)
     expect(report.guardedSubAppCount).toBe(18)
-    expect(report.publicReadCount).toBe(12)
+    expect(report.publicReadCount).toBe(13)
   })
 
   it('reports zero unguarded mounts once the reasoned allowlist is applied', () => {
@@ -152,7 +155,7 @@ describe('route-guard audit over src/api/server.ts', () => {
     )
   })
 
-  it('splits the thirty-three /queen mounts into 12 public-read, 11 wrapper-guarded and 10 allowlisted', () => {
+  it('splits the thirty-four /queen mounts into 13 public-read, 11 wrapper-guarded and 10 allowlisted', () => {
     const queenMounts = classifyMounts(source).filter(
       (mount) => mount.path === '/queen' || mount.path.startsWith('/queen/'),
     )
@@ -205,7 +208,9 @@ describe('route-guard audit over src/api/server.ts', () => {
     // RE-MEASURED 2026-10-08, the t27-bees app: thirty-one became thirty-three.
     // The twelfth public-read is /queen/public-app; the tenth allowlisted mount
     // is /queen/app/webhook, signed by GitHub (reason in the allowlist).
-    expect(queenMounts.length).toBe(33)
+    // RE-MEASURED 2026-10-08, the shaper: thirty-three became thirty-four. The
+    // thirteenth public-read is /queen/public-shaping.
+    expect(queenMounts.length).toBe(34)
 
     const counts: Record<string, number> = {
       'public-read': 0,
@@ -219,7 +224,7 @@ describe('route-guard audit over src/api/server.ts', () => {
     // The four buckets must account for every mount with the exact expected
     // split; anything unaccounted for breaks one of these numbers.
     expect(counts).toEqual({
-      'public-read': 12,
+      'public-read': 13,
       'prefix-guard': 0,
       wrapper: 11,
       unguarded: 10,

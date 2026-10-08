@@ -3,3 +3,8 @@ wasm: gHashTag/trinity main apps/website/public/t27/t27_compiler.wasm sha256 4d9
 refresh: scripts/sync-t27-specs.sh (T27_ROOT, TRINITY_ROOT), then bun test tests/api/queen-inngest.test.ts
 app: gHashTag/t27 specs/queen/app.t27 blob 3908c5594ec6c2c4abac93b8be74299729d4c227 (t27#7705), byte-identical; queen/app.t27 sha256 dfaa6aebb821346b30b2e04e90050cddb451d413881e5796551a2a5996633507
 app.wasm: t27c gen-c specs/queen/app.t27 > app.c; zig 0.16.0 cc --target=wasm32-wasi -Oz -DNDEBUG -mexec-model=reactor -Wl,--export=app_reaction -Wl,--export=free_reviews_left -Wl,--export=review_depth -Wl,--export=review_wanted -Wl,--export=command_of -Wl,--export=app_event_of -Wl,--export=compiler_verdict -Wl,--export=is_t27_path -o app.wasm app.c (reproducible: two builds, one hash); queen/app.wasm sha256 3c2daf7db07996695b11149d083aa69b704d8aa87a12d2b69cb1e7535e1a9eb9
+shaping cards: gHashTag/t27 specs/queen/shaping.t27 (t27#7715, blob e2bf7024) and specs/policy/issue_shape.t27 (master blob 7b523dd4), byte-identical; each wasm is t27c gen-c of its card + zig 0.16.0 cc --target=wasm32-wasi -Oz -DNDEBUG -mexec-model=reactor, exports: issue_shape judge,check_issue; shaping shape_action,path_accepted,shape_lands,attempt_due
+shaping: queen/shaping.t27 sha256 e887aacb9648b6efe25fd8fdd334e671e099692647f1d6836d121fe082205b05
+shaping: queen/shaping.wasm sha256 3df33ce63e04668cae31f0d6baf20c0ed3df9995eca22cb0d6fca006f2fffb23
+shaping: policy/issue_shape.t27 sha256 27af8ee0e0cf3cb3706e1919e6215d128e9a0bf04fdde985ad46b6413c4b7896
+shaping: policy/issue_shape.wasm sha256 506a5e70bd149bed16f6e0ef64ca4b7f2c4b2f591b6cc97cd22b733e047d9e94

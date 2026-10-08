@@ -88,6 +88,8 @@ export interface GithubAnswer {
 export interface AppRepo {
   repo: string
   private: boolean
+  /** When the repository was last pushed to (ISO), when GitHub said. */
+  pushedAt?: string | null
 }
 
 export interface AppGithub {
@@ -95,6 +97,8 @@ export interface AppGithub {
   installations(): Promise<Array<{ id: number; account: string }>>
   /** The repositories one installation chose. */
   installationRepos(installationId: number): Promise<AppRepo[]>
+  /** The installation that serves one repository (`owner/name`). */
+  installationFor(repo: string): Promise<number>
   /** One REST call made as the installation (its token, its permissions). */
   call(
     installationId: number,
@@ -203,10 +207,24 @@ export function createAppGithub(
           )
         for (const r of repos as Array<Record<string, unknown>>)
           if (typeof r.full_name === 'string')
-            all.push({ repo: r.full_name, private: r.private === true })
+            all.push({
+              repo: r.full_name,
+              private: r.private === true,
+              pushedAt: typeof r.pushed_at === 'string' ? r.pushed_at : null,
+            })
         if (repos.length < 100) break
       }
       return all
+    },
+
+    async installationFor(repo) {
+      const answer = await asApp('GET', `/repos/${repo}/installation`)
+      const id = (answer.body as { id?: unknown } | null)?.id
+      if (answer.status !== 200 || typeof id !== 'number')
+        throw new Error(
+          `${repo}: the app is not installed (http ${answer.status})`,
+        )
+      return id
     },
 
     async call(installationId, method, path, body, accept) {

@@ -66,6 +66,7 @@ import { createQueenPublicHardwareRoute } from './routes/queen-public-hardware'
 import { createQueenPublicJobsRoute } from './routes/queen-public-jobs'
 import { createQueenPublicLeaderboardRoute } from './routes/queen-public-leaderboard'
 import { createQueenPublicResearchRoute } from './routes/queen-public-research'
+import { createQueenPublicShapingRoute } from './routes/queen-public-shaping'
 import { createQueenPublicStatusRoute } from './routes/queen-public-status'
 import { createQueenRegistryRoute } from './routes/queen-registry'
 import { createQueenRehearsalRoute } from './routes/queen-rehearsal'
@@ -413,6 +414,7 @@ export async function createHttpServer(config: HttpServerConfig) {
     .use('/queen/public-credits', publicReadCorsMiddleware())
     .use('/queen/public-jobs', publicReadCorsMiddleware())
     .use('/queen/public-app', publicReadCorsMiddleware())
+    .use('/queen/public-shaping', publicReadCorsMiddleware())
     .use('/queen/public-earnings', publicReadCorsMiddleware())
     .use('/queen/scheduler', publicReadCorsMiddleware())
     // The runner cabinet: exactly https://app.t27.ai, bearer only, no cookies.
@@ -445,6 +447,9 @@ export async function createHttpServer(config: HttpServerConfig) {
     // The t27-bees app (specs/queen/app.t27): configured or not, what it
     // serves, its recent reviews on public repositories. No credential.
     .route('/queen/public-app', createQueenPublicAppRoute())
+    // Issues the Queen is shaping, or whose authors she told what they lack
+    // (specs/queen/shaping.t27). Counts, issue numbers, paths and notes.
+    .route('/queen/public-shaping', createQueenPublicShapingRoute())
     // GitHub delivers the app's webhooks here, from its own server: there is
     // no Origin to trust. The guard is the HMAC of the body under
     // TRIOS_BEES_WEBHOOK_SECRET, and the route is off while that is unset.
