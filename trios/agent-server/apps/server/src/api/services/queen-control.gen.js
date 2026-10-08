@@ -104,7 +104,8 @@ export const EK_MODEL_CALL = 0;
 export const EK_PUSH = 1;
 export const EK_PULL_REQUEST = 2;
 export const EK_COMMENT = 3;
-export const EFFECT_KINDS = 4;
+export const EK_RELEASE = 4;
+export const EFFECT_KINDS = 5;
 export const DO_RUN = 0;
 export const DO_SKIP = 1;
 export const DO_LOOK = 2;
@@ -148,10 +149,11 @@ export const GITHUB_REQUEST_LIMIT_SECONDS = 10;
 // t27c gen-js: a TestBlock was not emitted -- it is checked by the compiler, not by the artifact.
 // t27c gen-js: a TestBlock was not emitted -- it is checked by the compiler, not by the artifact.
 // t27c gen-js: a TestBlock was not emitted -- it is checked by the compiler, not by the artifact.
+// t27c gen-js: a TestBlock was not emitted -- it is checked by the compiler, not by the artifact.
 
 // Declaration order, which the spec's own laws depend on.
 export const __STRUCT_ORDER__ = [];
-export const __DECL_ORDER__ = ["EV_TASK_CREATED", "EV_TASK_ENDED", "EV_WORKER_IDLE", "EV_LEASE_EXPIRED", "EV_EVIDENCE", "EV_REVIEW", "EV_ASSIGN", "EV_CANCEL", "EV_HEARTBEAT", "EV_TICK", "EVENT_KINDS", "EVENT_NAMES", "R_NONE", "R_DISPATCH", "R_REVIEW", "R_RECLAIM", "R_ASSIGN", "R_CANCEL", "R_RECONCILE", "RECONCILE_SECONDS", "NO_HOLDER", "TASK_LEASE_TTL_SECONDS", "TASK_HEARTBEAT_SECONDS", "SRC_NONE", "SRC_MANUAL", "SRC_AUTO", "A_OK", "A_HELD", "A_AGENT_BUSY", "A_WRONG_DOMAIN", "DOMAINS", "DOMAIN_COUNT", "DOMAIN_T27C", "DOMAIN_T27B", "DOMAIN_SPECS", "DOMAIN_QUEEN_OPS", "AG_BOOT", "AG_IDLE", "AG_BUSY", "AG_COMPACT", "AG_RETIRED", "AG_ILLEGAL", "AE_READY", "AE_ASSIGN", "AE_TASK_DONE", "AE_INTERRUPT", "AE_COMPACTED", "AE_RETIRE", "P_REUSE", "P_CLONE", "P_WAIT", "ST_BASE", "ST_TIP", "ST_HOLD", "TIP_NONE", "TIP_UNJUDGED", "TIP_SENT_BACK", "TIP_ACCEPTED", "TIP_PR_CLOSED", "EFF_NONE", "EFF_INTENT", "EFF_DONE", "EK_MODEL_CALL", "EK_PUSH", "EK_PULL_REQUEST", "EK_COMMENT", "EFFECT_KINDS", "DO_RUN", "DO_SKIP", "DO_LOOK", "DO_NOTHING", "DO_GIVE_UP", "EFFECT_RUN_LIMIT", "GITHUB_REQUEST_LIMIT_SECONDS"];
+export const __DECL_ORDER__ = ["EV_TASK_CREATED", "EV_TASK_ENDED", "EV_WORKER_IDLE", "EV_LEASE_EXPIRED", "EV_EVIDENCE", "EV_REVIEW", "EV_ASSIGN", "EV_CANCEL", "EV_HEARTBEAT", "EV_TICK", "EVENT_KINDS", "EVENT_NAMES", "R_NONE", "R_DISPATCH", "R_REVIEW", "R_RECLAIM", "R_ASSIGN", "R_CANCEL", "R_RECONCILE", "RECONCILE_SECONDS", "NO_HOLDER", "TASK_LEASE_TTL_SECONDS", "TASK_HEARTBEAT_SECONDS", "SRC_NONE", "SRC_MANUAL", "SRC_AUTO", "A_OK", "A_HELD", "A_AGENT_BUSY", "A_WRONG_DOMAIN", "DOMAINS", "DOMAIN_COUNT", "DOMAIN_T27C", "DOMAIN_T27B", "DOMAIN_SPECS", "DOMAIN_QUEEN_OPS", "AG_BOOT", "AG_IDLE", "AG_BUSY", "AG_COMPACT", "AG_RETIRED", "AG_ILLEGAL", "AE_READY", "AE_ASSIGN", "AE_TASK_DONE", "AE_INTERRUPT", "AE_COMPACTED", "AE_RETIRE", "P_REUSE", "P_CLONE", "P_WAIT", "ST_BASE", "ST_TIP", "ST_HOLD", "TIP_NONE", "TIP_UNJUDGED", "TIP_SENT_BACK", "TIP_ACCEPTED", "TIP_PR_CLOSED", "EFF_NONE", "EFF_INTENT", "EFF_DONE", "EK_MODEL_CALL", "EK_PUSH", "EK_PULL_REQUEST", "EK_COMMENT", "EK_RELEASE", "EFFECT_KINDS", "DO_RUN", "DO_SKIP", "DO_LOOK", "DO_NOTHING", "DO_GIVE_UP", "EFFECT_RUN_LIMIT", "GITHUB_REQUEST_LIMIT_SECONDS"];
 
 // What this spec holds and this backend did not print. Empty is the whole
 // story most of the time; an entry here is a promise the artifact does not

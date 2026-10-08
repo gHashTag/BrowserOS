@@ -13,7 +13,8 @@
       "!**/apps/server/src/api/services/queen-contributor-policy.gen.ts",
       "!**/apps/server/src/api/services/queen-review-valve.gen.js",
       "!**/apps/server/src/api/services/queen-control.gen.js",
-      "!**/apps/server/src/api/services/queen-domains.gen.js"
+      "!**/apps/server/src/api/services/queen-domains.gen.js",
+      "!**/apps/server/src/api/services/queen-jobs.gen.js"
     ]
   },
   "formatter": {

@@ -87,6 +87,7 @@ import {
   workerProbeEndpoint,
   workspaceRoot,
 } from './queen-dispatch'
+import { advanceJobs } from './queen-jobs'
 import {
   acquireQueenLease,
   logLeaseOutcome,
@@ -2173,6 +2174,15 @@ export async function runRound(
   await clearAssigns(pool, served).catch((error) => {
     logger.warn('Queen could not clear served assignments', {
       served,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  })
+
+  // Multi-step jobs (specs/queen/jobs.t27): every running job takes the steps
+  // its card allows this round. A job holds no lane and no bee; a failure here
+  // is logged and the round goes on.
+  await advanceJobs(pool).catch((error) => {
+    logger.warn('Queen could not advance her jobs', {
       error: error instanceof Error ? error.message : String(error),
     })
   })

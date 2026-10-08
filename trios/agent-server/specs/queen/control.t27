@@ -1,4 +1,4 @@
-; Vendored from gHashTag/t27 specs/queen/control.t27, git blob b15548e6a9e2118cbcb1ae1202451cbe9455ae1e (master).
+; Vendored from gHashTag/t27 specs/queen/control.t27, git blob 8490f5105b21ab4a1d1ce7f59b0b834f5b35fac2 (master).
 ; The scheduler contract: event kinds, fenced task leases, reconcile cadence. This copy is
 ; read by the vendored t27_compiler.wasm at runtime; nothing here is parsed with a regex.
 ; Refresh: scripts/sync-t27-specs.sh (T27_ROOT), then bun test tests/api/queen-control.test.ts
@@ -441,7 +441,11 @@ pub const EK_MODEL_CALL : u8 = 0;
 pub const EK_PUSH : u8 = 1;
 pub const EK_PULL_REQUEST : u8 = 2;
 pub const EK_COMMENT : u8 = 3;
-pub const EFFECT_KINDS : u8 = 4;
+/// A GitHub release of a tag (specs/queen/jobs.t27, #7676). Publishing one starts the release pipeline
+/// (release.yml runs on `release: published` and publishes the crate), so it is the most irreversible
+/// effect in this file: a second one would be a second publish attempt of the same version.
+pub const EK_RELEASE : u8 = 4;
+pub const EFFECT_KINDS : u8 = 5;
 
 /// What a holder does before an effect. DO_LOOK: ask GitHub, then after_look.
 /// DO_NOTHING: the holder is fenced out and must not run the effect or journal anything.
@@ -473,6 +477,7 @@ pub fn effect_can_be_looked_up(kind: u8) -> bool {
     if (kind == EK_PUSH) { return true; }
     if (kind == EK_PULL_REQUEST) { return true; }
     if (kind == EK_COMMENT) { return true; }
+    if (kind == EK_RELEASE) { return true; }
     return false;
 }
 
@@ -482,6 +487,7 @@ pub fn effect_can_be_looked_up(kind: u8) -> bool {
 pub fn receiver_refuses_a_copy(kind: u8) -> bool {
     if (kind == EK_PUSH) { return true; }
     if (kind == EK_PULL_REQUEST) { return true; }
+    if (kind == EK_RELEASE) { return true; }
     return false;
 }
 
@@ -567,7 +573,8 @@ invariant illegal_is_outside_every_agent_state { assert AG_ILLEGAL > AG_RETIRED;
 invariant the_effect_codes_are_distinct {
     assert EFF_NONE == 0 and EFF_INTENT == 1 and EFF_DONE == 2;
     assert EK_MODEL_CALL == 0 and EK_PUSH == 1 and EK_PULL_REQUEST == 2 and EK_COMMENT == 3;
-    assert EFFECT_KINDS == EK_COMMENT + 1;
+    assert EK_RELEASE == 4;
+    assert EFFECT_KINDS == EK_RELEASE + 1;
     assert DO_RUN == 0 and DO_SKIP == 1 and DO_LOOK == 2 and DO_NOTHING == 3 and DO_GIVE_UP == 4;
 }
 /// One crash does not end an attempt (a limit of 1 would make every runtime crash a counted failure,
@@ -832,4 +839,19 @@ test an_effect_that_keeps_crashing_its_holder_gives_up_after_three_runs {
     // a give-up is counted against the issue; a cancel is an interruption and is not
     assert give_up_counts_against_issue() == true;
     assert give_up_counts_against_issue() != cancel_counts_against_issue();
+}
+
+// #7676: a release is found by its tag, and GitHub answers 422 "already_exists" to a second release
+// of the same tag, so a restarted Queen looks before it publishes and never publishes twice.
+test a_release_is_looked_up_by_its_tag_and_never_published_twice {
+    assert effect_can_be_looked_up(EK_RELEASE) == true;
+    assert receiver_refuses_a_copy(EK_RELEASE) == true;
+    assert effect_action(EFF_NONE, EK_RELEASE, 0, 8, 8) == DO_RUN;
+    assert effect_action(EFF_INTENT, EK_RELEASE, 1, 8, 8) == DO_LOOK;
+    assert effect_action(EFF_DONE, EK_RELEASE, 1, 8, 8) == DO_SKIP;
+    assert after_look(true, 3) == DO_SKIP;
+    assert after_look(false, 1) == DO_RUN;
+    assert effect_may_repeat(EK_RELEASE, false) == false;
+    // a fenced-out holder does nothing, a release included
+    assert effect_action(EFF_NONE, EK_RELEASE, 0, 8, 7) == DO_NOTHING;
 }

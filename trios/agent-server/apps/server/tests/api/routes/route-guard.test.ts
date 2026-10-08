@@ -114,9 +114,13 @@ describe('route-guard audit over src/api/server.ts', () => {
     // gHashTag/t27#6657). It WRITES and can interrupt a running bee, so it is
     // a guarded wrapper, and `guardedSubAppCount` went 16 to 17. Public-read
     // and prefix counts unchanged.
-    expect(report.totalMounts).toBe(52)
+    // RE-MEASURED 2026-10-08: 52 became 53 with /queen/jobs, where a person
+    // starts or cancels a multi-step job the Queen drives (specs/queen/jobs.t27,
+    // t27#7676). It WRITES, and a job can publish a release, so it is a guarded
+    // wrapper: `guardedSubAppCount` went 17 to 18.
+    expect(report.totalMounts).toBe(53)
     expect(report.prefixGuardCount).toBe(18)
-    expect(report.guardedSubAppCount).toBe(17)
+    expect(report.guardedSubAppCount).toBe(18)
     expect(report.publicReadCount).toBe(10)
   })
 
@@ -135,7 +139,7 @@ describe('route-guard audit over src/api/server.ts', () => {
     )
   })
 
-  it('splits the twenty-nine /queen mounts into 10 public-read, 10 wrapper-guarded and 9 allowlisted', () => {
+  it('splits the thirty /queen mounts into 10 public-read, 11 wrapper-guarded and 9 allowlisted', () => {
     const queenMounts = classifyMounts(source).filter(
       (mount) => mount.path === '/queen' || mount.path.startsWith('/queen/'),
     )
@@ -181,7 +185,9 @@ describe('route-guard audit over src/api/server.ts', () => {
     // RE-MEASURED 2026-10-07: twenty-eight became twenty-nine. The tenth
     // wrapper is /queen/tasks (cancel and assign), guarded inside its own
     // sub-app because it writes and can stop a running bee.
-    expect(queenMounts.length).toBe(29)
+    // RE-MEASURED 2026-10-08: twenty-nine became thirty. The eleventh wrapper
+    // is /queen/jobs, guarded inside its own sub-app because it writes.
+    expect(queenMounts.length).toBe(30)
 
     const counts: Record<string, number> = {
       'public-read': 0,
@@ -197,7 +203,7 @@ describe('route-guard audit over src/api/server.ts', () => {
     expect(counts).toEqual({
       'public-read': 10,
       'prefix-guard': 0,
-      wrapper: 10,
+      wrapper: 11,
       unguarded: 9,
     })
 

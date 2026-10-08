@@ -48,6 +48,7 @@ import {
   createQueenFeedRoute,
 } from './routes/queen-feed'
 import { createQueenHqRoute } from './routes/queen-hq'
+import { createQueenJobsRoute } from './routes/queen-jobs'
 import {
   createQueenBoardRoute,
   createQueenKanbanRoute,
@@ -305,6 +306,13 @@ export async function createHttpServer(config: HttpServerConfig) {
     .use('/*', requireTrustedAppOrigin())
     .route('/', createQueenTasksRoute())
 
+  // A person starts or cancels a multi-step job (specs/queen/jobs.t27). It
+  // WRITES, and a job's last steps can publish a release, so it is guarded
+  // inside its own sub-app like every route that writes.
+  const queenJobsRoutes = new Hono<Env>()
+    .use('/*', requireTrustedAppOrigin())
+    .route('/', createQueenJobsRoute())
+
   const queenRegistryRoutes = new Hono<Env>()
     .use('/*', requireTrustedAppOrigin())
     .route('/', createQueenRegistryRoute())
@@ -461,6 +469,7 @@ export async function createHttpServer(config: HttpServerConfig) {
     .route('/queen/lease', queenLeaseRoutes)
     .route('/queen/export', queenExportRoutes)
     .route('/queen/tasks', queenTasksRoutes)
+    .route('/queen/jobs', queenJobsRoutes)
     .route('/queen/rehearsal', queenRehearsalRoutes)
     .use('/shutdown/*', requireTrustedAppOrigin())
     .route(
