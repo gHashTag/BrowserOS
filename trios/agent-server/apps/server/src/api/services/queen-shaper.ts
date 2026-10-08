@@ -39,12 +39,8 @@ import { logger } from '../../lib/logger'
 import { type AppLlm, commentEffect } from './queen-app'
 import { appCredentials, createAppGithub } from './queen-app-github'
 import { flag, loadCardWasm, u32 } from './queen-card-wasm'
-import {
-  baseRef,
-  reviewLaneCandidates,
-  runAsBee,
-  workspaceRoot,
-} from './queen-dispatch'
+import { baseRef, runAsBee, workspaceRoot } from './queen-dispatch'
+import { freeLaneLlm } from './queen-free-lane'
 import {
   C_ALL,
   C_BOUNDARY,
@@ -56,7 +52,6 @@ import {
   MSG_REQUIREMENTS,
   MSG_SCENARIOS,
 } from './queen-issue-shape.gen'
-import { defaultReviewerLlm } from './queen-reviewer'
 import {
   MAX_BOUNDARY_PATHS,
   SH_SHAPE,
@@ -691,6 +686,7 @@ export async function repositoryFiles(): Promise<Set<string>> {
  * the Queen still judges every issue, and writes nothing.
  */
 export function defaultShapeIo(
+  pool: Pool | null = null,
   repo: string | undefined = process.env.TRIOS_GITHUB_REPO,
   env: NodeJS.ProcessEnv = process.env,
 ): ShapeIo | null {
@@ -709,23 +705,7 @@ export function defaultShapeIo(
     github.call(await inst(), method, path, body)
   return {
     files: repositoryFiles,
-    llm: async (system, message) => {
-      const lane = reviewLaneCandidates([])[0]
-      if (!lane)
-        return {
-          ok: false,
-          error: 'no model lane is configured',
-          transient: true,
-        }
-      const answer = await defaultReviewerLlm(lane, system, message)
-      return answer.ok
-        ? {
-            ok: true,
-            text: answer.text,
-            model: `${lane.provider}/${lane.model}`,
-          }
-        : answer
-    },
+    llm: freeLaneLlm(pool),
     async readIssue(n) {
       const r = await call('GET', `/repos/${repo}/issues/${n}`)
       const b = r.body as { body?: string | null; state?: string } | null
@@ -779,7 +759,7 @@ let running = false
 export function startShaping(pool: Pool, issues: ShapeIssue[]): void {
   if (running) return
   running = true
-  advanceShaping(pool, issues, defaultShapeIo())
+  advanceShaping(pool, issues, defaultShapeIo(pool))
     .then((r) => {
       if (r.shaped.length + r.refused.length + r.told.length > 0)
         logger.info('Queen shaped issues', {

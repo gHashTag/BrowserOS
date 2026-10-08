@@ -105,8 +105,7 @@ import {
   effectAction,
   runsAfterIntent,
 } from './queen-control-rules'
-import { reviewLaneCandidates } from './queen-dispatch'
-import { defaultReviewerLlm } from './queen-reviewer'
+import { freeLaneLlm } from './queen-free-lane'
 
 /** A review row's life. Not in the card: these are this table's own states. */
 export const RV_QUEUED = 0
@@ -555,29 +554,16 @@ export interface AppDeps {
   checkT27?: CheckT27
 }
 
-export function defaultAppDeps(env: NodeJS.ProcessEnv = process.env): AppDeps {
+export function defaultAppDeps(
+  env: NodeJS.ProcessEnv = process.env,
+  pool: Pool | null = null,
+): AppDeps {
   const credentials = appCredentials(env)
   return {
     github: credentials ? createAppGithub(credentials) : null,
     env,
     checkT27: checkT27WithNativeCompiler,
-    llm: async (system, message) => {
-      const lane = reviewLaneCandidates([])[0]
-      if (!lane)
-        return {
-          ok: false,
-          error: 'no model lane is configured',
-          transient: true,
-        }
-      const answer = await defaultReviewerLlm(lane, system, message)
-      return answer.ok
-        ? {
-            ok: true,
-            text: answer.text,
-            model: `${lane.provider}/${lane.model}`,
-          }
-        : answer
-    },
+    llm: freeLaneLlm(pool),
   }
 }
 
@@ -597,8 +583,9 @@ let blockedLogged = false
  */
 export async function advanceApp(
   pool: Pool,
-  deps: AppDeps = defaultAppDeps(),
+  given?: AppDeps,
 ): Promise<AppRoundResult> {
+  const deps = given ?? defaultAppDeps(process.env, pool)
   const result: AppRoundResult = { polled: 0, reviewed: 0, replied: 0 }
   if (!deps.github) {
     if (!blockedLogged) {
