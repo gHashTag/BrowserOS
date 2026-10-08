@@ -34,13 +34,17 @@
  * It writes as the t27-bees app, so every shaped body is visibly the Queen's.
  */
 
-import { execFile } from 'node:child_process'
 import type { Pool } from 'pg'
 import { logger } from '../../lib/logger'
 import { type AppLlm, commentEffect } from './queen-app'
 import { appCredentials, createAppGithub } from './queen-app-github'
 import { flag, loadCardWasm, u32 } from './queen-card-wasm'
-import { baseRef, reviewLaneCandidates, workspaceRoot } from './queen-dispatch'
+import {
+  baseRef,
+  reviewLaneCandidates,
+  runAsBee,
+  workspaceRoot,
+} from './queen-dispatch'
 import {
   C_ALL,
   C_BOUNDARY,
@@ -407,6 +411,14 @@ CREATE TABLE IF NOT EXISTS queen_shape_round (
 
 export async function ensureShapeTables(pool: Pool): Promise<void> {
   await pool.query(SHAPE_SQL)
+  // An attempt with no note and no shape is one that crashed before it could
+  // say why: the first production batch (2026-10-08) lost every attempt to
+  // "dubious ownership" that way. Each attempt now ends with a note, so this
+  // only repairs those rows; it runs before a batch starts any attempt.
+  await pool.query(
+    `UPDATE queen_shape SET attempts = 0, last_at = NULL
+      WHERE attempts > 0 AND note IS NULL AND shaped_at IS NULL AND NOT told`,
+  )
 }
 
 interface ShapeRow {
@@ -482,13 +494,23 @@ export async function advanceShaping(
   }
   for (const { issue, missing } of toShape.slice(0, SHAPES_PER_ROUND)) {
     const outcome = await shapeOne(pool, issue, missing, io, now).catch(
-      (error) => ({
-        shaped: false,
-        note: `failed: ${error instanceof Error ? error.message : String(error)}`.slice(
-          0,
-          300,
-        ),
-      }),
+      async (error) => {
+        // A failure of ours (the checkout, the database, GitHub) is not an
+        // attempt at the issue: it must never bring its author a "she tried
+        // and could not" comment. The attempt is given back and the reason kept.
+        const note =
+          `failed: ${error instanceof Error ? error.message : String(error)}`.slice(
+            0,
+            300,
+          )
+        await pool
+          .query(
+            'UPDATE queen_shape SET attempts = GREATEST(attempts - 1, 0), note = $2 WHERE issue = $1',
+            [issue.number, note],
+          )
+          .catch(() => undefined)
+        return { shaped: false, note }
+      },
     )
     if (outcome.shaped) result.shaped.push(issue.number)
     else result.refused.push({ issue: issue.number, note: outcome.note })
@@ -641,22 +663,26 @@ async function tellOne(
 let filesCache: { at: number; files: Set<string> } | null = null
 
 /** The repository's files at the base ref, from the Queen's own checkout. */
-export function repositoryFiles(): Promise<Set<string>> {
+export async function repositoryFiles(): Promise<Set<string>> {
   if (filesCache && Date.now() - filesCache.at < 10 * 60_000)
-    return Promise.resolve(filesCache.files)
-  return new Promise((resolve, reject) => {
-    execFile(
-      'git',
-      ['-C', workspaceRoot(), 'ls-tree', '-r', '--name-only', baseRef()],
-      { maxBuffer: 64 * 1024 * 1024, timeout: 30_000 },
-      (error, stdout) => {
-        if (error) return reject(error)
-        const files = new Set(stdout.split('\n').filter(Boolean))
-        filesCache = { at: Date.now(), files }
-        resolve(files)
-      },
+    return filesCache.files
+  // As the bee, not as the server: the checkout belongs to the bee's uid, and
+  // git refuses a root process in another user's tree ("dubious ownership",
+  // measured on the first production batch, 2026-10-08).
+  const listed = await runAsBee(
+    'git',
+    ['ls-tree', '-r', '--name-only', baseRef()],
+    workspaceRoot(),
+    30_000,
+    64 * 1024 * 1024,
+  )
+  if (listed.code !== 0)
+    throw new Error(
+      `the checkout could not be listed: ${listed.out.slice(0, 200)}`,
     )
-  })
+  const files = new Set(listed.out.split('\n').filter(Boolean))
+  filesCache = { at: Date.now(), files }
+  return files
 }
 
 /**

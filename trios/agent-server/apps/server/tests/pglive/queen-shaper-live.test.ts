@@ -260,6 +260,37 @@ describe('the Queen shapes issues, against Postgres', () => {
     expect(w.modelCalls).toBe(SHAPE_ATTEMPT_LIMIT)
   })
 
+  it('does not count a failure of ours as an attempt, and repairs the rows the old code left', async () => {
+    if (!pool) return expect(offlineRequested()).toBe(true)
+    // a row the first production batch left: counted, never noted
+    await pool.query(
+      "CREATE TABLE IF NOT EXISTS queen_shape (issue int PRIMARY KEY, attempts int NOT NULL DEFAULT 0, told boolean NOT NULL DEFAULT false, last_at timestamptz, shaped_at timestamptz, paths jsonb NOT NULL DEFAULT '[]'::jsonb, note text)",
+    )
+    await pool.query(
+      'INSERT INTO queen_shape (issue, attempts, last_at) VALUES (7702, 1, now())',
+    )
+    const w = new FakeWorld([unready])
+    w.files = async () => {
+      throw new Error('the checkout could not be listed: dubious ownership')
+    }
+    const r = await advanceShaping(pool, [unready], w)
+    expect(r.refused[0].note).toContain('dubious ownership')
+    const rows = (
+      await pool.query(
+        'SELECT issue, attempts, note FROM queen_shape ORDER BY issue',
+      )
+    ).rows
+    expect(rows).toEqual([
+      { issue: 7702, attempts: 0, note: null },
+      {
+        issue: 7703,
+        attempts: 0,
+        note: expect.stringContaining('dubious ownership'),
+      },
+    ])
+    expect(w.modelCalls).toBe(0)
+  })
+
   it('leaves a ready issue and a container alone, and writes nothing without a writer', async () => {
     if (!pool) return expect(offlineRequested()).toBe(true)
     const ready = {

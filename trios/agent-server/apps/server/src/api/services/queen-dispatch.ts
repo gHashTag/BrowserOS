@@ -5652,3 +5652,17 @@ export async function recordDispatch(
 export function beesRunElsewhere(): boolean {
   return process.env.TRIOS_QUEEN_BEES_RUN_ELSEWHERE === 'on'
 }
+
+/**
+ * `run` for a module outside this file: a command as the bee, never as the
+ * server (the uid split above). The shaper lists the checkout's files with it.
+ */
+export function runAsBee(
+  command: string,
+  args: string[],
+  cwd: string,
+  timeoutMs = 120_000,
+  maxOutChars?: number,
+): Promise<{ code: number; out: string; capped?: boolean }> {
+  return run(command, args, cwd, timeoutMs, maxOutChars)
+}
