@@ -1,0 +1,82 @@
+// SPDX-License-Identifier: Apache-2.0
+; specs/queen/reviewer.t27 -- the Queen's reviewer runs on its own clock, several reviews at a time
+; Owner, 2026-10-08 (translated): "do point 3 -- a separate reviewer". Measured that afternoon on the
+; live Queen (gHashTag/BrowserOS trios/agent-server):
+; - bees finished 47 tasks in an hour and the Queen reviewed 23, so finished work queued up (91);
+; - the review sweep ran INSIDE the round, before it handed out work: at most 3 reviews, one after
+;   another, and at most 45 s of wall clock (0.75 of a 60 s tick), each review a model call of up to
+;   2 minutes -- in practice about one review a round;
+; - every finished task waiting for its verdict held its files (holds.t27 now lets go after 30 min).
+; The reviewer moves out of the round: its own clock, up to REVIEWER_CONCURRENCY rows at once, each
+; on its own lane, one row never twice at once, and every waiting row visited in turn. The round
+; then reviews nothing: two sweeps over one row would race on its verdict.
+; ASCII only (L3).
+; phi^2 + 1/phi^2 = 3 | TRINITY
+
+module QueenReviewer;
+
+/// How often the reviewer looks for rows to take: often, because a pass that finds every slot busy
+/// costs one query.
+pub const REVIEWER_EVERY_SECONDS : u32 = 10;
+
+/// Rows reviewed at once. Each takes its own lane (a key no bee and no other review holds), so this is
+/// bounded by keys as well as by this number.
+pub const REVIEWER_CONCURRENCY : u32 = 4;
+
+/// One row's wall clock: the witness, the criteria measurement and the model call. It no longer
+/// shares a 45 s budget with the round, because it no longer holds the round up.
+pub const REVIEW_ROW_SECONDS : u32 = 300;
+
+/// How many rows a pass starts: the free slots, but no more than the rows waiting.
+pub fn review_slots(in_flight: u32, waiting: u32) -> u32 {
+    if (in_flight >= REVIEWER_CONCURRENCY) { return 0; }
+    let room : u32 = REVIEWER_CONCURRENCY - in_flight;
+    if (waiting < room) { return waiting; }
+    return room;
+}
+
+/// The order rows are taken in: the one this reviewer visited longest ago first, a row it never
+/// visited before any it has. Without it, a row that is re-read and waits again (no review spent)
+/// keeps its place at the head and the reviewer circles the same few rows.
+pub fn visit_first(never_a: bool, seconds_since_a: u32, never_b: bool, seconds_since_b: u32) -> bool {
+    if (never_a and never_b == false) { return true; }
+    if (never_b and never_a == false) { return false; }
+    return seconds_since_a > seconds_since_b;
+}
+
+/// While the reviewer runs, the round reviews nothing.
+pub fn round_reviews(reviewer_running: bool) -> bool {
+    return reviewer_running == false;
+}
+
+test a_pass_fills_the_free_slots_with_waiting_rows {
+    assert review_slots(0, 0) == 0;
+    assert review_slots(0, 2) == 2;
+    assert review_slots(0, 100) == REVIEWER_CONCURRENCY;
+    assert review_slots(1, 100) == REVIEWER_CONCURRENCY - 1;
+    assert review_slots(REVIEWER_CONCURRENCY - 1, 1) == 1;
+    assert review_slots(REVIEWER_CONCURRENCY, 100) == 0;
+    assert review_slots(REVIEWER_CONCURRENCY + 1, 100) == 0;
+}
+
+test every_row_is_visited_in_turn {
+    // never visited goes first
+    assert visit_first(true, 0, false, 9999) == true;
+    assert visit_first(false, 9999, true, 0) == false;
+    // otherwise the one visited longest ago
+    assert visit_first(false, 300, false, 20) == true;
+    assert visit_first(false, 20, false, 300) == false;
+    assert visit_first(false, 20, false, 20) == false;
+    assert visit_first(true, 0, true, 0) == false;
+}
+
+test the_round_stands_aside_for_the_reviewer {
+    assert round_reviews(true) == false;
+    assert round_reviews(false) == true;
+}
+
+invariant the_reviewer_is_quicker_than_the_round {
+    assert REVIEWER_EVERY_SECONDS < 60;
+    assert REVIEWER_CONCURRENCY > 1;
+    assert REVIEW_ROW_SECONDS >= 120;
+}

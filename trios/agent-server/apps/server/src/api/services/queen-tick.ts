@@ -103,6 +103,12 @@ import {
   startedLine,
 } from './queen-report-lines'
 import {
+  drainReviewerRound,
+  reviewerRunning,
+  roundReviews,
+  startReviewer,
+} from './queen-review-loop'
+import {
   CEILING_FLOOR_MINUTES,
   escalationKind,
   KIND_SEND_BACK_CEILING,
@@ -1791,7 +1797,12 @@ export async function runRound(
     })
     return []
   })
-  const reviewed = await reviewFinishedDispatches(pool, deps.review)
+  // reviewer.t27 round_reviews: while the reviewer runs on its own clock, the
+  // round reviews nothing (two sweeps over one row would race on its
+  // verdict) and reports what the reviewer judged since the last round.
+  const reviewed = roundReviews(reviewerRunning())
+    ? await reviewFinishedDispatches(pool, deps.review)
+    : drainReviewerRound<ReviewRound>()
   if (reviewed.acted.length > 0) {
     logger.info('Queen reviewed her own work', { verdicts: reviewed.acted })
   }
@@ -2891,7 +2902,7 @@ export interface ReviewTally {
   unjudged: number
 }
 
-interface ReviewRound {
+export interface ReviewRound {
   /** `#1234:accept`, one per dispatch judged this round. */
   acted: string[]
   /** Issues whose commit reached outside the boundary, and where. */
@@ -3031,9 +3042,64 @@ export async function releaseStaleContracts(pool: Pool): Promise<number[]> {
   return issues
 }
 
+/** A finished row with no verdict yet, or a wait: what a review sweep takes. */
+const REVIEW_WAITING_WHERE = `d.started = true AND d.finished_at IS NOT NULL
+        AND (d.review_state IS NULL OR d.review_state = 'wait')
+        AND d.outcome NOT LIKE 'reaped%'`
+
+/**
+ * Only rows whose issue is still open - once the board has been read at all.
+ * An empty board means the sync has not run in this process yet, and
+ * filtering against it would stop every review rather than fewer of them.
+ */
+async function openIssueGuard(
+  pool: Pool,
+): Promise<{ stillOpen: string; boardIsTrustworthy: boolean }> {
+  const board = await pool.query<{ n: string }>(
+    'SELECT count(*)::text AS n FROM queen_issues',
+  )
+  const boardIsTrustworthy = Number(board.rows[0]?.n ?? 0) > 0
+  return {
+    boardIsTrustworthy,
+    stillOpen: boardIsTrustworthy
+      ? 'AND EXISTS (SELECT 1 FROM queen_issues i WHERE i.number = d.issue)'
+      : '',
+  }
+}
+
+/** The issues a review sweep would take now, longest-waiting first. */
+export async function waitingReviewIssues(pool: Pool): Promise<number[]> {
+  const { stillOpen } = await openIssueGuard(pool)
+  const r = await pool.query(
+    `SELECT d.issue FROM queen_dispatch d
+      WHERE ${REVIEW_WAITING_WHERE}
+        ${stillOpen}
+      ORDER BY d.reviewer_at ASC NULLS FIRST, d.finished_at ASC`,
+  )
+  return r.rows.map((row) => Number(row.issue))
+}
+
+/**
+ * Which rows one sweep takes and what it shares with sweeps running beside it
+ * (gHashTag/t27 specs/queen/reviewer.t27). The round passes none of it and
+ * sweeps every waiting row; the reviewer passes one issue per sweep, the lanes
+ * its other sweeps hold, and a wall clock of its own.
+ */
+export interface ReviewScope {
+  /** Only these issues. */
+  issues?: number[]
+  /** Key indices sibling sweeps hold right now: not offered to this one. */
+  reservedKeys?: () => number[]
+  /** Told the lane a review is about to call, so siblings can avoid it. */
+  onLane?: (lane: WorkerProvider) => void
+  /** This sweep's wall clock, instead of the round's share of a tick. */
+  deadlineMs?: number
+}
+
 export async function reviewFinishedDispatches(
   pool: Pool,
   overrides: Partial<ReviewDeps> = {},
+  scope: ReviewScope = {},
 ): Promise<ReviewRound> {
   const deps: ReviewDeps = {
     ...defaultReviewDeps(),
@@ -3076,13 +3142,7 @@ export async function reviewFinishedDispatches(
   // enough to subtract against. Guarded on a NON-EMPTY board: an empty one
   // means the sync has not run yet in this process, and filtering against it
   // would silently stop every review rather than fewer of them.
-  const board = await pool.query<{ n: string }>(
-    'SELECT count(*)::text AS n FROM queen_issues',
-  )
-  const boardIsTrustworthy = Number(board.rows[0]?.n ?? 0) > 0
-  const stillOpen = boardIsTrustworthy
-    ? 'AND EXISTS (SELECT 1 FROM queen_issues i WHERE i.number = d.issue)'
-    : ''
+  const { stillOpen, boardIsTrustworthy } = await openIssueGuard(pool)
   const done = await pool.query(
     `SELECT d.issue, d.conversation_id, d.review_state,
             d.criteria, d.criteria_source, d.send_backs, d.owned_paths,
@@ -3105,14 +3165,14 @@ export async function reviewFinishedDispatches(
                      WHERE t.conversation_id = d.conversation_id
                        AND t.kind = 'error') AS errored
        FROM queen_dispatch d
-      WHERE d.started = true AND d.finished_at IS NOT NULL
-        AND (d.review_state IS NULL OR d.review_state = 'wait')
-        AND d.outcome NOT LIKE 'reaped%'
+      WHERE ${REVIEW_WAITING_WHERE}
         ${stillOpen}
+        ${scope.issues ? 'AND d.issue = ANY($1::int[])' : ''}
       -- The review budget is a few calls a round, so the rows that have waited
       -- longest for one go first; without an order, rows whose review keeps
       -- failing could spend the budget every round ahead of the rest.
       ORDER BY d.reviewer_at ASC NULLS FIRST, d.finished_at ASC`,
+    scope.issues ? [scope.issues] : [],
   )
   if (!boardIsTrustworthy) {
     logger.warn(
@@ -3133,7 +3193,8 @@ export async function reviewFinishedDispatches(
   // The whole sweep, not only its measurements: a review is a provider call and
   // can sit on its own timeout, so a budget counted in reviews bounds the
   // number and not the wall clock the dispatcher is waiting on.
-  const sweepDeadline = Date.now() + sweepDeadlineMs(tickIntervalSeconds())
+  const sweepDeadline =
+    Date.now() + (scope.deadlineMs ?? sweepDeadlineMs(tickIntervalSeconds()))
   let takenKeys: number[] | null = null
   const repo = process.env.TRIOS_GITHUB_REPO || 'gHashTag/trios'
 
@@ -3623,7 +3684,8 @@ export async function reviewFinishedDispatches(
         // credential; the keys running bees hold are counted exactly as
         // `runRound` counts them before it hands out a key.
         takenKeys ??= await runningKeys(pool)
-        const taken = takenKeys
+        // and the lanes reviews running beside this one hold (reviewer.t27)
+        const taken = [...takenKeys, ...(scope.reservedKeys?.() ?? [])]
         // A LANE THAT ALREADY REFUSED THIS REVIEW IS NOT OFFERED AGAIN.
         //
         // `chooseReviewerLane` is deterministic, so without this the same lane
@@ -3682,6 +3744,7 @@ export async function reviewFinishedDispatches(
               tries++
             ) {
               const lane: WorkerProvider = choice.lane
+              scope.onLane?.(lane)
               triedLanes.add(reviewerLaneKey(lane))
               const answer = await deps.llm(
                 lane,
@@ -4918,6 +4981,15 @@ export function startQueenTick(): void {
   const gate = createRoundGate(round)
   refillOnBeeCompletion(gate.request)
   wakeOnControlEvents(gate.request)
+  // The reviewer, on its own clock (reviewer.t27): several reviews at a time,
+  // off the round's critical path. TRIOS_QUEEN_REVIEWER=off hands reviewing
+  // back to the round.
+  const stopReviewer = startReviewer(
+    pool,
+    LEASE_NAME,
+    reviewFinishedDispatches,
+    waitingReviewIssues,
+  )
   // The bus (events.t27 section 4): this process reads every row of the log,
   // a runner's included, so a runner's task.ended wakes her within a second.
   followControlEvents(pool).catch((error) =>
@@ -4944,6 +5016,7 @@ export function startQueenTick(): void {
   const handover = async (): Promise<void> => {
     if (timer) clearInterval(timer)
     stopFollowing()
+    stopReviewer?.()
     // The gate with it, for the same reason as the timer: no round may start
     // after the process has handed the hive back.
     gate.stop()

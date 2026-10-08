@@ -20,3 +20,6 @@ dashboard: queen/dashboard.wasm sha256 2b310da336cd9332c179ee487c01188f2f9de8d21
 holds card: gHashTag/t27 specs/queen/holds.t27 (t27#7838, PR t27#7839, blob 64ce76f48f939f7afa03bb43bfa36e2d069a7d2b), byte-identical; holds.wasm = t27c gen-c + zig 0.16.0 cc --target=wasm32-wasi -Oz -DNDEBUG -mexec-model=reactor, exports holds_files (reproducible: two builds, one hash)
 holds: queen/holds.t27 sha256 6a4855c2d77b9b122a4cacf40159ecf81e0cdfaba58928f225e058bb60e6b6b1
 holds: queen/holds.wasm sha256 80af0a3a399f4343f6d618a4da088abfb146b949144f934041385e7cc92fc14b
+reviewer card: gHashTag/t27 specs/queen/reviewer.t27 (t27#7840, PR t27#7841, blob 59aecee2aa9b578f619faf527c4b9ed8c2e21102), byte-identical; reviewer.wasm = t27c gen-c + zig 0.16.0 cc --target=wasm32-wasi -Oz -DNDEBUG -mexec-model=reactor, exports review_slots,visit_first,round_reviews (reproducible: two builds, one hash)
+reviewer: queen/reviewer.t27 sha256 42b4876742db4d882bbaf2edc316fcc8709c194547474dcfade9d1f716c33c12
+reviewer: queen/reviewer.wasm sha256 80d6392979c76b6bda9042d6ccf04c970a01c4bb4140a8472af901fc0b081fcd
