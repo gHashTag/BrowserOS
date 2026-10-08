@@ -4346,7 +4346,7 @@ async function recordVerdict(
  * The key indices running bees hold, counted as `runRound` counts them: a bee
  * that is still running is spending its key; a finished one is not.
  */
-async function runningKeys(pool: Pool): Promise<number[]> {
+export async function runningKeys(pool: Pool): Promise<number[]> {
   const running = await pool
     .query(
       `SELECT key_index FROM queen_dispatch
