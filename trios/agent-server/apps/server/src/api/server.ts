@@ -62,6 +62,7 @@ import { createQueenPublicAgentsRoute } from './routes/queen-public-agents'
 import { createQueenPublicAppRoute } from './routes/queen-public-app'
 import { createQueenPublicCreditsRoute } from './routes/queen-public-credits'
 import { createQueenPublicEarningsRoute } from './routes/queen-public-earnings'
+import { createQueenPublicEventsRoute } from './routes/queen-public-events'
 import { createQueenPublicHardwareRoute } from './routes/queen-public-hardware'
 import { createQueenPublicJobsRoute } from './routes/queen-public-jobs'
 import { createQueenPublicLeaderboardRoute } from './routes/queen-public-leaderboard'
@@ -417,6 +418,7 @@ export async function createHttpServer(config: HttpServerConfig) {
     .use('/queen/public-app', publicReadCorsMiddleware())
     .use('/queen/public-shaping', publicReadCorsMiddleware())
     .use('/queen/public-tasks', publicReadCorsMiddleware())
+    .use('/queen/public-events', publicReadCorsMiddleware())
     .use('/queen/public-earnings', publicReadCorsMiddleware())
     .use('/queen/scheduler', publicReadCorsMiddleware())
     // The runner cabinet: exactly https://app.t27.ai, bearer only, no cookies.
@@ -456,6 +458,7 @@ export async function createHttpServer(config: HttpServerConfig) {
     // flight: issue, since, last heard, an anonymous lane. Filtered by the card
     // specs/queen/tasks.t27. No provider, key, path or person's runner.
     .route('/queen/public-tasks', createQueenPublicTasksRoute())
+    .route('/queen/public-events', createQueenPublicEventsRoute())
     // GitHub delivers the app's webhooks here, from its own server: there is
     // no Origin to trust. The guard is the HMAC of the body under
     // TRIOS_BEES_WEBHOOK_SECRET, and the route is off while that is unset.

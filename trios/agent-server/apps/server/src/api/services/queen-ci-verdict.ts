@@ -41,6 +41,7 @@
  */
 import type { Pool } from 'pg'
 import { logger } from '../../lib/logger'
+import { publishEvent } from './queen-control'
 import { PR_FIX_ATTEMPTS, REVIEWER_LOGIN } from './queen-review-valve'
 
 /** Accepted issues asked about per round. Two GitHub reads each, plus a log per red check. */
@@ -252,6 +253,10 @@ export async function takeBackRefusedAcceptances(
       [issue, state, note, sendBacks],
     )
     if (!updated.rowCount) continue
+    await publishEvent(pool, 'queen/task.reviewed', {
+      issue,
+      verdict: state,
+    }).catch(() => 0)
     const checks = review !== null ? [REVIEWER_LOGIN] : red.map((r) => r.name)
     taken.push({ issue, pull: open.number, state, checks })
     logger.info('Queen took back an acceptance a required check refused', {

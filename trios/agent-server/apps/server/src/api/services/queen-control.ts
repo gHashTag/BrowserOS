@@ -38,6 +38,7 @@ import { DEFAULT_SPECS_ROOT } from '../../inngest/spec-catalog'
 import { type Analyze, loadCompiler } from '../../inngest/t27-consts'
 import { QUEEN_CONTROL_SQL } from '../../lib/db/pg-migrate'
 import { logger } from '../../lib/logger'
+import { busKindsAgree, LogFollower, logDue } from './queen-events'
 import { queenHolderName } from './queen-lease'
 
 /** The slice of the card this module enforces, straight from the wasm. */
@@ -329,11 +330,12 @@ export async function reclaimableTaskLeases(
  * kinds are indices into that array, so a name this card does not know is a
  * caller the card has not agreed to, and it is refused before any SQL runs.
  *
- * The sequence is assigned in the same statement that writes the row; two
- * concurrent publishers on one stream race for (stream, seq) and the PRIMARY
- * KEY makes the loser an error rather than a duplicate. Idempotent replay by
- * event id (the card's `event_applies`) belongs to the reaction slice, which
- * is what needs it.
+ * What is written is events.t27's log_due: every kind but the heartbeat, and
+ * task.evidence once a minute per issue. The number comes from the stream's
+ * counter row (events.t27 section 1), so it is gapless and in commit order.
+ * GREATEST with the log's own maximum covers a writer from before the bus
+ * still draining during a deploy; a key collision with one is retried.
+ * Returns the number, or 0 when the card says the event is not written.
  */
 export async function publishEvent(
   pool: Pool,
@@ -347,28 +349,57 @@ export async function publishEvent(
     throw new Error(
       `queen event ${JSON.stringify(name)} is not in EVENT_NAMES of the control card`,
     )
-  const result = await pool.query(
-    `INSERT INTO queen_event_log (stream, seq, kind, payload)
-     SELECT $1, COALESCE(MAX(seq), 0) + 1, $2, $3::jsonb
-       FROM queen_event_log WHERE stream = $1
-     RETURNING seq`,
-    [stream, kind, JSON.stringify(payload)],
-  )
-  const seq = Number(result.rows[0]?.seq ?? 0)
-  logger.info('Queen control event', { stream, name, kind, seq })
-  // After the row exists, never before: a reaction that ran ahead of the log
-  // would be a reaction to an event nobody can replay.
-  if (eventListener) {
+  if (!logDueNow(kind, payload)) return 0
+  const origin = queenHolderName()
+  let seq = 0
+  for (let attempt = 1; ; attempt++) {
     try {
-      eventListener({ stream, name, kind, seq })
+      const result = await pool.query(
+        `WITH n AS (
+           INSERT INTO queen_event_counter AS c (stream, last)
+           VALUES ($1, (SELECT COALESCE(MAX(seq), 0) + 1
+                          FROM queen_event_log WHERE stream = $1))
+           ON CONFLICT (stream) DO UPDATE
+             SET last = GREATEST(c.last, (SELECT COALESCE(MAX(seq), 0)
+                                            FROM queen_event_log
+                                           WHERE stream = $1)) + 1
+           RETURNING last
+         )
+         INSERT INTO queen_event_log (stream, seq, kind, payload, origin)
+         SELECT $1, last, $2, $3::jsonb, $4 FROM n
+         RETURNING seq`,
+        [stream, kind, JSON.stringify(payload), origin],
+      )
+      seq = Number(result.rows[0]?.seq ?? 0)
+      break
     } catch (error) {
-      logger.warn('Queen control event listener failed', {
-        name,
-        error: error instanceof Error ? error.message : String(error),
-      })
+      const code = (error as { code?: string }).code
+      if (code !== '23505' || attempt >= 3) throw error
     }
   }
+  logger.info('Queen control event', { stream, name, kind, seq })
+  // After the row exists, never before: a reaction that ran ahead of the log
+  // would be a reaction to an event nobody can replay. With a follower in
+  // this process, it is the one path that delivers, in log order.
+  const follower = followers.get(stream)
+  if (follower) follower.poke()
+  else deliverEvent({ stream, name, kind, seq, publishedHere: true })
   return seq
+}
+
+/** When this process last wrote each kind for each issue, for log_due. */
+const lastLogged = new Map<string, number>()
+
+function logDueNow(kind: number, payload: Record<string, unknown>): boolean {
+  const key = `${kind}:${String(payload.issue ?? '')}`
+  const now = Date.now()
+  const at = lastLogged.get(key)
+  const due = logDue(kind, at !== undefined, at ? (now - at) / 1000 : 0)
+  if (due) {
+    if (lastLogged.size > 10_000) lastLogged.clear()
+    lastLogged.set(key, now)
+  }
+  return due
 }
 
 /** One event as the log recorded it. */
@@ -377,20 +408,87 @@ export interface ControlEvent {
   name: string
   kind: number
   seq: number
+  /** This process wrote it (events.t27 wakes_here). */
+  publishedHere: boolean
 }
 
 let eventListener: ((event: ControlEvent) => void) | null = null
+const eventReaders = new Set<(event: ControlEvent) => void>()
+
+function deliverEvent(event: ControlEvent): void {
+  for (const listener of [eventListener, ...eventReaders]) {
+    if (!listener) continue
+    try {
+      listener(event)
+    } catch (error) {
+      logger.warn('Queen control event listener failed', {
+        name: event.name,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+}
+
+/**
+ * Another reader of the same events, beside the Queen's listener: a bee
+ * runner taking an order the moment it is created. Returns its removal.
+ */
+export function addControlEventReader(
+  reader: (event: ControlEvent) => void,
+): () => void {
+  eventReaders.add(reader)
+  return () => eventReaders.delete(reader)
+}
 
 /**
  * Who hears an event once it is in the log. One listener, set by the process
  * that runs the Queen's round (`wakeOnControlEvents` in queen-tick.ts); null
- * clears it. A process that runs no round - a bee runner - sets none, and its
- * events are still recorded.
+ * clears it.
  */
 export function setControlEventListener(
   listener: ((event: ControlEvent) => void) | null,
 ): void {
   eventListener = listener
+}
+
+const followers = new Map<string, LogFollower>()
+
+/**
+ * Follow a stream of the log in this process (events.t27 section 4): every
+ * row, this process's and every other's, reaches the listener once and in
+ * order. Returns the follower so the caller can stop it.
+ */
+export async function followControlEvents(
+  pool: Pool,
+  stream = 'queen',
+): Promise<LogFollower> {
+  const running = followers.get(stream)
+  if (running) return running
+  const spec = await loadControlSpec()
+  if (!busKindsAgree(spec.eventKinds))
+    throw new Error(
+      `queen/events.t27 has rows for BUS_KINDS kinds, control.t27 names ${spec.eventKinds}`,
+    )
+  const follower = new LogFollower(pool, stream, queenHolderName(), (e, here) =>
+    deliverEvent({
+      stream,
+      name: spec.eventNames[e.kind] ?? `kind ${e.kind}`,
+      kind: e.kind,
+      seq: e.seq,
+      publishedHere: here,
+    }),
+  )
+  followers.set(stream, follower)
+  await follower.start().catch((error) => {
+    followers.delete(stream)
+    throw error
+  })
+  return follower
+}
+
+export function stopFollowing(stream = 'queen'): void {
+  followers.get(stream)?.stop()
+  followers.delete(stream)
 }
 
 /**

@@ -114,9 +114,19 @@ describe('closing an obsolete dispatch', () => {
     ]
     const closed = await closeObsolete(pool, rows, tasks)
     expect([...closed].sort()).toEqual([11, 12])
-    expect(writes).toHaveLength(1)
-    expect(writes[0].params.slice(0, 3)).toEqual([11, 'escalate', 'obsolete'])
-    expect(String(writes[0].params[3])).toContain('review_valve.t27')
-    expect(writes[0].sql).toContain('review_state = $2')
+    const updates = writes.filter((w) => /UPDATE queen_dispatch/.test(w.sql))
+    expect(updates).toHaveLength(1)
+    expect(updates[0].params.slice(0, 3)).toEqual([11, 'escalate', 'obsolete'])
+    expect(String(updates[0].params[3])).toContain('review_valve.t27')
+    expect(updates[0].sql).toContain('review_state = $2')
+    // and the board hears it (gHashTag/t27 specs/queen/events.t27)
+    const events = writes.filter((w) =>
+      /INSERT INTO queen_event_log/.test(w.sql),
+    )
+    expect(events).toHaveLength(1)
+    expect(JSON.parse(String(events[0].params[2]))).toEqual({
+      issue: 11,
+      verdict: 'obsolete',
+    })
   })
 })

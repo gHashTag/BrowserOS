@@ -1,0 +1,308 @@
+// SPDX-License-Identifier: Apache-2.0
+; specs/queen/events.t27 -- the event log as a bus: a cursor that loses nothing, read by every process
+; and by anyone watching the board or the game
+; Owner, 2026-10-08 (translated): lower every task to the scheduler's native level; the actors talk to
+; each other, and the dashboard and the game show all of it. Epic #7718, slice 3. control.t27 section 1
+; names the event kinds and what each wakes; this card says how an event travels.
+; Measured on the supervisor (gHashTag/BrowserOS trios/agent-server) before this card:
+; - the log took its number as MAX(seq)+1. Two writers at once got the same number, the second insert
+;   hit the primary key, and the error was caught and dropped: an event lost without a word.
+; - five of the ten kinds were never written (worker.idle, task.evidence, task.reviewed,
+;   lease.heartbeat, tick), and nothing read the log back. A runner's task.ended woke nobody; it
+;   waited out the Queen's next round.
+; - the board and the game drew whole snapshots every few seconds, because there was no way to ask
+;   "what changed since I last looked".
+; Index of a per-kind table = control.t27 EV_*. The supervisor refuses to start when control.t27's
+; EVENT_KINDS is not BUS_KINDS, so a new kind cannot ship without its row here.
+; ASCII only (L3).
+; phi^2 + 1/phi^2 = 3 | TRINITY
+
+module QueenEvents;
+
+pub const BUS_KINDS : u8 = 10;
+
+; --- 1. The cursor -----------------------------------------------------------------------------------
+
+/// Each stream numbers its events 1, 2, 3, ... with no gap and in commit order. The number comes from
+/// a counter row the writing statement holds locked until it commits, so the next writer waits and
+/// reads the number after it. A database sequence is the obvious tool and the wrong one: it hands out
+/// numbers at insert, they commit in any order, and a reader that has seen 9 cannot know whether 8 is
+/// still coming. Gapless is what lets a reader tell "nothing happened" from "I missed something".
+pub fn next_seq(last: u64) -> u64 {
+    return last + 1;
+}
+
+; --- 2. What is written ------------------------------------------------------------------------------
+
+/// Seconds between two log rows of one kind for one task; 0 = every one, NEVER = not logged.
+/// - evidence (4): a bee speaks many times a minute; one row a minute says it is alive and working.
+/// - heartbeat (8): never. A heartbeat is the renewal of a lease row, which is already its record, and
+///   at one per bee per minute it would be most of the log. The Queen needs no decision for it
+///   (control.t27 wakes_queen), and liveness reaches the board through evidence.
+/// - tick (9): written by the Queen's own timer, once per period, not by rounds an event asked for.
+pub const NEVER : u32 = 4294967295;
+pub const LOG_EVERY_SECONDS : [10]u32 = [0, 0, 0, 0, 60, 0, 0, 0, 4294967295, 0];
+
+/// `seen_before`: this process logged the same kind for the same task before; `seconds_since`: since then.
+pub fn log_due(kind: u8, seen_before: bool, seconds_since: u32) -> bool {
+    if (kind >= BUS_KINDS) { return false; }
+    if (LOG_EVERY_SECONDS[kind] == NEVER) { return false; }
+    if (seen_before == false) { return true; }
+    return seconds_since >= LOG_EVERY_SECONDS[kind];
+}
+
+/// Every kind that is logged is public, so the public feed has the log's numbers and no gap. What
+/// keeps it safe is the projection: only these payload keys, and only scalar values. A string passes
+/// only as a token (token_ok). A transcript line, a reason, a person's name, a URL with a query never
+/// pass, whatever key they sit under.
+pub const PUBLIC_KEYS : [5]str = ["issue", "outcome", "verdict", "repo", "slots"];
+pub const TOKEN_MAX : usize = 128;
+
+pub fn token_char(c: u8) -> bool {
+    if (c >= 97 and c <= 122) { return true; }
+    if (c >= 65 and c <= 90) { return true; }
+    if (c >= 48 and c <= 57) { return true; }
+    return c == 46 or c == 95 or c == 47 or c == 45;
+}
+
+/// A token: 1 to TOKEN_MAX letters, digits, or one of . _ / - ("accepted", "gHashTag/t27", "sendBack").
+pub fn token_ok(buf: []const u8, n: usize) -> bool {
+    if (n == 0 or n > TOKEN_MAX) { return false; }
+    var i : usize = 0;
+    while (i < n) {
+        if (token_char(buf[i]) == false) { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+; --- 3. Reading past a cursor ------------------------------------------------------------------------
+
+/// What a read after `cursor` finds, given the oldest and newest number the log still keeps (both 0 on
+/// an empty log).
+pub const CR_EMPTY : u8 = 0;
+pub const CR_PAGE : u8 = 1;
+pub const CR_RESYNC : u8 = 2;
+
+/// RESYNC when the cursor is past the newest (the log was reset under the reader) or the events right
+/// after it were pruned. A reader told to resync takes a snapshot, which carries a fresh cursor.
+pub fn cursor_read(cursor: u64, oldest: u64, newest: u64) -> u8 {
+    if (cursor > newest) { return CR_RESYNC; }
+    if (cursor == newest) { return CR_EMPTY; }
+    if (cursor + 1 < oldest) { return CR_RESYNC; }
+    return CR_PAGE;
+}
+
+/// What a reader does with each event of a page, in order. Delivery is at least once (a poll and a
+/// wake may both read the same row), so an event at or below the cursor is skipped; the next number is
+/// applied; anything further means the reader missed some, and only a snapshot repairs that.
+pub const DA_SKIP : u8 = 0;
+pub const DA_APPLY : u8 = 1;
+pub const DA_RESYNC : u8 = 2;
+
+pub fn delta_action(cursor: u64, seq: u64) -> u8 {
+    if (seq <= cursor) { return DA_SKIP; }
+    if (seq == cursor + 1) { return DA_APPLY; }
+    return DA_RESYNC;
+}
+
+/// Events one read returns. 0 asks for the default; more than the maximum gets the maximum.
+pub const EVENTS_PAGE_DEFAULT : u32 = 200;
+pub const EVENTS_PAGE_MAX : u32 = 1000;
+
+pub fn page_size(asked: u32) -> u32 {
+    if (asked == 0) { return EVENTS_PAGE_DEFAULT; }
+    if (asked > EVENTS_PAGE_MAX) { return EVENTS_PAGE_MAX; }
+    return asked;
+}
+
+/// A read with nothing new may wait for the next event instead of returning empty, at most
+/// WAIT_MAX_SECONDS: under the 30-second idle timeout of the edge in front of the supervisor.
+pub const WAIT_MAX_SECONDS : u32 = 25;
+
+pub fn wait_seconds(asked: u32) -> u32 {
+    if (asked > WAIT_MAX_SECONDS) { return WAIT_MAX_SECONDS; }
+    return asked;
+}
+
+/// A board that read a page refreshes the tasks the page named, at most this many in one request.
+/// More than that, and one snapshot is cheaper than the list.
+pub const REFRESH_TASKS_MAX : u32 = 100;
+pub const RF_NOTHING : u8 = 0;
+pub const RF_TASKS : u8 = 1;
+pub const RF_SNAPSHOT : u8 = 2;
+
+pub fn refresh_action(changed_tasks: u32) -> u8 {
+    if (changed_tasks == 0) { return RF_NOTHING; }
+    if (changed_tasks > REFRESH_TASKS_MAX) { return RF_SNAPSHOT; }
+    return RF_TASKS;
+}
+
+; --- 4. Every process follows the log ----------------------------------------------------------------
+
+/// Each process reads the log past its own cursor every FOLLOW_MS, and at once after it writes, so an
+/// event published by a runner reaches the Queen within a second instead of at her next round.
+pub const FOLLOW_MS : u32 = 1000;
+
+/// Kinds whose publisher already reacted in its own process: the dispatcher's created, the finisher's
+/// ended, the reclaimer's lease.expired, the timer's tick. Read back from the log by that same process,
+/// they wake nothing; read by any other process, they wake as control.t27 says.
+pub const PUBLISHER_REACTS : [10]u8 = [1, 1, 0, 1, 0, 0, 0, 0, 0, 1];
+
+/// `wakes`: control.t27 wakes_queen(kind). `published_here`: the row's origin is this process.
+pub fn wakes_here(wakes: bool, kind: u8, published_here: bool) -> bool {
+    if (wakes == false or kind >= BUS_KINDS) { return false; }
+    if (published_here and PUBLISHER_REACTS[kind] == 1) { return false; }
+    return true;
+}
+
+/// A runner with a free slot claims an order the moment task.created (0) is read, instead of at its
+/// next poll; any other kind leaves it on its poll.
+pub fn runner_claims_now(kind: u8, free_slots: u32) -> bool {
+    return kind == 0 and free_slots > 0;
+}
+
+; --- 5. How long the log keeps an event --------------------------------------------------------------
+
+/// An event is pruned once it is KEEP_SECONDS old AND at least KEEP_AT_LEAST newer events exist, so a
+/// quiet week never empties the log a reader resumes from.
+pub const KEEP_SECONDS : u32 = 259200;
+pub const KEEP_AT_LEAST : u64 = 5000;
+
+/// The highest number an old enough event may have and still be pruned; 0 = none.
+pub fn prune_through(newest: u64) -> u64 {
+    if (newest <= KEEP_AT_LEAST) { return 0; }
+    return newest - KEEP_AT_LEAST;
+}
+
+test numbers_follow_one_another {
+    assert next_seq(0) == 1;
+    assert next_seq(41) == 42;
+}
+
+test evidence_is_thinned_and_heartbeats_are_not_logged {
+    // created, ended, review: every one
+    assert log_due(0, true, 0) == true;
+    assert log_due(1, true, 0) == true;
+    assert log_due(5, true, 0) == true;
+    // evidence: the first, then one a minute
+    assert log_due(4, false, 0) == true;
+    assert log_due(4, true, 59) == false;
+    assert log_due(4, true, 60) == true;
+    // heartbeat: never, not even the first
+    assert log_due(8, false, 0) == false;
+    assert log_due(8, true, 4000000000) == false;
+    // a kind the card has no row for is never written
+    assert log_due(BUS_KINDS, false, 0) == false;
+}
+
+test a_token_is_short_and_plain {
+    assert token_ok("accepted", 8) == true;
+    assert token_ok("gHashTag/t27", 12) == true;
+    assert token_ok("send_back-2.v1", 14) == true;
+    assert token_ok("", 0) == false;
+    assert token_ok("two words", 9) == false;
+    assert token_ok("a?b=c", 5) == false;
+    assert token_ok("x:y", 3) == false;
+    assert token_ok("@me", 3) == false;
+    assert token_ok("[z]", 3) == false;
+    assert token_ok("{z}", 3) == false;
+    assert token_ok("`z`", 3) == false;
+    assert token_char(97) == true and token_char(122) == true;
+    assert token_char(65) == true and token_char(90) == true;
+    assert token_char(48) == true and token_char(57) == true;
+    assert token_char(96) == false and token_char(123) == false;
+    assert token_char(64) == false and token_char(91) == false;
+    assert token_char(47) == true and token_char(58) == false;
+    assert token_char(46) == true and token_char(95) == true and token_char(45) == true;
+    assert token_char(44) == false and token_char(32) == false;
+}
+
+test a_token_has_a_ceiling {
+    // 128 bytes of 'a' pass, 129 do not; n past the ceiling is refused before a byte is read
+    assert token_ok("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 128) == true;
+    assert token_ok("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 129) == false;
+}
+
+test a_cursor_reads_a_page_nothing_or_a_resync {
+    assert cursor_read(0, 0, 0) == CR_EMPTY;
+    assert cursor_read(0, 1, 5) == CR_PAGE;
+    assert cursor_read(4, 1, 5) == CR_PAGE;
+    assert cursor_read(5, 1, 5) == CR_EMPTY;
+    // the log was reset under the reader
+    assert cursor_read(9, 1, 5) == CR_RESYNC;
+    assert cursor_read(1, 0, 0) == CR_RESYNC;
+    // the events right after the cursor were pruned
+    assert cursor_read(10, 12, 40) == CR_RESYNC;
+    assert cursor_read(11, 12, 40) == CR_PAGE;
+    assert cursor_read(0, 2, 40) == CR_RESYNC;
+}
+
+test a_reader_skips_applies_or_resyncs {
+    assert delta_action(5, 4) == DA_SKIP;
+    assert delta_action(5, 5) == DA_SKIP;
+    assert delta_action(5, 6) == DA_APPLY;
+    assert delta_action(5, 7) == DA_RESYNC;
+    assert delta_action(0, 1) == DA_APPLY;
+}
+
+test pages_and_waits_are_bounded {
+    assert page_size(0) == EVENTS_PAGE_DEFAULT;
+    assert page_size(1) == 1;
+    assert page_size(EVENTS_PAGE_MAX) == EVENTS_PAGE_MAX;
+    assert page_size(EVENTS_PAGE_MAX + 1) == EVENTS_PAGE_MAX;
+    assert wait_seconds(0) == 0;
+    assert wait_seconds(WAIT_MAX_SECONDS) == WAIT_MAX_SECONDS;
+    assert wait_seconds(WAIT_MAX_SECONDS + 1) == WAIT_MAX_SECONDS;
+    assert wait_seconds(3600) == WAIT_MAX_SECONDS;
+}
+
+test a_board_refreshes_what_changed {
+    assert refresh_action(0) == RF_NOTHING;
+    assert refresh_action(1) == RF_TASKS;
+    assert refresh_action(REFRESH_TASKS_MAX) == RF_TASKS;
+    assert refresh_action(REFRESH_TASKS_MAX + 1) == RF_SNAPSHOT;
+}
+
+test an_event_wakes_once {
+    // a runner's task.ended (1) wakes the Queen; her own does not wake her twice
+    assert wakes_here(true, 1, false) == true;
+    assert wakes_here(true, 1, true) == false;
+    // created, lease.expired, tick: the publisher reacted
+    assert wakes_here(true, 0, true) == false;
+    assert wakes_here(true, 3, true) == false;
+    assert wakes_here(true, 9, true) == false;
+    assert wakes_here(true, 9, false) == true;
+    // assign (6), cancel (7), review (5), idle (2), evidence (4): published by a route or a bee, they wake
+    assert wakes_here(true, 6, true) == true;
+    assert wakes_here(true, 7, true) == true;
+    assert wakes_here(true, 5, true) == true;
+    assert wakes_here(true, 2, true) == true;
+    assert wakes_here(true, 4, true) == true;
+    // a kind that wakes nobody, or one the card does not know, wakes nobody
+    assert wakes_here(false, 8, false) == false;
+    assert wakes_here(true, BUS_KINDS, false) == false;
+}
+
+test a_runner_claims_on_created_only {
+    assert runner_claims_now(0, 1) == true;
+    assert runner_claims_now(0, 0) == false;
+    assert runner_claims_now(1, 4) == false;
+    assert runner_claims_now(2, 4) == false;
+}
+
+test the_log_keeps_a_floor {
+    assert prune_through(0) == 0;
+    assert prune_through(KEEP_AT_LEAST) == 0;
+    assert prune_through(KEEP_AT_LEAST + 1) == 1;
+    assert prune_through(KEEP_AT_LEAST + 900) == 900;
+}
+
+invariant one_row_per_kind {
+    assert BUS_KINDS == 10;
+    assert LOG_EVERY_SECONDS[8] == NEVER;
+    assert LOG_EVERY_SECONDS[4] == 60;
+    assert EVENTS_PAGE_DEFAULT <= EVENTS_PAGE_MAX;
+    assert WAIT_MAX_SECONDS < 30;
+    assert KEEP_SECONDS == 72 * 3600;
+}
