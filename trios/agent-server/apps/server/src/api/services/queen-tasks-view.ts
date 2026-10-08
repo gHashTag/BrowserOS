@@ -164,9 +164,12 @@ export function beesOf(
       r.queued_at === null ||
       r.claimed_by !== null ||
       r.runner_claimed_at !== null
-    const since = new Date(
-      r.claimed_at ?? r.runner_claimed_at ?? r.dispatched_at,
-    )
+    // When the turn began: dispatched_at, which a runner sets as it starts the
+    // bee. Not claimed_at - a runner renews that every 15 s to vouch for a long
+    // turn (waitForEnding), so read as a start it made every bee seconds old
+    // and, with nothing heard, never quiet (measured 2026-10-08: b7510 quiet
+    // with a `since` four minutes after its last event).
+    const since = new Date(r.dispatched_at)
     const heard = r.conversation_id
       ? lastHeard.get(r.conversation_id)
       : undefined
