@@ -235,6 +235,39 @@ pub const APP_REVIEWS_PER_ROUND : u32 = 2;
 /// the marker on the pull request instead of posting the review again.
 pub const REVIEW_MARKER : str = "t27-bees:review:";
 
+/// What is checked is posted apart from what is opined. Before the model reads the diff, every
+/// changed .t27 file (at most MAX_COMPILER_CHECKS of them) is run through the t27 compiler at the
+/// pull request's head, and the compiler's answer is posted as a checked fact. The compiler only
+/// reads the text (t27c parse, parse-complete, typecheck, in a process with an empty environment);
+/// nothing from the repository is generated, built or run, so nothing it says is a test result.
+/// A typecheck that passes is not a pass when the parser discarded tokens to get there:
+/// `t27c typecheck` answers ok on the English sentence "the cat sat on the mat", so discarded tokens
+/// make a file broken on their own. And a pass says the file is well formed, not that it is right:
+/// the typechecker does not resolve every name (measured 2026-10-08: `return y;` with no `y` passes).
+pub const V_CLEAN : u8 = 0;
+pub const V_BROKEN : u8 = 1;
+pub const MAX_COMPILER_CHECKS : u32 = 10;
+pub const T27_SUFFIX : str = ".t27$";
+
+pub fn compiler_verdict(typecheck_ok: bool, errors: u32, discarded: u32) -> u8 {
+    if (typecheck_ok == false) { return V_BROKEN; }
+    if (errors > 0) { return V_BROKEN; }
+    if (discarded > 0) { return V_BROKEN; }
+    return V_CLEAN;
+}
+
+/// Is path[0..len] a t27 source, by its suffix? (T27_SUFFIX up to its '$'.)
+pub fn is_t27_path(path: []const u8, len: usize) -> bool {
+    var n : usize = mention_len(T27_SUFFIX);
+    if (len < n) { return false; }
+    var i : usize = 0;
+    while (i < n) {
+        if (path[len - n + i] != T27_SUFFIX[i]) { return false; }
+        i += 1;
+    }
+    return true;
+}
+
 /// What `@t27-bees help` answers, one line per command, in C_REVIEW .. C_RESUME order.
 pub const COMMAND_HELP : [5]str = [
     "review -- review this pull request's head again, even if it was reviewed",
@@ -346,6 +379,27 @@ test a_webhook_not_listed_is_other {
     assert app_event_of("pull_request.openedx", 20, false) == GE_OTHER;
     // the length bounds the read: only "pull_request.closed" of the longer text is the pair
     assert app_event_of("pull_request.closed.extra", 19, false) == GE_PR_CLOSED;
+}
+
+test the_compiler_is_the_judge_of_a_t27_file {
+    assert compiler_verdict(true, 0, 0) == V_CLEAN;
+    assert compiler_verdict(false, 0, 0) == V_BROKEN;
+    assert compiler_verdict(true, 2, 0) == V_BROKEN;
+    // ok from the typechecker, but the parser threw tokens away to get there
+    assert compiler_verdict(true, 0, 3) == V_BROKEN;
+}
+
+test only_a_t27_file_goes_to_the_compiler {
+    assert is_t27_path("specs/queen/app.t27", 19) == true;
+    assert is_t27_path("a.t27", 5) == true;
+    assert is_t27_path(".t27", 4) == true;
+    assert is_t27_path("t27", 3) == false;
+    assert is_t27_path("specs/queen/app.t27.md", 22) == false;
+    assert is_t27_path("specs/queen/app.t28", 19) == false;
+    assert is_t27_path("specs/queen/appxt27", 19) == false;
+    assert is_t27_path("README.md", 9) == false;
+    // the length bounds the read: the first 19 bytes of a longer name are the path
+    assert is_t27_path("specs/queen/app.t27.md", 19) == true;
 }
 
 invariant every_event_pair_has_a_code {

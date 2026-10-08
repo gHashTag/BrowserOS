@@ -38,6 +38,12 @@ interface AppExports {
   review_wanted: (alreadyReviewed: number, askedAgain: number) => number
   command_of: (text: number, len: number) => number
   app_event_of: (pair: number, len: number, onAPullRequest: number) => number
+  compiler_verdict: (
+    typecheckOk: number,
+    errors: number,
+    discarded: number,
+  ) => number
+  is_t27_path: (path: number, len: number) => number
 }
 
 export const APP_WASM_FILE = 'queen/app.wasm'
@@ -138,4 +144,23 @@ export function appEventOf(
 ): number {
   const { at, len } = put(`${event}.${action}`)
   return app().x.app_event_of(at, len, flag(onAPullRequest))
+}
+
+/** compiler_verdict: V_CLEAN, or V_BROKEN on a failed typecheck, an error or a discarded token. */
+export function compilerVerdict(
+  typecheckOk: boolean,
+  errors: number,
+  discarded: number,
+): number {
+  return app().x.compiler_verdict(
+    flag(typecheckOk),
+    u32(errors),
+    u32(discarded),
+  )
+}
+
+/** is_t27_path: is this path a t27 source, by its suffix? */
+export function isT27Path(path: string): boolean {
+  const { at, len } = put(path)
+  return app().x.is_t27_path(at, len) !== 0
 }
