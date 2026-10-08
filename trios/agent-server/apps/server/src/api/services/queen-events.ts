@@ -233,6 +233,8 @@ export function publicPayload(
 
 export interface PublicEvent {
   seq: number
+  /** control.t27 EV_* - what a board's board_action reads. */
+  kind: number
   name: string
   at: string
   task: string | null
@@ -273,6 +275,7 @@ export async function publicEventsPage(
     return {
       ...fields,
       seq: e.seq,
+      kind: e.kind,
       name: names[e.kind] ?? 'unknown',
       at: e.at,
       task: typeof fields.issue === 'number' ? `${repo}#${fields.issue}` : null,

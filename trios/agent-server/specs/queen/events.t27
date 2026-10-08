@@ -156,6 +156,11 @@ pub fn board_action(kind: u8) -> u8 {
 /// arrives as one page and one refresh rather than one each.
 pub const READ_PAUSE_MS : u32 = 2000;
 
+/// A board still takes a whole snapshot this often: it also shows what GitHub changed (an issue
+/// opened, closed or edited), and no Queen event announces that. control.t27 reconciles the Queen on
+/// the same period, for the same reason: events move the work, the period repairs what they miss.
+pub const SNAPSHOT_EVERY_SECONDS : u32 = 300;
+
 ; --- 4. Every process follows the log ----------------------------------------------------------------
 
 /// Each process reads the log past its own cursor every FOLLOW_MS, and at once after it writes, so an
@@ -337,4 +342,6 @@ invariant one_row_per_kind {
     assert EVENTS_PAGE_DEFAULT <= EVENTS_PAGE_MAX;
     assert WAIT_MAX_SECONDS < 30;
     assert KEEP_SECONDS == 72 * 3600;
+    assert READ_PAUSE_MS < FOLLOW_MS * 5;
+    assert SNAPSHOT_EVERY_SECONDS * 1000 > READ_PAUSE_MS;
 }

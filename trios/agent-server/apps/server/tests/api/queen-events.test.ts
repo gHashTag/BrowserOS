@@ -437,13 +437,14 @@ describe('a public page past a cursor', () => {
     expect(page.events).toEqual([
       {
         seq: 8,
+        kind: 5,
         name: 'queen/task.reviewed',
         at: at.toISOString(),
         task: 'o/r#11',
         issue: 11,
         verdict: 'accept',
       },
-      { seq: 9, name: 'queen/tick', at: at.toISOString(), task: null },
+      { seq: 9, kind: 9, name: 'queen/tick', at: at.toISOString(), task: null },
     ])
   })
 
