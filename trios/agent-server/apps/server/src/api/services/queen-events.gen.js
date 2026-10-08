@@ -30,6 +30,12 @@ export const RF_NOTHING = 0;
 export const RF_TASKS = 1;
 export const RF_SNAPSHOT = 2;
 // t27c gen-js: fn refresh_action was not emitted -- this backend lowers declarations, not bodies.
+export const EA_NOTHING = 0;
+export const EA_REFRESH = 1;
+export const EA_TOUCH = 2;
+export const BOARD_ACTION = [1, 1, 0, 1, 2, 1, 1, 1, 0, 0];
+// t27c gen-js: fn board_action was not emitted -- this backend lowers declarations, not bodies.
+export const READ_PAUSE_MS = 2000;
 export const FOLLOW_MS = 1000;
 export const PUBLISHER_REACTS = [1, 1, 0, 1, 0, 0, 0, 0, 0, 1];
 // t27c gen-js: fn wakes_here was not emitted -- this backend lowers declarations, not bodies.
@@ -48,11 +54,12 @@ export const KEEP_AT_LEAST = 5000;
 // t27c gen-js: a TestBlock was not emitted -- it is checked by the compiler, not by the artifact.
 // t27c gen-js: a TestBlock was not emitted -- it is checked by the compiler, not by the artifact.
 // t27c gen-js: a TestBlock was not emitted -- it is checked by the compiler, not by the artifact.
+// t27c gen-js: a TestBlock was not emitted -- it is checked by the compiler, not by the artifact.
 // t27c gen-js: a InvariantBlock was not emitted -- it is checked by the compiler, not by the artifact.
 
 // Declaration order, which the spec's own laws depend on.
 export const __STRUCT_ORDER__ = [];
-export const __DECL_ORDER__ = ["BUS_KINDS", "NEVER", "LOG_EVERY_SECONDS", "PUBLIC_KEYS", "TOKEN_MAX", "CR_EMPTY", "CR_PAGE", "CR_RESYNC", "DA_SKIP", "DA_APPLY", "DA_RESYNC", "EVENTS_PAGE_DEFAULT", "EVENTS_PAGE_MAX", "WAIT_MAX_SECONDS", "REFRESH_TASKS_MAX", "RF_NOTHING", "RF_TASKS", "RF_SNAPSHOT", "FOLLOW_MS", "PUBLISHER_REACTS", "KEEP_SECONDS", "KEEP_AT_LEAST"];
+export const __DECL_ORDER__ = ["BUS_KINDS", "NEVER", "LOG_EVERY_SECONDS", "PUBLIC_KEYS", "TOKEN_MAX", "CR_EMPTY", "CR_PAGE", "CR_RESYNC", "DA_SKIP", "DA_APPLY", "DA_RESYNC", "EVENTS_PAGE_DEFAULT", "EVENTS_PAGE_MAX", "WAIT_MAX_SECONDS", "REFRESH_TASKS_MAX", "RF_NOTHING", "RF_TASKS", "RF_SNAPSHOT", "EA_NOTHING", "EA_REFRESH", "EA_TOUCH", "BOARD_ACTION", "READ_PAUSE_MS", "FOLLOW_MS", "PUBLISHER_REACTS", "KEEP_SECONDS", "KEEP_AT_LEAST"];
 
 // What this spec holds and this backend did not print. Empty is the whole
 // story most of the time; an entry here is a promise the artifact does not

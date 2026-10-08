@@ -138,6 +138,24 @@ pub fn refresh_action(changed_tasks: u32) -> u8 {
     return RF_TASKS;
 }
 
+/// What a board does with one event. REFRESH: the task's column or its bee may have moved, so it is
+/// read again (created, ended, lease.expired, reviewed, assign, cancel). TOUCH: the bee was heard and
+/// nothing else changed, so the board marks it heard at the event's time and reads nothing (evidence,
+/// the most frequent kind by far). NOTHING: the event names no task (worker.idle, tick).
+pub const EA_NOTHING : u8 = 0;
+pub const EA_REFRESH : u8 = 1;
+pub const EA_TOUCH : u8 = 2;
+pub const BOARD_ACTION : [10]u8 = [1, 1, 0, 1, 2, 1, 1, 1, 0, 0];
+
+pub fn board_action(kind: u8) -> u8 {
+    if (kind >= BUS_KINDS) { return EA_NOTHING; }
+    return BOARD_ACTION[kind];
+}
+
+/// A board pauses this long after applying a page before it reads the next, so a burst of events
+/// arrives as one page and one refresh rather than one each.
+pub const READ_PAUSE_MS : u32 = 2000;
+
 ; --- 4. Every process follows the log ----------------------------------------------------------------
 
 /// Each process reads the log past its own cursor every FOLLOW_MS, and at once after it writes, so an
@@ -262,6 +280,20 @@ test a_board_refreshes_what_changed {
     assert refresh_action(1) == RF_TASKS;
     assert refresh_action(REFRESH_TASKS_MAX) == RF_TASKS;
     assert refresh_action(REFRESH_TASKS_MAX + 1) == RF_SNAPSHOT;
+}
+
+test a_board_refreshes_touches_or_ignores {
+    assert board_action(0) == EA_REFRESH;
+    assert board_action(1) == EA_REFRESH;
+    assert board_action(2) == EA_NOTHING;
+    assert board_action(3) == EA_REFRESH;
+    assert board_action(4) == EA_TOUCH;
+    assert board_action(5) == EA_REFRESH;
+    assert board_action(6) == EA_REFRESH;
+    assert board_action(7) == EA_REFRESH;
+    assert board_action(8) == EA_NOTHING;
+    assert board_action(9) == EA_NOTHING;
+    assert board_action(BUS_KINDS) == EA_NOTHING;
 }
 
 test an_event_wakes_once {
