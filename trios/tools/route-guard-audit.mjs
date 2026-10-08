@@ -121,6 +121,11 @@ export const DEFAULT_ALLOWLIST = [
       'own capability - a server-to-server route for the app render proxy, with no browser Origin; every request is refused unless its bearer equals QUEEN_CONTRIBUTOR_PROXY_TOKEN (at least 32 bytes, compared with timingSafeEqual) and it carries a verified x-queen-contributor-id, and the route is off while that token is unset (src/api/routes/queen-contributor-keys.ts, tests/api/queen-contributor-keys.test.ts)',
   },
   {
+    path: '/queen/app/webhook',
+    reason:
+      'signed webhook - GitHub delivers the t27-bees app events here from its own server, with no browser Origin; every request is refused unless X-Hub-Signature-256 is the HMAC-SHA256 of the exact body under TRIOS_BEES_WEBHOOK_SECRET (compared with timingSafeEqual, checked before the body is parsed), and the route refuses everything while that secret is unset or shorter than 16 characters (src/api/routes/queen-app-webhook.ts, tests/api/queen-app.test.ts)',
+  },
+  {
     path: '/api/inngest',
     reason:
       'signed webhook — Inngest calls this path from its own server with an x-inngest-signature over INNGEST_SIGNING_KEY; inngest/hono rejects an unsigned or missigned request with 4xx before any function runs (tests/api/queen-inngest.test.ts), and a browser Origin never appears on it, so the trusted-origin check would only turn the scheduler off (comment at the mount)',
