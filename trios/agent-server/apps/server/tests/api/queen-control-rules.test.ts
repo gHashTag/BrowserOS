@@ -177,9 +177,16 @@ describe('an event wakes the Queen through the round gate', () => {
     const asked: string[] = []
     wakeOnControlEvents((why) => asked.push(why))
     const pool = sequencePool()
-    await publishEvent(pool, 'queen/lease.expired', { issue: 3 })
     await publishEvent(pool, 'queen/task.reviewed', { issue: 3 })
+    await publishEvent(pool, 'queen/worker.idle', {})
     expect(asked.length).toBe(2)
+  })
+
+  it('does not wake for a reclaim the round itself just made', async () => {
+    const asked: string[] = []
+    wakeOnControlEvents((why) => asked.push(why))
+    await publishEvent(sequencePool(), 'queen/lease.expired', { issue: 3 })
+    expect(asked).toEqual([])
   })
 
   it('ignores a redelivered sequence number', async () => {

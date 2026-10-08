@@ -39,6 +39,7 @@ import type { Pool } from 'pg'
 import { createQueenPool } from '../../lib/db/queen-pool'
 import { logger } from '../../lib/logger'
 import { bundleOfBranch } from '../routes/queen-export'
+import { loadControlSpec, renewTaskLeases } from './queen-control'
 import { abortBeeHere, runClaimedBee, salvageDispatch } from './queen-dispatch'
 import { queenLeaseDatabaseUrl } from './queen-lease'
 
@@ -222,6 +223,9 @@ export async function runOneOrder(
     branch: order.branch,
   })
   inFlight.set(order.issue, order)
+  // The first beat at once: preparing the worktree can take longer than a
+  // heartbeat, and the lease must say this runtime is alive from the claim on.
+  await beatForBees(pool, [order.issue])
   try {
     const outcome = await runClaimedBee(pool, order)
     if (!outcome.started) return order
@@ -251,6 +255,30 @@ export async function runOneOrder(
 
 /** The orders this process is carrying right now, by issue. */
 const inFlight = new Map<number, BeeOrder>()
+
+/**
+ * The runtime's heartbeat (specs/queen/control.t27 section 2): renew the task
+ * lease of every bee this process carries. The Queen no longer renews a task
+ * a runner took, so a runner that stops beating loses its tasks within one
+ * TTL and the Queen hands them back (reclaimExpiredLeases). Never throws: one
+ * missed beat is not a dead runner - the TTL is three beats.
+ */
+export async function beatForBees(
+  pool: Pool,
+  issues: number[] = [...inFlight.keys()],
+): Promise<number[]> {
+  if (issues.length === 0) return []
+  try {
+    const spec = await loadControlSpec()
+    return await renewTaskLeases(pool, issues, spec.taskLeaseTtlSeconds)
+  } catch (error) {
+    logger.warn('Runner could not renew the leases of its bees', {
+      issues,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return []
+  }
+}
 
 /** The runner this process started, so a shutdown can drain it. */
 let active: { pool: Pool; runner: string; stop: () => void } | null = null
@@ -382,6 +410,23 @@ export function startBeeRunner(): void {
         busy -= 1
       })
   }
+
+  // The heartbeat runs on its own clock, apart from the claim loop, so a bee
+  // whose worktree is still being prepared is vouched for as well. It is NOT
+  // stopped with the claim loop: a stopping runner drains the bees it carries,
+  // and they stay alive until the process ends - so do their leases.
+  loadControlSpec()
+    .then((spec) => {
+      setInterval(
+        () => void beatForBees(pool),
+        spec.taskHeartbeatSeconds * 1000,
+      )
+    })
+    .catch((error) => {
+      logger.warn('Runner has no control card; its leases will lapse', {
+        error: error instanceof Error ? error.message : String(error),
+      })
+    })
 
   const timer = setInterval(() => {
     // Every free slot, not one: a replica with four slots and four orders

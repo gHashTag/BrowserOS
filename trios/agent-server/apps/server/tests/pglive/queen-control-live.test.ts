@@ -23,10 +23,16 @@ import {
   claimTaskLease,
   clearAssigns,
   pendingAssigns,
+  reclaimExpiredLeases,
+  renewRunningLeases,
+  renewTaskLeases,
   requestAssign,
   taskLeasedLive,
 } from '../../src/api/services/queen-control'
-import { finishDispatch } from '../../src/api/services/queen-dispatch'
+import {
+  DISPATCH_OUTCOME_LABELS,
+  finishDispatch,
+} from '../../src/api/services/queen-dispatch'
 import {
   dispatchRowState,
   ensureQueenColumns,
@@ -218,5 +224,148 @@ describe('a person cancels and assigns through the same machine', () => {
     expect(await pendingAssigns(pool)).toEqual([10])
     await clearAssigns(pool, [])
     expect(await pendingAssigns(pool)).toEqual([10])
+  })
+})
+
+describe('a runtime that stops beating loses its task within one TTL', () => {
+  let scratch: { url: string; drop: () => Promise<void> } | null = null
+  let pool: Pool | null = null
+  const previousUrl = process.env.DATABASE_URL
+  const TTL = 180
+  const LABEL = DISPATCH_OUTCOME_LABELS.reapedLeaseExpired
+
+  beforeEach(async () => {
+    scratch = await scratchDatabase()
+    if (!scratch) return
+    process.env.DATABASE_URL = scratch.url
+    await runPgMigrations()
+    pool = createQueenPool(scratch.url)
+    await ensureQueenColumns(pool)
+  })
+
+  afterEach(async () => {
+    await pool?.end().catch(() => undefined)
+    pool = null
+    await scratch?.drop()
+    scratch = null
+    if (previousUrl === undefined) delete process.env.DATABASE_URL
+    else process.env.DATABASE_URL = previousUrl
+  })
+
+  /**
+   * A started bee on `issue`, its lease claimed by the Queen. `who` says what
+   * runs it; `pulse` how long its older heartbeat has been silent.
+   */
+  const bee = async (
+    issue: number,
+    who: 'queen' | 'bee-runner' | 'lent-runner',
+    pulseSilentSeconds: number,
+  ): Promise<void> => {
+    const db = pool as Pool
+    await db.query(
+      `INSERT INTO queen_dispatch
+         (issue, branch, started, detail, owned_paths, conversation_id,
+          key_index, dispatched_at)
+       VALUES ($1, $2, true, 'running', '[]'::jsonb, $3, 0,
+               now() - interval '1 hour')`,
+      [issue, `queen-${issue}`, `conv-${issue}`],
+    )
+    if (who === 'bee-runner') {
+      await db.query(
+        `UPDATE queen_dispatch
+            SET claimed_by = 'runner-1',
+                claimed_at = now() - make_interval(secs => $2)
+          WHERE issue = $1`,
+        [issue, pulseSilentSeconds],
+      )
+    }
+    if (who === 'lent-runner') {
+      await db.query(
+        `UPDATE queen_dispatch
+            SET runner_claimed_at = now() - interval '1 hour',
+                runner_lease_at = now() - make_interval(secs => $2)
+          WHERE issue = $1`,
+        [issue, pulseSilentSeconds],
+      )
+    }
+    await claimTaskLease(db, issue, 'queen-a', TTL)
+  }
+
+  const lapse = async (issue: number): Promise<void> => {
+    await (pool as Pool).query(
+      `UPDATE queen_task_lease SET expires_at = now() - interval '1 minute'
+        WHERE issue = $1`,
+      [issue],
+    )
+  }
+
+  const outcome = async (issue: number) =>
+    (
+      await (pool as Pool).query(
+        'SELECT outcome, finished_at FROM queen_dispatch WHERE issue = $1',
+        [issue],
+      )
+    ).rows[0]
+
+  it('hands back a bee runner that went silent', async () => {
+    if (!pool) return expect(offlineRequested()).toBe(true)
+    await bee(4400, 'bee-runner', 600)
+    await lapse(4400)
+    const back = await reclaimExpiredLeases(pool, TTL, LABEL)
+    expect(back.map((r) => r.issue)).toEqual([4400])
+    expect((await outcome(4400)).outcome).toBe(LABEL)
+    // and a second pass finds nothing left to reclaim
+    expect(await reclaimExpiredLeases(pool, TTL, LABEL)).toEqual([])
+  })
+
+  it('hands back a lent runner that went silent', async () => {
+    if (!pool) return expect(offlineRequested()).toBe(true)
+    await bee(4401, 'lent-runner', 600)
+    await lapse(4401)
+    const back = await reclaimExpiredLeases(pool, TTL, LABEL)
+    expect(back.map((r) => r.issue)).toEqual([4401])
+  })
+
+  it('keeps a draining runner whose older pulse still beats', async () => {
+    if (!pool) return expect(offlineRequested()).toBe(true)
+    await bee(4402, 'bee-runner', 5)
+    await lapse(4402)
+    expect(await reclaimExpiredLeases(pool, TTL, LABEL)).toEqual([])
+    expect((await outcome(4402)).finished_at).toBeNull()
+  })
+
+  it('keeps a runner whose lease is still renewed', async () => {
+    if (!pool) return expect(offlineRequested()).toBe(true)
+    await bee(4403, 'bee-runner', 600)
+    expect(await renewTaskLeases(pool, [4403], TTL)).toEqual([4403])
+    expect(await reclaimExpiredLeases(pool, TTL, LABEL)).toEqual([])
+  })
+
+  it("leaves the Queen's own bee to the reapers that salvage", async () => {
+    if (!pool) return expect(offlineRequested()).toBe(true)
+    await bee(4404, 'queen', 0)
+    await lapse(4404)
+    expect(await reclaimExpiredLeases(pool, TTL, LABEL)).toEqual([])
+  })
+
+  it('renews only what the Queen herself runs', async () => {
+    if (!pool) return expect(offlineRequested()).toBe(true)
+    await bee(4405, 'queen', 0)
+    await bee(4406, 'bee-runner', 0)
+    await bee(4407, 'lent-runner', 0)
+    expect(await renewRunningLeases(pool, 'queen-a', TTL)).toBe(1)
+    const renewed = await pool.query(
+      `SELECT issue FROM queen_task_lease
+        WHERE renewed_at > acquired_at ORDER BY issue`,
+    )
+    expect(renewed.rows.map((r) => Number(r.issue))).toEqual([4405])
+  })
+
+  it('never revives a lease that already lapsed', async () => {
+    if (!pool) return expect(offlineRequested()).toBe(true)
+    await bee(4408, 'bee-runner', 0)
+    await lapse(4408)
+    expect(await renewTaskLeases(pool, [4408], TTL)).toEqual([])
+    expect(await renewTaskLeases(pool, [], TTL)).toEqual([])
   })
 })

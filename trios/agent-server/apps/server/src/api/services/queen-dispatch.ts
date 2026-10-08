@@ -134,6 +134,12 @@ export const DISPATCH_OUTCOME_LABELS = {
   reapedRunnerSilent: 'reaped: runner went silent',
   /** The runner said it could not do the work, and handed the issue back. */
   reapedRunnerGaveUp: 'reaped: runner gave up',
+  /**
+   * The runtime running the bee stopped renewing its task lease for a whole
+   * TTL (specs/queen/control.t27 section 2, R_RECLAIM). Keeps the `reaped`
+   * prefix, so the issue is released exactly as a silent runner's is.
+   */
+  reapedLeaseExpired: 'reaped: task lease expired',
 } as const
 
 /** One label from the set, as a type. */
